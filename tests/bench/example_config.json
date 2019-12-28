@@ -1,0 +1,55 @@
+{
+  "db_path": "./bench_db",
+  "log_path": "./",
+  "duration_sec": 30,
+  "duration_ops": 0,
+  "warming_up_sec": 3,
+  "cooling_down_sec": 5,
+  "num_kv_pairs": 200000,
+  "initial_load": true,
+  "initial_load_rate": 50000,
+  "initial_load_order": "random",
+  "key": {
+    "type": "random",
+    "median": 8,
+    "sigma": 4
+  },
+  "value": {
+    "type": "normal",
+    "median": 1024,
+    "sigma": 16
+  },
+  "workers": [
+    {
+      "type": "writer",
+      "rate": 2000
+    },
+    {
+      "type": "point_reader",
+      "rate": 2000
+    },
+    {
+      "type": "range_reader",
+      "rate": 10,
+      "batch": {
+        "type": "normal",
+        "median": 100,
+        "sigma": 20
+      }
+    }
+  ],
+  "db_configs": {
+    "cache_size_mb": 1024,
+    "wal_size_mb": 64,
+    "compaction_factor": 240,
+    "max_tiering_limit": 10,
+    "merge_mode": "appending",
+    "block_reuse_factor": 0,
+    "l0_table_size_mb": 1024,
+    "l1_table_size_mb": 2560,
+    "l1_size_mb": 122880,
+    "bloom_filter_bits": 10.0,
+    "num_table_writers": 8,
+    "num_compactor_threads": 2
+  }
+}
