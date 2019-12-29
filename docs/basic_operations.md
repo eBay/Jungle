@@ -21,6 +21,7 @@ The basic unit of indexing in Jungle is a [record](../include/libjungle/record.h
 * [Get operation](#get-operation)
 * [Delete operation](#delete-operation)
 * [Iterator](#iterator)
+* [Snapshot](#snapshot)
 
 -----
 ### [Initialization](#contents)
@@ -160,7 +161,7 @@ returned_record.free();
 
 ### [Delete operation](#contents)
 
-In Jungle, delete operation is the same as update operation, modifying the existing record as a deletion marker (i.e., tombstone). You can put your custom metadata for each tombstone and retrieve it later. Tombstones are physically purged later, during Table compaction.
+In Jungle, delete operation is the same as update operation, modifying the existing record as a deletion marker (i.e., tombstone). You can put your custom metadata for each tombstone and retrieve it later. Tombstones are physically purged later, during Table compaction. Note that deletion will succeed even though the given key does not exist.
 
 There are three different ways to delete a record.
 
@@ -177,15 +178,17 @@ db->del(SizedBuf("key_to_delete");
 db->delSN(100, SizedBuf("key_to_delete");
 ```
 
-##### Delete a record with custom metadata and sequence number: `jungle::setRecord`.
+##### Delete a record with custom metadata or sequence number: `jungle::setRecord`.
   * Both custom metadata and sequence number for this tombstone will be set to the given values.
   * Sequence number should be unique and increasing. If not, undefined behavior including system crash or data corruption will happen.
 ```C++
 Record record;
+record.key = ... // key to delete.
 record.meta = ... // metadata for this tombstone
 record.seqNum = 100;
 db->setRecord(record);
 ```
+  * If you skip setting `record.seqNum` or set it to `DB::NULL_SEQNUM`, the sequence number will be automatically generated.
 
 -----
 ### [Iterator](#contents)
@@ -305,4 +308,44 @@ Status s = itr.seekSN(100);
 ```
 Other things are identical to those of key iterator.
 
+
+-----
+### [Snapshot](#contents)
+
+There are two types of snapshot in Jungle:
+* Persistent snapshot: user explicitly generates a snapshot using `DB::checkpoint` API. This snapshot will persist even after DB close, and will last until it is compacted.
+* Instant snapshot: user can always open a volatile snapshot based on the latest DB image, but this snapshot will be available after DB restart.
+
+
+#### Create a persistent snapshot
+```C++
+uint64_t marker = 0;
+db->checkpoint(marker);
+```
+Returned `marker` is a sequence number corresponding to the snapshot.
+
+
+#### Open a persistent snapshot using a marker
+```C++
+DB* snapshot = nullptr;
+db->openSnapshot(&snapshot, marker);
+```
+
+#### Get the list of available checkpoint markers
+```C++
+std::list<uint64_t> markers;
+db->getCheckpoints(markers);
+```
+
+#### Open an instant snapshot (without a marker)
+```C++
+DB* snapshot = nullptr;
+db->openSnapshot(&snapshot);
+```
+
+#### Close a snapshot
+All snapshot handles should be closed prior than the parent DB handle.
+```C++
+DB::close(snapshot);
+```
 

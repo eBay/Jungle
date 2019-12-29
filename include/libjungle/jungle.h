@@ -299,6 +299,7 @@ public:
     Status setRecordByKey(const Record& rec);
 
     /**
+     * (Not supported yet)
      * Set (upsert) a set of records in batch.
      *
      * @param batch Set of records.
