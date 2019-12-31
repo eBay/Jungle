@@ -32,4 +32,8 @@ add_executable(snapshot_instant ${SNAPSHOT_INST})
 target_link_libraries(snapshot_instant ${JUNGLE_TEST_DEPS})
 add_dependencies(snapshot_instant static_lib)
 
+set(LOG_STORE ${EXAMPLES_DIR}/example_log_store_mode.cc)
+add_executable(log_store ${LOG_STORE})
+target_link_libraries(log_store ${JUNGLE_TEST_DEPS})
+add_dependencies(log_store static_lib)
  

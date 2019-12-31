@@ -132,6 +132,7 @@ int main() {
     key_itr.close();
 
     // Close and free DB instance.
+    // All iterator handles should be closed before closing DB instance.
     DB::close(db);
 
     // Release global resources.

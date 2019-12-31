@@ -12,4 +12,6 @@ Contents
 * [Overview: Combining LSM-Tree & Append-Only B+Tree](overview.md)
 * [Understanding Sequence Numbers](seq_numbers.md)
 * [Basic Operations](basic_operations.md)
+* [Log Store Mode](log_store_mode.md)
+* [Examples](../examples)
 * Tuning Parameters
