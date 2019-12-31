@@ -1,5 +1,5 @@
-Raft Examples
----------
+Examples
+--------
 
 * [example_get_set_del.cc](./example_get_set_del.cc)
   - Basic `get`, `set`, and `del` operations.
@@ -11,4 +11,6 @@ Raft Examples
   - Persistent snapshot based on checkpoint.
 * [example_snapshot_instant.cc](./example_snapshot_instant.cc)
   - Instant (volatile) snapshot.
+* [example_log_store_mode.cc](./example_log_store_mode.cc)
+  - Log store mode.
 
