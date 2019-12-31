@@ -1,0 +1,26 @@
+language: cpp
+
+matrix:
+  include:
+    # works on Precise and Trusty
+    - os: linux
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - g++-5
+      env:
+         - MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
+         - SIMPLELOGGER_EXIT_ON_CRASH=true
+         - FORCE_COMPILE_DEPENDENCIES=true
+
+before_install:
+  - sudo apt-get update
+  - sudo apt-get install -y cmake lcov
+
+install:
+  - ./prepare.sh
+
+script:
+  - ./travis_build.sh
