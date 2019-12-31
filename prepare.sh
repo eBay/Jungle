@@ -7,10 +7,8 @@ RECOMPILE_FDB=true
 
 if [ -d third_party/forestdb ]; then
     pushd third_party/forestdb
-    if [ -f ".git" ]; then
-        if [ $(git rev-parse HEAD) == ${FORESTDB_COMMIT} ]; then
-            RECOMPILE_FDB=false
-        fi
+    if [ $(git rev-parse HEAD) == ${FORESTDB_COMMIT} ]; then
+        RECOMPILE_FDB=false
     fi
     if [ ${FORCE_COMPILE_DEPENDENCIES} == true ]; then
         RECOMPILE_FDB=true
