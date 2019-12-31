@@ -2,6 +2,11 @@
 
 Jungle
 ======
+
+[![Build Status](https://travis-ci.com/eBay/Jungle.svg?branch=master)](https://travis-ci.com/eBay/Jungle)
+[![codecov](https://codecov.io/gh/eBay/Jungle/branch/master/graph/badge.svg)](https://codecov.io/gh/eBay/Jungle)
+
+
 Embedded key-value storage library, based on a combined index of [LSM-tree](https://en.wikipedia.org/wiki/Log-structured_merge-tree) and [copy-on-write (append-only) B+tree](https://www.usenix.org/legacy/events/lsf07/tech/rodeh.pdf). Please refer to our [paper](https://www.usenix.org/conference/hotstorage19/presentation/ahn).
 
 Jungle is specialized for building [replicated state machine](https://en.wikipedia.org/wiki/State_machine_replication) of consensus protocols such as [Paxos](https://en.wikipedia.org/wiki/Paxos_(computer_science)) or [Raft](https://raft.github.io/), by providing chronological ordering and lightweight persistent snapshot. It can be also used for building log store.
