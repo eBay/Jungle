@@ -1203,9 +1203,15 @@ Status TableFile::updateSnapshot() {
     std::list<Snapshot*> stale_snps;
     {   std::lock_guard<std::mutex> l(latestSnapshotLock);
         auto entry = latestSnapshot.begin();
+
+        // Decrease the reference count of the previously latest one.
+        if (entry != latestSnapshot.end()) {
+            Snapshot*& latest_snp = *entry;
+            latest_snp->refCount--;
+        }
+
         while (entry != latestSnapshot.end()) {
             Snapshot*& cur_snp = *entry;
-            cur_snp->refCount--;
             if (!cur_snp->refCount) {
                 stale_snps.push_back(cur_snp);
                 entry = latestSnapshot.erase(entry);
@@ -1218,6 +1224,8 @@ Status TableFile::updateSnapshot() {
 
     // Close all stale snapshots (refCount == 0).
     for (Snapshot*& cur_snp: stale_snps) {
+        _log_trace(myLog, "delete snapshot %p refcount %zu",
+                   cur_snp, cur_snp->refCount);
         fdb_kvs_close(cur_snp->fdbSnap);
         delete cur_snp;
     }
@@ -1230,6 +1238,8 @@ Status TableFile::leaseSnapshot(TableFile::Snapshot*& snp_out) {
     assert(entry != latestSnapshot.end());
     Snapshot* snp = *entry;
     snp->refCount++;
+    _log_trace(myLog, "lease snapshot %p refcount %zu",
+               snp, snp->refCount);
     snp_out = snp;
 
     return Status();
@@ -1239,6 +1249,8 @@ Status TableFile::returnSnapshot(TableFile::Snapshot* snapshot) {
     std::list<Snapshot*> stale_snps;
     {   std::lock_guard<std::mutex> l(latestSnapshotLock);
         snapshot->refCount--;
+        _log_trace(myLog, "return snapshot %p refcount %zu",
+                   snapshot, snapshot->refCount);
         auto entry = latestSnapshot.begin();
         while (entry != latestSnapshot.end()) {
             Snapshot*& cur_snp = *entry;
@@ -1253,6 +1265,8 @@ Status TableFile::returnSnapshot(TableFile::Snapshot* snapshot) {
 
     // Close all stale snapshots (refCount == 0).
     for (Snapshot*& cur_snp: stale_snps) {
+        _log_trace(myLog, "delete snapshot %p refcount %zu",
+                   cur_snp, cur_snp->refCount);
         fdb_kvs_close(cur_snp->fdbSnap);
         delete cur_snp;
     }
