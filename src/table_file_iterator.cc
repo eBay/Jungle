@@ -53,14 +53,17 @@ Status TableFile::Iterator::init(DB* snap_handle,
         auto entry = t_file->snapHandles.find(snap_handle);
         if (entry == t_file->snapHandles.end()) return Status::SNAPSHOT_NOT_FOUND;
 
-        // WARNING:
-        //   Currently one snapshot only allows one iterator.
-        //
-        // TODO:
-        //   Should open a separate snapshot handle!
-        //   Multiple iterators derived from the same snapshot handle will share
-        //   `dhandle` and `bhandle` which will cause race condition.
-        fdb_snap = entry->second;
+        fdb_kvs_handle* snap_src = entry->second;
+        fdb_seqnum_t snap_seqnum = 0;
+        fs = fdb_get_kvs_seqnum(snap_src, &snap_seqnum);
+        if (fs != FDB_RESULT_SUCCESS) return Status::INVALID_SNAPSHOT;
+
+        fs = fdb_snapshot_open( snap_src,
+                                &fdbSnap,
+                                snap_seqnum );
+        if (fs != FDB_RESULT_SUCCESS) return Status::FDB_OPEN_KVS_FAIL;
+
+        fdb_snap = fdbSnap;
 
     } else {
         // Normal, use latest snapshot.
@@ -105,11 +108,16 @@ Status TableFile::Iterator::initSN(DB* snap_handle,
         auto entry = t_file->snapHandles.find(snap_handle);
         if (entry == t_file->snapHandles.end()) return Status::SNAPSHOT_NOT_FOUND;
 
-        // WARNING: See `init()` above.
-        fdb_snap = entry->second;
-
-        fs = fdb_get_kvs_seqnum(fdb_snap, &snap_seqnum);
+        fdb_kvs_handle* snap_src = entry->second;
+        fs = fdb_get_kvs_seqnum(snap_src, &snap_seqnum);
         if (fs != FDB_RESULT_SUCCESS) return Status::INVALID_SNAPSHOT;
+
+        fs = fdb_snapshot_open( snap_src,
+                                &fdbSnap,
+                                snap_seqnum );
+        if (fs != FDB_RESULT_SUCCESS) return Status::FDB_OPEN_KVS_FAIL;
+
+        fdb_snap = fdbSnap;
 
     } else {
         // Normal, use latest snapshot.
