@@ -292,13 +292,13 @@ If the cursor is successfully moved, `s.ok()` will be `true`.
 
 ##### Jump to a random position (key iterator)
 ```C++
-Status s = itr.seek(SizedBuf("key_to_find");
+Status s = itr.seek(SizedBuf("key_to_find"));
 ```
 If the given key does not exist, this API will find the smallest but greater then the given key. If such key does not exist either, `s.ok()` will be `false`.
 
 There is an option to choose the behavior when the exact match does not exist. If you explicitly set it as follows:
 ```C++
-Status s = itr.seek(SizedBuf("key_to_find", Iterator::SMALLER);
+Status s = itr.seek(SizedBuf("key_to_find", Iterator::SMALLER));
 ```
 then it will find the greatest but smaller than the given key.
 
@@ -314,7 +314,7 @@ Other things are identical to those of key iterator.
 
 There are two types of snapshot in Jungle:
 * Persistent snapshot: user explicitly generates a snapshot using `DB::checkpoint` API. This snapshot will persist even after DB close, and will last until it is compacted.
-* Instant snapshot: user can always open a volatile snapshot based on the latest DB image, but this snapshot will be available after DB restart.
+* Instant snapshot: user can always open a volatile snapshot based on the latest DB image, but this snapshot will not be available after DB restart.
 
 
 #### Create a persistent snapshot
