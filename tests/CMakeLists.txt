@@ -47,12 +47,6 @@ add_dependencies(unit_test
                  keyvalue_test
                  crc32_test)
 
-
-set(CASUAL_TEST ${TEST_DIR}/jungle/casual_test.cc)
-add_executable(casual_test ${CASUAL_TEST})
-target_link_libraries(casual_test ${JUNGLE_TEST_DEPS})
-add_dependencies(casual_test static_lib)
-
 set(BASIC_OP_TEST ${TEST_DIR}/jungle/basic_op_test.cc)
 add_executable(basic_op_test ${BASIC_OP_TEST})
 target_link_libraries(basic_op_test ${JUNGLE_TEST_DEPS})
@@ -110,7 +104,6 @@ add_dependencies(large_test static_lib)
 
 add_custom_target(func_test)
 add_dependencies(func_test
-                 casual_test
                  basic_op_test
                  seq_itr_test
                  key_itr_test
@@ -175,26 +168,9 @@ set(BENCH
     ${TEST_DIR}/bench/bench.cc
     ${TEST_DIR}/bench/db_adapter_jungle.cc)
 add_executable(jungle_bench ${BENCH})
-set_target_properties(jungle_bench 
-                      PROPERTIES COMPILE_FLAGS 
+set_target_properties(jungle_bench
+                      PROPERTIES COMPILE_FLAGS
                       "-DJUNGLE_ADAPTER=1")
 target_link_libraries(jungle_bench ${JUNGLE_TEST_DEPS})
 add_dependencies(jungle_bench static_lib)
 
-# If RocksDB library & header paths are given, compile it as well.
-if (ROCKSDB_LIBRARY AND ROCKSDB_INCLUDE)
-    message(STATUS "RocksDB library: ${ROCKSDB_LIBRARY}")
-    message(STATUS "RocksDB include: ${ROCKSDB_INCLUDE}")
-    set(ROCKS_BENCH
-        ${TEST_DIR}/bench/bench.cc
-        ${TEST_DIR}/bench/db_adapter_rocksdb.cc)
-    add_executable(rocksdb_bench ${ROCKS_BENCH})
-    set_target_properties(rocksdb_bench 
-                          PROPERTIES COMPILE_FLAGS 
-                          "-DROCKSDB_ADAPTER=1")
-    target_link_libraries(rocksdb_bench                             
-                          ${ROCKSDB_LIBRARY}
-                          ${JUNGLE_TEST_DEPS})
-    add_dependencies(rocksdb_bench static_lib)
-
-endif ()
