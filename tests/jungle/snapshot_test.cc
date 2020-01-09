@@ -290,6 +290,65 @@ int checkpoint_on_cold_start() {
     return 0;
 }
 
+int checkpoint_limit_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+
+    jungle::GlobalConfig g_conf;
+    g_conf.numTableWriters = 0;
+    jungle::init(g_conf);
+
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 16;
+    s = jungle::DB::open(&db, filename, config);
+    CHK_OK(s);
+
+    // Set KV pairs.
+    int n = 10;
+    std::list<uint64_t> chk_local;
+
+    for (size_t ii=0; ii<20; ++ii) {
+        // Append `n` pairs.
+        std::vector<jungle::KV> kv(n);
+        CHK_Z(_init_kv_pairs(n, kv, "key_", "value_"));
+        CHK_Z(_set_bykey_kv_pairs(0, n, db, kv));
+
+        // Checkpoint.
+        uint64_t seq_num_out = 0;
+        CHK_OK(db->checkpoint(seq_num_out));
+
+        _free_kv_pairs(n, kv);
+    }
+
+    // Get the list of checkpoints, it should match the config.
+    std::list<uint64_t> chk_out;
+    TestSuite::_msg("before flush\n");
+    CHK_Z( db->getCheckpoints(chk_out) );
+    for (auto& entry: chk_out) TestSuite::_msg("%zu\n", entry);
+    CHK_EQ( config.maxKeepingCheckpoints, chk_out.size() );
+
+    // Flush.
+    CHK_Z( db->sync() );
+    CHK_Z( db->flushLogs(jungle::FlushOptions()) );
+
+    // Get the list of checkpoints, it should not exceed the limit.
+    CHK_Z( db->getCheckpoints(chk_out) );
+    TestSuite::_msg("after flush\n");
+    for (auto& entry: chk_out) TestSuite::_msg("%zu\n", entry);
+    CHK_GTEQ( config.maxKeepingCheckpoints, chk_out.size() );
+
+    CHK_Z( jungle::DB::close(db) );
+
+    jungle::shutdown();
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int snapshot_basic_table_only_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1005,6 +1064,7 @@ int main(int argc, char** argv) {
     ts.doTest("checkpoint marker flush test", checkpoint_marker_flush_test);
     ts.doTest("checkpoint marker purge test", checkpoint_marker_purge_test);
     ts.doTest("checkpoint on cold start test", checkpoint_on_cold_start);
+    ts.doTest("checkpoint limit test", checkpoint_limit_test);
     ts.doTest("snapshot basic table only test", snapshot_basic_table_only_test);
     ts.doTest("snapshot basic log only test", snapshot_basic_log_only_test);
     ts.doTest("snapshot basic combined test", snapshot_basic_combined_test);

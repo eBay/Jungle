@@ -577,8 +577,18 @@ void TableFile::addCheckpoint(uint64_t chk, uint64_t commit_seqnum) {
                   tableInfo->level, tableInfo->number, tableInfo->hashNum,
                   chk, commit_seqnum);
     }
+
+    const DBConfig* db_config = tableMgr->getDbConfig();
+
     mGuard l(chkMapLock);
     chkMap.insert( std::make_pair(chk, commit_seqnum) );
+
+    // Remove old checkpoints if it exceeds the limit.
+    while (chkMap.size() > db_config->maxKeepingCheckpoints) {
+        auto entry = chkMap.begin();
+        if (entry == chkMap.end()) break;
+        chkMap.erase(entry);
+    }
 }
 
 Status TableFile::setCheckpoint(Record* rec,
@@ -599,6 +609,8 @@ Status TableFile::setCheckpoint(Record* rec,
 
             addCheckpoint(chk, commit_seqnum);
         }
+
+        if (chk > prev_seqnum && rec && chk > rec->seqNum) break;
     }
     return Status();
 }

@@ -67,6 +67,7 @@ public:
         , truncateInconsecutiveLogs(true)
         , logFileTtl_sec(0)
         , maxKeepingMemtables(0)
+        , maxKeepingCheckpoints(10)
         , maxEntriesInLogFile(16384)        // 16K
         , maxLogFileSize(4194304)           // 4MB
         , cmpFunc(nullptr)
@@ -153,6 +154,13 @@ public:
      * even before the TTL of corresponding log file.
      */
     uint32_t maxKeepingMemtables;
+
+    /**
+     * Number of checkpoints (i.e., persistent snapshots) kept
+     * in database. Once the number exceeds this limit, older one
+     * will be purged sequentially.
+     */
+    uint32_t maxKeepingCheckpoints;
 
     /**
      * Max number of logs in a file.
