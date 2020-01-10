@@ -29,6 +29,8 @@ limitations under the License.
 
 namespace jungle {
 
+const FlushOptions DB::DEFAULT_FLUSH_OPTIONS;
+
 DB::DB() : p(new DBInternal()), sn(nullptr) {}
 
 DB::DB(DB* _parent, uint64_t last_flush, uint64_t checkpoint)

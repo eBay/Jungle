@@ -61,7 +61,7 @@ int checkpoint_basic_test() {
     CHK_EQ(2*n, (int)seq_num_out);
 
     // Flush.
-    s = db->flushLogs(jungle::FlushOptions());
+    s = db->flushLogs();
     CHK_OK(s);
 
     // 2n -- 3n-1: key3_x value3_x
@@ -334,7 +334,7 @@ int checkpoint_limit_test() {
 
     // Flush.
     CHK_Z( db->sync() );
-    CHK_Z( db->flushLogs(jungle::FlushOptions()) );
+    CHK_Z( db->flushLogs() );
 
     // Get the list of checkpoints, it should not exceed the limit.
     CHK_Z( db->getCheckpoints(chk_out) );
@@ -379,7 +379,7 @@ int snapshot_basic_table_only_test() {
 
     // Sync and flush.
     CHK_OK(db->sync(false));
-    CHK_OK(db->flushLogs(jungle::FlushOptions()));
+    CHK_OK(db->flushLogs());
 
     // Open snapshot.
     jungle::DB* snap;
@@ -490,8 +490,7 @@ int snapshot_basic_combined_test() {
 
     // Sync and flush.
     CHK_OK(db->sync(false));
-    jungle::FlushOptions f_opt;
-    CHK_OK(db->flushLogs(f_opt));
+    CHK_OK(db->flushLogs());
 
     // Set more and checkpoint.
     std::vector<jungle::KV> kv3(n);
@@ -511,7 +510,7 @@ int snapshot_basic_combined_test() {
     CHK_OK(db->openSnapshot(&snap, chk));
 
     // Flush after that.
-    CHK_OK(db->flushLogs(f_opt));
+    CHK_OK(db->flushLogs());
 
     // Snapshot: sees kv2 and kv3.
     CHK_Z(_get_bykey_check(0, n, snap, kv2));
@@ -567,7 +566,7 @@ int snapshot_iterator_table_only_test() {
 
     // Sync and flush.
     CHK_OK(db->sync(false));
-    CHK_OK(db->flushLogs(jungle::FlushOptions()));
+    CHK_OK(db->flushLogs());
 
     // Open snapshot.
     jungle::DB* snap;
@@ -688,8 +687,7 @@ int snapshot_iterator_combined_test() {
 
     // Sync and flush.
     CHK_OK(db->sync(false));
-    jungle::FlushOptions f_opt;
-    CHK_OK(db->flushLogs(f_opt));
+    CHK_OK(db->flushLogs());
 
     // Set more and checkpoint.
     std::vector<jungle::KV> kv3(n);
@@ -713,7 +711,7 @@ int snapshot_iterator_combined_test() {
     CHK_OK(itr.initSN(snap));
 
     // Flush after that.
-    CHK_OK(db->flushLogs(f_opt));
+    CHK_OK(db->flushLogs());
 
     // Snapshot: sees kv2 and kv3.
     CHK_Z(_itr_check(0, n, itr, kv2));
@@ -762,7 +760,7 @@ int snapshot_with_compaction_test() {
     }
 
     // Flush.
-    CHK_Z( db->flushLogs(jungle::FlushOptions()) );
+    CHK_Z( db->flushLogs() );
 
     // Verify checkpoints.
     for (int chk: {10, 20, 30}) {
@@ -807,7 +805,7 @@ int snapshot_with_compaction_test() {
     }
 
     // Flush.
-    CHK_Z( db->flushLogs(jungle::FlushOptions()) );
+    CHK_Z( db->flushLogs() );
 
     // Verify checkpoints:
     //  10-30: invalid.
@@ -886,7 +884,7 @@ int snapshot_with_compaction_test() {
     }
 
     // Flush.
-    CHK_Z( db->flushLogs(jungle::FlushOptions()) );
+    CHK_Z( db->flushLogs() );
 
     // Close DB.
     CHK_OK(jungle::DB::close(db));
@@ -917,7 +915,7 @@ int latest_snapshot_test() {
 
     // Sync and flush.
     CHK_Z(db->sync(false));
-    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    CHK_Z(db->flushLogs());
 
     std::vector<jungle::KV> kv2(n);
     CHK_Z(_init_kv_pairs(n, kv2, "key2_", "value2_"));
@@ -933,7 +931,7 @@ int latest_snapshot_test() {
     CHK_Z(_init_kv_pairs(n, kv3, "key1_", "value1_new_"));
     CHK_Z(_set_bykey_kv_pairs(0, n, db, kv3));
     CHK_Z(db->sync(false));
-    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    CHK_Z(db->flushLogs());
 
     std::vector<jungle::KV> kv4(n);
     CHK_Z(_init_kv_pairs(n, kv4, "key2_", "value2_new_"));
@@ -1013,7 +1011,7 @@ int empty_db_snapshot_test() {
 
     // Sync and flush.
     CHK_Z(db->sync(false));
-    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    CHK_Z(db->flushLogs());
 
     // Set more.
     std::vector<jungle::KV> kv2(n);

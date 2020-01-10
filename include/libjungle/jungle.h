@@ -189,6 +189,11 @@ public:
     static const uint64_t NULL_SEQNUM = static_cast<uint64_t>(-1);
 
     /**
+     * Default flush options.
+     */
+    static const FlushOptions DEFAULT_FLUSH_OPTIONS;
+
+    /**
      * Initialize process-wide global resources such as
      * block cache and background workers.
      *
@@ -484,7 +489,7 @@ public:
      *                If not given, it will flush all logs.
      * @return OK on success.
      */
-    Status flushLogs(const FlushOptions& options,
+    Status flushLogs(const FlushOptions& options = DEFAULT_FLUSH_OPTIONS,
                      const uint64_t seq_num = -1);
 
     /**
