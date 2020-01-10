@@ -29,6 +29,8 @@ limitations under the License.
 #include <sys/types.h>
 #include <unistd.h>
 
+// LCOV_EXCL_START
+
 namespace jungle {
 
 size_t RwSerializer::size() {
@@ -489,4 +491,6 @@ size_t RndGen::fromProbDist(std::vector<size_t>& prob_dist) {
 }
 
 } // namespace jungle
+
+// LCOV_EXCL_STOP
 
