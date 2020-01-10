@@ -366,14 +366,24 @@ Status DB::getCheckpoints(std::list<uint64_t>& chk_out) {
     EP( p->checkHandleValidity() );
 
     std::list<uint64_t> chk_local;
-    EP(p->tableMgr->getAvailCheckpoints(chk_local));
     EP(p->logMgr->getAvailCheckpoints(chk_local));
+    if (chk_local.size() < p->dbConfig.maxKeepingCheckpoints) {
+        // Only when the number of checkpoints is less than the limit.
+        EP(p->tableMgr->getAvailCheckpoints(chk_local));
+    }
 
     // Asc order sort, remove duplicates.
     std::set<uint64_t> chk_sorted;
     for (auto& entry: chk_local) chk_sorted.insert(entry);
-    for (auto& entry: chk_sorted) chk_out.push_back(entry);
 
+    // Only pick last N checkpoints.
+    chk_out.clear();
+    auto entry = chk_sorted.rbegin();
+    while (entry != chk_sorted.rend()) {
+        if (chk_out.size() >= p->dbConfig.maxKeepingCheckpoints) break;
+        chk_out.push_front(*entry);
+        entry++;
+    }
     return Status();
 }
 
@@ -782,6 +792,10 @@ void DB::DBInternal::destroy() {
 }
 
 void DB::DBInternal::adjustConfig() {
+    // At least one checkpoint should be allowed.
+    if (dbConfig.maxKeepingCheckpoints == 0) {
+        dbConfig.maxKeepingCheckpoints = 1;
+    }
 }
 
 void DB::DBInternal::waitForBgTasks() {
