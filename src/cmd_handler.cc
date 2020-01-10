@@ -25,6 +25,8 @@ limitations under the License.
 #include <iostream>
 #include <sstream>
 
+// LCOV_EXCL_START
+
 namespace jungle {
 
 CmdHandler::CmdHandler( const std::string& _w_name,
@@ -172,3 +174,6 @@ std::string CmdHandler::hLogLevel(DBWrap* target_dbw,
 }
 
 } // namespace jungle
+
+// LCOV_EXCL_STOP
+

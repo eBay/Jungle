@@ -65,6 +65,8 @@ if (CODE_COVERAGE GREATER 0)
         'usr/*'
         'tests/*'
         'tools/*'
+        'src/simple_thread_pool.h'
+        'src/logger.*'
     )
 endif()
 
