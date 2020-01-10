@@ -512,6 +512,7 @@ Status TableFile::openSnapshot(DB* snap_handle,
 {
     Status s;
     uint64_t snap_seqnum = 0;
+    bool clone_from_latest = false;
 
     {   mGuard l(chkMapLock);
         auto entry = chkMap.find(checkpoint);
@@ -522,8 +523,7 @@ Status TableFile::openSnapshot(DB* snap_handle,
                  checkpoint > e_max->second ) {
                 // Beyond the table's checkpoint.
                 // Take the latest marker.
-                l.unlock();
-                getLatestSnapMarker(snap_seqnum);
+                clone_from_latest = true;
 
             } else {
                 // Find greatest one smaller than chk.
@@ -540,14 +540,24 @@ Status TableFile::openSnapshot(DB* snap_handle,
             snap_seqnum = entry->second;
         }
     }
-    if (!snap_seqnum) return Status::INVALID_CHECKPOINT;
-
-    FdbHandleGuard g(this, getIdleHandle());
-    fdb_kvs_handle* kvs_db = g.handle->db;
+    if (!clone_from_latest && !snap_seqnum) return Status::INVALID_CHECKPOINT;
 
     fdb_status fs;
-    fdb_kvs_handle* fdbSnap;
-    fs = fdb_snapshot_open(kvs_db, &fdbSnap, snap_seqnum);
+    fdb_kvs_handle* fdbSnap = nullptr;
+
+    if (clone_from_latest) {
+        // Clone snapshot from the latest one.
+        Snapshot* snp = nullptr;
+        leaseSnapshot(snp);
+        fs = fdb_snapshot_open(snp->fdbSnap, &fdbSnap, snp->fdbSeqnum);
+        returnSnapshot(snp);
+
+    } else {
+        // Otherwise: open snapshot based on seq number.
+        FdbHandleGuard g(this, getIdleHandle());
+        fdb_kvs_handle* kvs_db = g.handle->db;
+        fs = fdb_snapshot_open(kvs_db, &fdbSnap, snap_seqnum);
+    }
     if (fs != FDB_RESULT_SUCCESS) return Status::FDB_OPEN_KVS_FAIL;
 
     {   mGuard l(snapHandlesLock);
