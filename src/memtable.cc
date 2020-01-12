@@ -378,29 +378,27 @@ MemTable::RecNode* MemTable::findRecNode(Record* rec) {
 }
 
 void MemTable::addToByKeyIndex(Record* rec) {
-    // Find existing record.
-    RecNode* existing_node = findRecNode(rec);
-    if (!existing_node) {
-        // Not exist, brand-new key.
+    RecNode* existing_node = nullptr;
 
-        // Create a RecNode as a wrapper
-        // both for insertion and deletion (tombstone).
-        RecNode* rec_node = new RecNode(rec->kv.key);
-        {
-            mGuard l(rec_node->recListLock);
-            rec_node->recList->push_back(rec);
-        }
+    // Try non-duplicate insert first.
 
-        int ret = skiplist_insert_nodup(idxByKey, &rec_node->snode);
-        if (ret == 0) {
-            bfByKey->set(rec->kv.key.data, rec->kv.key.size);
-            return;
-        } else {
-            // Concurrent thread already inserted it, re-find.
-            delete rec_node;
-            existing_node = findRecNode(rec);
-            assert(existing_node);
-        }
+    // Create a RecNode as a wrapper
+    // both for insertion and deletion (tombstone).
+    RecNode* rec_node = new RecNode(rec->kv.key);
+    {
+        mGuard l(rec_node->recListLock);
+        rec_node->recList->push_back(rec);
+    }
+
+    int ret = skiplist_insert_nodup(idxByKey, &rec_node->snode);
+    if (ret == 0) {
+        bfByKey->set(rec->kv.key.data, rec->kv.key.size);
+        return;
+    } else {
+        // Already exist, re-find.
+        delete rec_node;
+        existing_node = findRecNode(rec);
+        assert(existing_node);
     }
 
     // Existing key RecNode: just push back.
@@ -410,15 +408,19 @@ void MemTable::addToByKeyIndex(Record* rec) {
 }
 
 Status MemTable::addToBySeqIndex(Record* rec, Record*& prev_rec_out) {
-    RecNodeSeq query(rec);
-    skiplist_node* cursor = skiplist_find(idxBySeq, &query.snode);
-    if (cursor) {
-        RecNodeSeq* prev = _get_entry(cursor, RecNodeSeq, snode);
-        prev_rec_out = prev->rec;
-        // If already exist, replace and then return the old one.
-        prev->rec = rec;
-        skiplist_release_node(&prev->snode);
-        return Status();
+    if ( valid_number(rec->seqNum) && rec->seqNum <= maxSeqNum ) {
+        // If the seqnum of `rec` is smaller than the current max,
+        // we should search existing one.
+        RecNodeSeq query(rec);
+        skiplist_node* cursor = skiplist_find(idxBySeq, &query.snode);
+        if (cursor) {
+            RecNodeSeq* prev = _get_entry(cursor, RecNodeSeq, snode);
+            prev_rec_out = prev->rec;
+            // If already exist, replace and then return the old one.
+            prev->rec = rec;
+            skiplist_release_node(&prev->snode);
+            return Status();
+        }
     }
 
     // TODO: multi-thread update on the same key?
