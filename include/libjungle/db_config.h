@@ -59,25 +59,6 @@ typedef CompactionCbDecision (*CompactionCbFunc)
                              (const CompactionCbParams& params);
 #endif
 
-struct DirectIoOptions{
-    /**
-     * If `true`, use direct-IO bypassing OS page cache.
-     * Currently only supported for log files.
-     * Default: `false`
-     */
-    bool enabled;
-
-    /**
-     * The size of memory buffer for direct-IO.
-     */
-    size_t bufferSize;
-
-    /**
-     * The alignment size of memory buffer for direct-IO.
-     */
-    size_t alignSize;
-};
-
 class DBConfig {
 public:
     DBConfig()
@@ -109,7 +90,6 @@ public:
         , maxL1Size((uint64_t)120 * 1073741824) // 120 GB
         , maxParallelWritesPerJob(0)
         , readOnly(false)
-        , directIoOpt{false, 16384, 512}
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -323,6 +303,31 @@ public:
      * If `true`, read-only mode. No modify, recovery, and compaction.
      */
     bool readOnly;
+
+    struct DirectIoOptions{
+        DirectIoOptions()
+            : enabled(false)
+            , bufferSize(16384)
+            , alignSize(512)
+            {}
+
+        /**
+         * If `true`, use direct-IO bypassing OS page cache.
+         * Currently only supported for log files.
+         * Default: `false`
+         */
+        bool enabled;
+
+        /**
+         * The size of memory buffer for direct-IO.
+         */
+        size_t bufferSize;
+
+        /**
+         * The alignment size of memory buffer for direct-IO.
+         */
+        size_t alignSize;
+    };
 
     /**
      * Direct-IO related options.
