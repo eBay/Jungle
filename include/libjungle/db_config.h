@@ -91,6 +91,8 @@ public:
         , maxParallelWritesPerJob(0)
         , readOnly(false)
         , directIo(false)
+        , directIoBufferSize(16384)
+        , directIoAlignSize(512)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -311,6 +313,16 @@ public:
      * Default: `false`
      */
     bool directIo;
+
+    /**
+     * The size of memory buffer for direct-IO.
+     */
+    size_t directIoBufferSize;
+
+    /**
+     * The alignment size of memory buffer for direct-IO.
+     */
+    size_t directIoAlignSize;
 };
 
 class GlobalConfig {

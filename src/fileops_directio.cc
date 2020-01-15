@@ -87,22 +87,29 @@ static FileHandleDirectIO* getHandle(FileHandle* fhandle) {
     return dynamic_cast<FileHandleDirectIO*>(fhandle);
 }
 
-FileOpsDirectIO::FileOpsDirectIO(SimpleLogger* log) : myLog(log) {}
+FileOpsDirectIO::FileOpsDirectIO(SimpleLogger* log,
+                                 size_t buffer_size,
+                                 size_t align_size)
+    : myLog(log)
+    , mBufferSize(buffer_size)
+    , mAlignSize(align_size)
+    {}
+
 FileOpsDirectIO::~FileOpsDirectIO() {}
 
 Status FileOpsDirectIO::allocAlignedBuf(void** aligned_buf) {
     int mr = posix_memalign(aligned_buf,
-                            ALIGNMENT,
-                            ALIGNED_BUFFER_SIZE + ALIGNMENT);
+                            mAlignSize,
+                            mBufferSize + mAlignSize);
     if (mr) {
         _log_err(myLog,
                  "failed to allocate aligned buffer with error code %d, "
                  "aligned size %d, buffer size %d",
-                 mr, ALIGNMENT, ALIGNED_BUFFER_SIZE);
+                 mr, mAlignSize, mBufferSize);
         return Status::DIRECT_IO_NOT_SUPPORTED;
     }
     // One ALIGNMENT more for padding
-    memset(*aligned_buf, 0x0, ALIGNED_BUFFER_SIZE + ALIGNMENT);
+    memset(*aligned_buf, 0x0, mBufferSize + mAlignSize);
     return Status::OK;
 }
 
@@ -116,12 +123,12 @@ Status FileOpsDirectIO::readInternal(const std::string &pathname,
     size_t sleep_time_us = 1;
     ssize_t r = -1;
     size_t read_size = nbyte;
-    size_t need_align = nbyte % ALIGNMENT;
+    size_t need_align = nbyte % mAlignSize;
     if (need_align > 0) {
         // This is the case that reading the tail of the file with un-aligned size
         // Extend the read size even it may be larger than file size
         // The size of bytes returned should be exactly equal to nbyte
-        read_size += (ALIGNMENT - need_align);
+        read_size += (mAlignSize - need_align);
     }
 
     do {
@@ -201,7 +208,7 @@ Status FileOpsDirectIO::open(FileHandle** fhandle_out,
     if (file_size_tmp < 0) return Status::ERROR;
     auto file_size = static_cast<size_t>(file_size_tmp);
 
-    size_t need_align = file_size % ALIGNMENT;
+    size_t need_align = file_size % mAlignSize;
     if (need_align == 0) {
         fhandle->filePos = file_size;
         fhandle->flushedFilePos = file_size;
@@ -291,7 +298,7 @@ Status FileOpsDirectIO::pread(FileHandle* fhandle,
 
     Status s;
     size_t aligned_file_offset = offset;
-    size_t need_align = offset % ALIGNMENT;
+    size_t need_align = offset % mAlignSize;
     if (need_align > 0) {
         aligned_file_offset -= need_align;
     }
@@ -301,13 +308,13 @@ Status FileOpsDirectIO::pread(FileHandle* fhandle,
         size_t aligned_slice;
         {
             size_t slice = std::min((size_t) (offset + count - aligned_file_offset),
-                                    (size_t) ALIGNED_BUFFER_SIZE);
+                                    mBufferSize);
             aligned_slice = slice;
-            need_align = slice % ALIGNMENT;
+            need_align = slice % mAlignSize;
             if (need_align > 0) {
-                aligned_slice = slice + (ALIGNMENT - need_align);
+                aligned_slice = slice + (mAlignSize - need_align);
             }
-            assert(aligned_slice > 0 && aligned_slice <= ALIGNED_BUFFER_SIZE);
+            assert(aligned_slice > 0 && aligned_slice <= mBufferSize);
             // The tail of file is allowed to be un-aligned size
             if (aligned_file_offset + aligned_slice > file_size) {
                 aligned_slice = file_size - aligned_file_offset;
@@ -359,11 +366,11 @@ Status FileOpsDirectIO::append(FileHandle* fhandle,
 
     const auto* buf_char = static_cast<const uint8_t*>(buf);
     while (source_pos < count) {
-        size_t write_buf_size = ALIGNED_BUFFER_SIZE - phandle->bufPos;
+        size_t write_buf_size = mBufferSize - phandle->bufPos;
         size_t left_source_size = count - source_pos;
         size_t slice = std::min(left_source_size, write_buf_size);
 
-        assert(slice > 0 && slice <= ALIGNED_BUFFER_SIZE);
+        assert(slice > 0 && slice <= mBufferSize);
         memcpy(phandle->bufCharPtr + phandle->bufPos,
                buf_char + source_pos,
                slice);
@@ -372,40 +379,40 @@ Status FileOpsDirectIO::append(FileHandle* fhandle,
         source_pos += slice;
 
         // Flush, once write buffer is full
-        if (ALIGNED_BUFFER_SIZE <= phandle->bufPos) {
+        if (mBufferSize <= phandle->bufPos) {
             size_t num_tries = 0;
             do {
                 r = ::pwrite(phandle->fd,
                              phandle->bufPtr,
-                             ALIGNED_BUFFER_SIZE,
+                             mBufferSize,
                              phandle->filePos);
-                if (r == (ssize_t) ALIGNED_BUFFER_SIZE) break;
+                if (r == (ssize_t) mBufferSize) break;
                 int n = errno;
                 num_tries++;
                 _log_err(myLog,
                          "failed to write log file %s, offset %zu, "
                          "bytes %d, errno %d, msg %s, retrying %d...",
                          phandle->pathname.c_str(), phandle->filePos,
-                         ALIGNED_BUFFER_SIZE, n, strerror(n), num_tries);
+                         mBufferSize, n, strerror(n), num_tries);
                 Timer::sleepUs(sleep_time_us);
                 sleep_time_us = std::min(sleep_time_us * 2, (size_t) MAX_SLEEP_US);
-            } while (r != (ssize_t) ALIGNED_BUFFER_SIZE && num_tries < MAX_TRIES);
-            if (r != (ssize_t) ALIGNED_BUFFER_SIZE) {
+            } while (r != (ssize_t) mBufferSize && num_tries < MAX_TRIES);
+            if (r != (ssize_t) mBufferSize) {
                 _log_err(myLog,
                          "failed to write log file %s after %d retries, "
                          "offset %zu, bytes %d",
                          phandle->pathname.c_str(), num_tries,
-                         phandle->filePos, ALIGNED_BUFFER_SIZE);
+                         phandle->filePos, mBufferSize);
                 return Status::FILE_WRITE_SIZE_MISMATCH;
             } else if (num_tries > 0) {
                 _log_warn(myLog,
                           "Write log file %s succeed after %d retries, "
                           "offset %zu, bytes %d",
                           phandle->pathname.c_str(), num_tries,
-                          phandle->filePos, ALIGNED_BUFFER_SIZE);
+                          phandle->filePos, mBufferSize);
             }
             phandle->bufPos = 0;
-            phandle->filePos += ALIGNED_BUFFER_SIZE;
+            phandle->filePos += mBufferSize;
             if (phandle->filePos > phandle->flushedFilePos) {
                 phandle->flushedFilePos = phandle->filePos;
             }
@@ -438,13 +445,13 @@ Status FileOpsDirectIO::flush(FileHandle* fhandle) {
         return Status();
     }
 
-    size_t need_align = phandle->bufPos % ALIGNMENT;
+    size_t need_align = phandle->bufPos % mAlignSize;
     size_t aligned_pos = phandle->bufPos;
     if (need_align > 0) {
-        size_t padding = ALIGNMENT - need_align;
+        size_t padding = mAlignSize - need_align;
         if (padding < 8) {
             // Enough room for padding flags
-            padding += ALIGNMENT;
+            padding += mAlignSize;
         }
         aligned_pos = phandle->bufPos + padding;
 
@@ -457,7 +464,7 @@ Status FileOpsDirectIO::flush(FileHandle* fhandle) {
                       0,
                       offset);
     }
-    assert(aligned_pos > 0 && aligned_pos <= ALIGNED_BUFFER_SIZE);
+    assert(aligned_pos > 0 && aligned_pos <= mBufferSize);
 
     size_t num_tries = 0;
     size_t sleep_time_us = 1;
@@ -537,9 +544,9 @@ Status FileOpsDirectIO::ftruncate(FileHandle* fhandle,
     if (length >= file_size) return Status::OK;
 
     size_t aligned_length = length;
-    size_t need_align = length % ALIGNMENT;
+    size_t need_align = length % mAlignSize;
     if (need_align > 0) {
-        aligned_length = length + (ALIGNMENT - need_align);
+        aligned_length = length + (mAlignSize - need_align);
     }
 
     int r = ::ftruncate(phandle->fd, length);
@@ -563,8 +570,8 @@ Status FileOpsDirectIO::ftruncate(FileHandle* fhandle,
                         phandle->fd,
                         phandle->bufPtr,
                         need_align,
-                        aligned_length - ALIGNMENT));
-        phandle->filePos = aligned_length - ALIGNMENT;
+                        aligned_length - mAlignSize));
+        phandle->filePos = aligned_length - mAlignSize;
         phandle->flushedFilePos = length;
         phandle->bufPos = need_align;
     }

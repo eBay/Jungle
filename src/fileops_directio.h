@@ -23,13 +23,11 @@ limitations under the License.
 
 namespace jungle {
 
-#define ALIGNMENT 512
-// 16KB block size
-#define ALIGNED_BUFFER_SIZE 16384
-
 class FileOpsDirectIO : public FileOps {
 public:
-    FileOpsDirectIO(SimpleLogger* log);
+    FileOpsDirectIO(SimpleLogger* log,
+                    size_t buffer_size = 16384,
+                    size_t align_size = 512);
     ~FileOpsDirectIO();
 
     Status open(FileHandle** fhandle_out,
@@ -76,6 +74,9 @@ private:
                         off_t offset);
 
     SimpleLogger* myLog;
+
+    size_t mBufferSize;
+    size_t mAlignSize;
 };
 
 } // namespace jungle
