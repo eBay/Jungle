@@ -98,8 +98,8 @@ Status DB::open(DB** ptr_out,
     }
     db->p->fDirectOps =
         new FileOpsDirectIO(db->p->myLog,
-                            db->p->dbConfig.directIoBufferSize,
-                            db->p->dbConfig.directIoAlignSize);
+                            db->p->dbConfig.directIoOpt.bufferSize,
+                            db->p->dbConfig.directIoOpt.alignSize);
     _log_info(db->p->myLog, "Open new DB handle %s %p", path.c_str(), db);
     _log_info(db->p->myLog, "cache size %zu", db_mgr->getGlobalConfig()->fdbCacheSize);
 

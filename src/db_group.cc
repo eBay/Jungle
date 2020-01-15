@@ -105,8 +105,8 @@ Status DBGroup::openDB(DB** ptr_out,
     db->p->fOps = new FileOpsPosix;
     db->p->fDirectOps =
         new FileOpsDirectIO(src->p->myLog,
-                            db_config.directIoBufferSize,
-                            db_config.directIoAlignSize);
+                            db_config.directIoOpt.bufferSize,
+                            db_config.directIoOpt.alignSize);
     db->p->dbConfig = db_config;
     db->p->myLog = src->p->myLog;
 

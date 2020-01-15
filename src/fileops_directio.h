@@ -75,8 +75,8 @@ private:
 
     SimpleLogger* myLog;
 
-    size_t mBufferSize;
-    size_t mAlignSize;
+    size_t bufferSize;
+    size_t alignSize;
 };
 
 } // namespace jungle

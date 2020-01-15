@@ -21,6 +21,6 @@ limitations under the License.
 #define TEST_CUSTOM_DB_CONFIG(config)                                   \
     const char* direct_env = std::getenv("TEST_ENABLE_DIRECTIO");       \
     if (direct_env != nullptr && !std::strcmp(direct_env, "true")) {    \
-        config.directIo = true;                                         \
+        config.directIoOpt.enabled = true;                                         \
     }                                                                   \
 
