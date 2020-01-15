@@ -59,7 +59,7 @@ Status LogMgr::init(const LogMgrOptions& _options) {
     Status s;
     mani = new LogManifest(this,
                            opt.fOps,
-                           opt.dbConfig->directIo
+                           opt.dbConfig->directIoOpt.enabled
                                && FileOps::supportDirectIO()
                            ? opt.fDirectOps : opt.fOps);
     if (!mani) return Status::ALLOCATION_FAILURE;
@@ -109,7 +109,7 @@ Status LogMgr::init(const LogMgrOptions& _options) {
 
        try {
         TC(l_file->create(l_filename,
-                          opt.dbConfig->directIo
+                          opt.dbConfig->directIoOpt.enabled
                               && FileOps::supportDirectIO()
                           ? opt.fDirectOps : opt.fOps,
                           log_num,
@@ -441,7 +441,7 @@ Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
         l_new_file->setLogger(myLog);
         uint64_t start_seqnum = cur_log_file_info->file->getMaxSeqNum() + 1;
         l_new_file->create( l_filename,
-                            opt.dbConfig->directIo
+                            opt.dbConfig->directIoOpt.enabled
                                 && FileOps::supportDirectIO()
                             ? opt.fDirectOps : opt.fOps,
                             new_log_num,

@@ -90,7 +90,6 @@ public:
         , maxL1Size((uint64_t)120 * 1073741824) // 120 GB
         , maxParallelWritesPerJob(0)
         , readOnly(false)
-        , directIo(false)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -305,12 +304,35 @@ public:
      */
     bool readOnly;
 
+    struct DirectIoOptions{
+        DirectIoOptions()
+            : enabled(false)
+            , bufferSize(16384)
+            , alignSize(512)
+            {}
+
+        /**
+         * If `true`, use direct-IO bypassing OS page cache.
+         * Currently only supported for log files.
+         * Default: `false`
+         */
+        bool enabled;
+
+        /**
+         * The size of memory buffer for direct-IO.
+         */
+        size_t bufferSize;
+
+        /**
+         * The alignment size of memory buffer for direct-IO.
+         */
+        size_t alignSize;
+    };
+
     /**
-     * If `true`, use direct-IO bypassing OS page cache.
-     * Currently only supported for log files.
-     * Default: `false`
+     * Direct-IO related options.
      */
-    bool directIo;
+    DirectIoOptions directIoOpt;
 };
 
 class GlobalConfig {

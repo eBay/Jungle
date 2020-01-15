@@ -25,6 +25,9 @@ limitations under the License.
 
 using namespace jungle;
 
+#define DEFAULT_ALIGNMENT 512
+#define DEFAULT_BUFFER_SIZE 16384
+
 int read_write_without_open_test()
 {
     const std::string prefix = "file_directio_test";
@@ -89,7 +92,7 @@ int normal_read_write_test()
 
     // Check file size
     cs_off_t offset = ops->eof(fhandle);
-    CHK_EQ(ALIGNMENT, offset);
+    CHK_EQ(DEFAULT_ALIGNMENT, offset);
 
     // Check padding bytes
     memset(buf, 'a', 256);
@@ -138,14 +141,14 @@ int _check_circling_data(uint8_t* buf, size_t size, size_t int_seq = 0) {
 }
 
 size_t _file_size(size_t data_size) {
-    size_t need_align = data_size % ALIGNMENT;
+    size_t need_align = data_size % DEFAULT_ALIGNMENT;
     if (0 == need_align) {
         return data_size;
     } else {
         // Make sure enougth room for padding bytes
-        return need_align <= (ALIGNMENT - 8)
-               ? data_size - need_align + ALIGNMENT
-               : data_size - need_align + 2 * ALIGNMENT;
+        return need_align <= (DEFAULT_ALIGNMENT - 8)
+               ? data_size - need_align + DEFAULT_ALIGNMENT
+               : data_size - need_align + 2 * DEFAULT_ALIGNMENT;
     }
 }
 
@@ -164,8 +167,8 @@ int unaligned_read_write_test()
 
     // Prepare write buffer
     size_t buf_size = static_cast<size_t>(randint(1, 10)
-                                          * ALIGNED_BUFFER_SIZE
-                                          + randint(0, ALIGNMENT - 1));
+                                          * DEFAULT_BUFFER_SIZE
+                                          + randint(0, DEFAULT_ALIGNMENT - 1));
     uint8_t* buf = new uint8_t[buf_size];
     uint8_t* buf_chk = new uint8_t[buf_size];
     _set_circling_data(buf, buf_size);
@@ -220,7 +223,7 @@ int unaligned_read_write_test()
     _check_circling_data(buf_chk, buf_size);
 
     // Check padding bytes
-    if (buf_size % ALIGNMENT != 0) {
+    if (buf_size % DEFAULT_ALIGNMENT != 0) {
         s = ops->pread(fhandle, buf_chk, 8, buf_size);
         CHK_OK(s);
         uint64_t val = 0;
@@ -260,8 +263,8 @@ int unaligned_file_read_test()
     Status s;
     // Prepare write buffer
     size_t buf_size = static_cast<size_t>(randint(1, 10)
-                                          * ALIGNED_BUFFER_SIZE
-                                          + randint(1, ALIGNMENT - 1));
+                                          * DEFAULT_BUFFER_SIZE
+                                          + randint(1, DEFAULT_ALIGNMENT - 1));
     uint8_t* buf = new uint8_t[buf_size];
     uint8_t* buf_chk = new uint8_t[buf_size];
     _set_circling_data(buf, buf_size);
@@ -334,8 +337,8 @@ int unaligned_file_write_test()
     Status s;
     // Prepare write buffer
     size_t buf_size = static_cast<size_t>(randint(1, 10)
-                                          * ALIGNED_BUFFER_SIZE
-                                          + randint(1, ALIGNMENT - 1));
+                                          * DEFAULT_BUFFER_SIZE
+                                          + randint(1, DEFAULT_ALIGNMENT - 1));
     uint8_t* buf = new uint8_t[buf_size];
     uint8_t* buf_chk = new uint8_t[buf_size];
     _set_circling_data(buf, buf_size);
