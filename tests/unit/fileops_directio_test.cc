@@ -25,6 +25,9 @@ limitations under the License.
 
 using namespace jungle;
 
+#define ALIGNMENT 512
+#define ALIGNED_BUFFER_SIZE 16384
+
 int read_write_without_open_test()
 {
     const std::string prefix = "file_directio_test";
