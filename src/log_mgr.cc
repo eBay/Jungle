@@ -432,8 +432,10 @@ Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
 
     uint64_t log_file_num = cur_log_file_info.ptr->logFileNum;
     if (max_log_num == log_file_num) {
-        // Set existing file immutable.
-        cur_log_file_info->file->setImmutable();
+        // WARNING:
+        //   We should not make this file immutable here, as there can be
+        //   other writer thread that pushes new updates to this file, until
+        //   the max log file number is updated below.
 
         std::string l_filename =
                 LogFile::getLogFileName(opt.path, opt.prefixNum, new_log_num);
@@ -739,6 +741,10 @@ Status LogMgr::syncInternal(bool call_fsync) {
         if (valid_number(after_sync)) {
             last_synced_log = ii;
         }
+        // Set this file immutable, if it is not the last file.
+        if (ii < ln_to) {
+            li->file->setImmutable();
+        }
     }
 
     // Sync up manifest file next
@@ -888,6 +894,12 @@ Status LogMgr::flush(const FlushOptions& options,
     for (uint64_t ii = ln_from; ii < ln_to; ++ii) {
         // Avoid loading memtable because of this call.
         LogFileInfoGuard ll(mani->getLogFileInfoP(ii, true));
+
+        // If it is not immutable yet (happens when we flush without sync),
+        // set it now.
+        if (!ll->file->isImmutable()) {
+            ll->file->setImmutable();
+        }
 
         // Remove file from manifest.
         mani->removeLogFile(ii);
