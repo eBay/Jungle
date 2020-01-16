@@ -85,16 +85,19 @@ fdb_config TableFile::FdbHandle::getFdbSettings(const DBConfig* db_config) {
                                        mgr->getLogger());
     }
 
-    if (db_config && db_config->bulkLoading) {
-        // Bulk loading mode: enable WAL flush before commit.
-        config.wal_flush_before_commit = true;
-        config.bulk_load_mode = true;
-    } else {
-        // Otherwise:
-        // Jungle will manually control WAL flushing.
-        config.wal_flush_before_commit = false;
-        config.bulk_load_mode = false;
-    }
+    // FIXME: `bulkLoading` should be deprecated.
+    (void)db_config->bulkLoading;
+
+    // NOTE:
+    //   We enable "WAL flush before commit" option to reduce memory
+    //   pressure, and those uncommitted data will not be seen by
+    //   user since we set `do_not_search_wal` option.
+    //
+    //   We also enable `bulk_load_mode` always on, as we don't want to
+    //   keep dirty B+tree nodes in memory, that brings unnecessary
+    //   memcpy overhead.
+    config.wal_flush_before_commit = true;
+    config.bulk_load_mode = true;
     config.do_not_search_wal = true;
 
     // Disable auto compaction,
