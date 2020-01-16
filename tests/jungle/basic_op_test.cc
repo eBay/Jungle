@@ -1741,6 +1741,49 @@ int add_new_log_file_race_test() {
     return 0;
 }
 
+int async_remove_file_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    // Initialize Jungle without any flusher/compactor/writer.
+    jungle::GlobalConfig g_conf;
+    g_conf.numCompactorThreads = 0;
+    g_conf.numFlusherThreads = 0;
+    g_conf.numTableWriters = 0;
+    jungle::init(g_conf);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Put 20 records.
+    for (size_t ii=0; ii<20; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+    }
+
+    // Flush up to 15.
+    CHK_Z( db->sync() );
+    CHK_Z( db->flushLogs(jungle::FlushOptions(), 15) );
+
+    // Wait 2 seconds.
+    TestSuite::sleep_sec(2);
+
+    // `log0000_00000000` shouldn't exist.
+    CHK_FALSE( TestSuite::exist(filename + "/log0000_00000000") );
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -1775,6 +1818,7 @@ int main(int argc, char** argv) {
     ts.doTest("reopen empty db test", reopen_empty_db_test);
     ts.doTest("different number of L0 partitions test", different_l0_partitions);
     ts.doTest("add new log file race test", add_new_log_file_race_test);
+    ts.doTest("async remove file test", async_remove_file_test);
 
     return 0;
 }

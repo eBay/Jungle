@@ -237,21 +237,6 @@ void Flusher::work(WorkerOptions* opt_base) {
         target_db->p->decBgTask();
     }
 
-    {   // Remove pending files if exist (spend up to 1 second).
-        Timer tt;
-        tt.setDurationMs(1000);
-        while (!tt.timeout()) {
-            std::string full_path;
-            s = dbm->popFileToRemove(full_path);
-            if (!s) break;
-            Timer tt;
-            FileMgr::remove(full_path);
-            _log_info(dbm->getLogger(),
-                      "removed pending file %s, %zu us",
-                      full_path.c_str(), tt.getUs());
-        }
-    }
-
     if ( dbm->flusherQueue()->size() &&
          !delayed_task ) {
         doNotSleepNextTime = true;
