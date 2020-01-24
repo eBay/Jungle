@@ -65,6 +65,10 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
     SizedBuf empty_key;
     std::list<Record*> recs_batch;
 
+    Timer elapsed_timer;
+    Timer sync_timer;
+    sync_timer.setDurationMs(db_config->preFlushDirtyInterval_sec * 1000);
+
    try {
     for (uint64_t ii = start_index; ii < start_index + count; ++ii) {
         if (!isCompactionAllowed()) {
@@ -87,11 +91,18 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
             // If debug parameter is given, sleep here.
             Timer::sleepUs(d_params.compactionItrScanDelayUs);
         }
+
+        // Periodic flushing to avoid burst disk write & freeze,
+        // which have great impact on (user-facing) latency.
+        if (sync_timer.timeoutAndReset()) {
+            dst_file->sync();
+        }
     }
 
     // Final commit, and generate snapshot on it.
     setTableFileItrFlush(dst_file, recs_batch, false);
-    _log_info(myLog, "(end of batch) set total %zu records", count);
+    _log_info(myLog, "(end of batch) set total %zu records, %zu us",
+              count, elapsed_timer.getUs());
 
    } catch (Status s) { // -----------------------------------
     _log_err(myLog, "got error: %d", (int)s);

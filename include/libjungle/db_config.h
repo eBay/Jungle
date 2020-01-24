@@ -90,6 +90,7 @@ public:
         , maxL1Size((uint64_t)120 * 1073741824) // 120 GB
         , maxParallelWritesPerJob(0)
         , readOnly(false)
+        , preFlushDirtyInterval_sec(5)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -333,6 +334,13 @@ public:
      * Direct-IO related options.
      */
     DirectIoOptions directIoOpt;
+
+    /**
+     * Interval of flushing dirty data during long-running compaction/split.
+     * If 0, dirty data will be flushed only at the end of the task,
+     * which may cause burst IO and high latency.
+     */
+    uint32_t preFlushDirtyInterval_sec;
 };
 
 class GlobalConfig {

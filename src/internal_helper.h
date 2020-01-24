@@ -139,21 +139,22 @@ struct Timer {
         reset();
     }
     void reset() {
+        auto cur = std::chrono::system_clock::now();
         std::lock_guard<std::mutex> l(lock);
-        tCreated = std::chrono::system_clock::now();
+        tCreated = cur;
     }
     void setDurationMs(size_t to) {
         durationUs = to * 1000;
     }
     bool timeout() const {
-        std::lock_guard<std::mutex> l(lock);
         auto cur = std::chrono::system_clock::now();
+        std::lock_guard<std::mutex> l(lock);
         std::chrono::duration<double> elapsed = cur - tCreated;
         return (durationUs < elapsed.count() * 1000000);
     }
     bool timeoutAndReset() {
-        std::lock_guard<std::mutex> l(lock);
         auto cur = std::chrono::system_clock::now();
+        std::lock_guard<std::mutex> l(lock);
         std::chrono::duration<double> elapsed = cur - tCreated;
         if (durationUs < elapsed.count() * 1000000) {
             tCreated = cur;
@@ -162,20 +163,20 @@ struct Timer {
         return false;
     }
     uint64_t getUs() {
-        std::lock_guard<std::mutex> l(lock);
         auto cur = std::chrono::system_clock::now();
+        std::lock_guard<std::mutex> l(lock);
         std::chrono::duration<double> elapsed = cur - tCreated;
         return (uint64_t)1000000 * elapsed.count();
     }
     uint64_t getMs() {
-        std::lock_guard<std::mutex> l(lock);
         auto cur = std::chrono::system_clock::now();
+        std::lock_guard<std::mutex> l(lock);
         std::chrono::duration<double> elapsed = cur - tCreated;
         return (uint64_t)1000 * elapsed.count();
     }
     double getSec() {
-        std::lock_guard<std::mutex> l(lock);
         auto cur = std::chrono::system_clock::now();
+        std::lock_guard<std::mutex> l(lock);
         std::chrono::duration<double> elapsed = cur - tCreated;
         return elapsed.count();
     }

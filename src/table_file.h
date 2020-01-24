@@ -123,6 +123,8 @@ public:
                                   bool& is_tombstone_out,
                                   SizedBuf& user_meta_out);
 
+    Status sync();
+
     Status setSingle(uint32_t key_hash_val,
                      const Record& rec,
                      uint64_t& offset_out);

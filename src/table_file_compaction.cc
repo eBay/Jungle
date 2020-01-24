@@ -128,9 +128,9 @@ Status TableFile::compactToManully(FdbHandle* compact_handle,
     DBMgr* mgr = DBMgr::getWithoutInit();
     DebugParams d_params = mgr->getDebugParams();
 
-    // Flush block cache for every 5 second.
+    // Flush block cache for every given second.
     Timer sync_timer;
-    sync_timer.setDurationMs(5000);
+    sync_timer.setDurationMs(local_config.preFlushDirtyInterval_sec * 1000);
 
     do {
         fdb_doc tmp_doc;
@@ -279,7 +279,7 @@ Status TableFile::mergeCompactTo(const std::string& file_to_merge,
 
     // Flush block cache for every 5 second.
     Timer sync_timer;
-    sync_timer.setDurationMs(5000);
+    sync_timer.setDurationMs(db_config->preFlushDirtyInterval_sec * 1000);
 
     uint64_t my_cnt = 0, my_discards = 0,
              merge_cnt = 0, merge_discards = 0;
