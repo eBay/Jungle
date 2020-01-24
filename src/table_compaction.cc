@@ -147,11 +147,12 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     uint64_t num_records_read = 0;
     uint64_t TABLE_LIMIT = db_config->getMaxTableSize(level + 1);
     size_t min_num_tables_for_new_level =
-        std::max((size_t)4, db_config->getMaxParallelWriters());
+        std::max( (size_t)db_config->numL0Partitions * 2,
+                  db_config->getMaxParallelWriters() );
     if ( max_key_table.empty() &&
          db_config->nextLevelExtension &&
          min_num_tables_for_new_level ) {
-        // It means that this is the flush flush to L1.
+        // It means that this is the first flush to L1.
         // Ignore given table size, and divide evenly
         // (basic assumption is that L0 is hash-partitioned so that it
         //  won't harm the key distribution of L1).

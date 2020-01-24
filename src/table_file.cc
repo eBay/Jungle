@@ -689,6 +689,12 @@ void TableFile::rawMetaToUserMeta(const SizedBuf& raw_meta,
     rw.get(user_meta_out.data, user_meta_out.size);
 }
 
+Status TableFile::sync() {
+    fdb_status fs = fdb_sync_file(writer->dbFile);
+    if (fs != FDB_RESULT_SUCCESS) return Status::FDB_COMMIT_FAIL;
+    return Status();
+}
+
 Status TableFile::setSingle(uint32_t key_hash_val,
                             const Record& rec,
                             uint64_t& offset_out)
