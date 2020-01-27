@@ -395,9 +395,12 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
 
     // Urgent compaction:
     //   => If stale ratio is bigger than debugging parameter.
+    //   => Effective only when L0 is the last level.
     int urgent_or_itc = 0;
+    size_t num_levels = getNumLevels();
     if ( d_params_effective &&
          d_params.urgentCompactionRatio &&
+         num_levels == 1 &&
          t_stats.totalSizeByte > db_config->minFileSizeToCompact &&
          ratio > d_params.urgentCompactionRatio ) {
         urgent_or_itc = 1;
