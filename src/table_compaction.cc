@@ -421,14 +421,16 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
 
 Status TableMgr::compactInPlace(const CompactOptions& options,
                                 TableInfo* victim_table,
-                                size_t level)
+                                size_t level,
+                                bool oldest_one_first)
 {
     if (level >= mani->getNumLevels()) return Status::INVALID_LEVEL;
 
     Status s;
     Timer tt;
+    VictimPolicy v_policy = oldest_one_first ? WORKING_SET_SIZE : STALE_RATIO;
     TableInfo* local_victim = findLocalVictim( level, victim_table,
-                                               STALE_RATIO, false );
+                                               v_policy, false );
     if (!local_victim) return Status::TABLE_NOT_FOUND;
 
     _log_info( myLog, "in-place compaction at level %zu victim %zu_%zu, "

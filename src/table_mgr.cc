@@ -39,6 +39,7 @@ TableMgr::TableMgr(DB* parent_db)
     , mani(nullptr)
     , numL0Partitions(1)
     , numL1Compactions(0)
+    , numWrittenRecords(0)
     , myLog(nullptr)
     {}
 
@@ -79,9 +80,11 @@ Status TableMgr::createNewTableFile( size_t level,
 void TableMgr::logTableSettings(const DBConfig* db_config) {
     if (db_config->compactionFactor) {
         _log_info( myLog, "compaction factor %u, reuse factor %zu, "
+                   "num writes to compact %zu, "
                    "min file size %zu, cycle at least %u at most %u",
                    db_config->compactionFactor,
                    db_config->blockReuseFactor,
+                   db_config->numWritesToCompact,
                    db_config->minFileSizeToCompact,
                    db_config->minBlockReuseCycleToCompact,
                    db_config->maxBlockReuseCycle );

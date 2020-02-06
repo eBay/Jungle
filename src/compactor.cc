@@ -170,6 +170,19 @@ void Compactor::work(WorkerOptions* opt_base) {
                                   target_hash_num, target_table, target_strategy );
                 if (found) break;
             }
+
+            if ( !found &&
+                 num_levels >= 2 &&
+                 db_config.numWritesToCompact &&
+                 dbwrap->db->p->tableMgr->getNumWrittenRecords() >
+                     db_config.numWritesToCompact ) {
+                target_db = dbwrap->db;
+                target_table = nullptr;
+                target_level = (std::rand() % (num_levels - 1)) + 1;
+                target_strategy = TableMgr::INPLACE_OLD;
+                found = true;
+            }
+
             if (found) {
                 target_db->p->incBgTask();
                 break;
@@ -197,17 +210,22 @@ void Compactor::work(WorkerOptions* opt_base) {
             } else if ( target_strategy == TableMgr::INPLACE &&
                         target_table ) {
                 s = target_db->p->tableMgr->compactInPlace
-                    ( c_opt, target_table, target_level );
+                    ( c_opt, target_table, target_level, false );
 
             } else if ( target_strategy == TableMgr::MERGE &&
                         target_table ) {
                 s = target_db->p->tableMgr->mergeLevel
                     ( c_opt, target_table, target_level );
 
+            } else if ( target_strategy == TableMgr::INPLACE_OLD ) {
+                s = target_db->p->tableMgr->compactInPlace
+                    ( c_opt, target_table, target_level, true );
+
             } else {
                 assert(0);
             }
             if (target_table) target_table->done();
+            target_db->p->tableMgr->resetNumWrittenRecords();
         }
 
         // Do not sleep next time to continue

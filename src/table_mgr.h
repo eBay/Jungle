@@ -126,6 +126,7 @@ public:
         SPLIT = 0x2,
         INPLACE = 0x3,
         MERGE = 0x4,
+        INPLACE_OLD = 0x5,
     };
 
     Status init(const TableMgrOptions& _options);
@@ -190,7 +191,8 @@ public:
 
     Status compactInPlace(const CompactOptions& options,
                           TableInfo* victim_table,
-                          size_t level);
+                          size_t level,
+                          bool oldest_one_first);
 
     Status compactL0(const CompactOptions& options,
                      uint32_t hash_num);
@@ -246,6 +248,10 @@ public:
     void setTableFileItrFlush(TableFile* dst_file,
                               std::list<Record*>& recs_batch,
                               bool without_commit);
+
+    uint64_t getNumWrittenRecords() const { return numWrittenRecords; }
+
+    void resetNumWrittenRecords() { numWrittenRecords = 0; }
 
     struct Iterator {
     public:
@@ -469,6 +475,9 @@ protected:
     // Set of (source) levels that interlevel compaction is in progress.
     std::unordered_set<size_t> lockedLevels;
     std::mutex lockedLevelsLock;
+
+    // Total accumulated number of records written to table.
+    std::atomic<uint64_t> numWrittenRecords;
 
     SimpleLogger* myLog;
 };
