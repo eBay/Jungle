@@ -521,7 +521,7 @@ Status DB::compactInplace(const CompactOptions& options,
     Status s;
     EP( p->checkHandleValidity(DBInternal::OPTYPE_COMPACT) );
     if (level == 0) return Status::INVALID_LEVEL;
-    s = p->tableMgr->compactInPlace(options, nullptr, level);
+    s = p->tableMgr->compactInPlace(options, nullptr, level, false);
     return s;
 }
 

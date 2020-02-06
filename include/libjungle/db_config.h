@@ -82,6 +82,7 @@ public:
         , maxBlockReuseCycle(1)
         , compactionFactor(300)             // 300%
         , blockReuseFactor(300)             // 300%
+        , numWritesToCompact(0)
         , useBloomFilterForGet(true)
         , bloomFilterBitsPerUnit(0.0)
         , nextLevelExtension(true)
@@ -236,6 +237,13 @@ public:
      * File size ratio threshold to trigger block reuse, in percentage.
      */
     uint32_t blockReuseFactor;
+
+    /**
+     * If non-zero, in-place compaction will be triggered after the
+     * given number of writes, even though the stale data ratio
+     * doesn't reach `compactionFactor`.
+     */
+    uint32_t numWritesToCompact;
 
     /**
      * If `false`, point get will not use bloom filter even though it exists.

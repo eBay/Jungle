@@ -154,6 +154,7 @@ Status TableMgr::setBatch(std::list<Record*>& batch,
               batch.size(), elapsed_us,
               (double)batch.size() * 1000000 / elapsed_us);
 
+    numWrittenRecords += batch.size();
     return Status();
 }
 

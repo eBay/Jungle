@@ -105,6 +105,7 @@ int JungleAdapter::open(const std::string& db_file,
     config.bloomFilterBitsPerUnit = 10;
     _jfloat(config.bloomFilterBitsPerUnit, configObj, "bloom_filter_bits");
 
+    //config.numWritesToCompact = 100000;
     //config.useBloomFilter = false;
 
     jungle::Status s = jungle::DB::open(&myDb, db_file, config);
