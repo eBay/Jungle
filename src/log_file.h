@@ -78,7 +78,8 @@ public:
                const SizedBuf& key,
                uint64_t* key_hash,
                Record& rec_out,
-               bool allow_tombstone = false);
+               bool allow_flushed_log,
+               bool allow_tombstone);
 
     Status flushMemTable();
 

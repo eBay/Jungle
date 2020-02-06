@@ -105,6 +105,7 @@ struct DebugParams {
         , logDetailsOfKeyNotFound(false)
         , tableSetBatchCb(nullptr)
         , addNewLogFileCb(nullptr)
+        , newLogBatchCb(nullptr)
         {}
 
     /**
@@ -161,6 +162,13 @@ struct DebugParams {
      * new log file is added, but right before appending the first log.
      */
     std::function< void(const GenericCbParams&) > addNewLogFileCb;
+
+    /**
+     * Callback function that will be invoked at the moment
+     * new batch (set of records) is appended, but before they become
+     * visible.
+     */
+    std::function< void(const GenericCbParams&) > newLogBatchCb;
 };
 
 using UserHandler = std::function< void(Status, void*) >;
@@ -304,14 +312,18 @@ public:
     Status setRecordByKey(const Record& rec);
 
     /**
-     * (Not supported yet)
      * Set (upsert) a set of records in batch.
+     * The batch will be applied atomically (all or nothing).
+     * `seqNum` part should be 1) all `NOT_INITIALIZED`, or 2) in
+     * increasing order without duplicate numbers (doesn't need to be
+     * consecutive).
+     * In case of 1), if `seqNum` part is not set, Jungle will
+     * automatically assign it.
      *
      * @param batch Set of records.
      * @return OK on success.
      */
-    Status setRecordByKeyMulti(std::list<Record*>& batch,
-                               bool last_batch = false);
+    Status setRecordBatch(const std::list<Record>& batch);
 
     /**
      * Get the value corresponding to the given key.

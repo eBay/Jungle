@@ -504,6 +504,7 @@ Status MemTable::getRecordByKey(const uint64_t chk,
                                 const SizedBuf& key,
                                 uint64_t* key_hash,
                                 Record& rec_out,
+                                bool allow_flushed_log,
                                 bool allow_tombstone)
 {
     // Check bloom filter first for fast screening.
@@ -519,12 +520,14 @@ Status MemTable::getRecordByKey(const uint64_t chk,
 
     RecNode* node = _get_entry(cursor, RecNode, snode);
     Record* rec_ret = node->getLatestRecord(chk);
-
-    if ( !rec_ret ||
-         ( valid_number(flushedSeqNum) &&
-           rec_ret->seqNum <= flushedSeqNum ) ) {
+    if (!rec_ret) {
+        skiplist_release_node(&node->snode);
+        return Status::KEY_NOT_FOUND;
+    }
+    if ( valid_number(flushedSeqNum) &&
+         rec_ret->seqNum <= flushedSeqNum ) {
         // Already purged KV pair, go to table.
-        if (!valid_number(chk)) {
+        if (!allow_flushed_log) {
             skiplist_release_node(&node->snode);
             return Status::KEY_NOT_FOUND;
         } // Tolerate if this is snapshot.

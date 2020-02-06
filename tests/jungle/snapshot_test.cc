@@ -1050,6 +1050,115 @@ int empty_db_snapshot_test() {
     return 0;
 }
 
+int race_with_set_batch() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Put 5 records.
+    for (size_t ii=0; ii<5; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+    }
+
+    // Set debug callback.
+    jungle::DebugParams dp;
+    dp.newLogBatchCb =
+        [db](const jungle::DebugParams::GenericCbParams& pp) -> int {
+        //jungle::DB* db;
+        // Open a snapshot.
+        jungle::DB* snap = nullptr;
+        CHK_Z( db->openSnapshot(&snap) );
+
+        for (size_t ii=0; ii<15; ++ii) {
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            jungle::SizedBuf value_out;
+            jungle::SizedBuf::Holder h(value_out);
+            jungle::Status s = snap->get( jungle::SizedBuf(key_str), value_out );
+            if (ii < 5) {
+                CHK_Z(s);
+                CHK_EQ( val_str, value_out.toString() );
+            } else {
+                // Otherwise they should not be visible yet.
+                CHK_FALSE(s);
+            }
+        }
+
+        // Same to iterator.
+        jungle::Iterator itr;
+        itr.init(snap);
+        size_t count = 0;
+        do {
+            jungle::Record rec;
+            jungle::Record::Holder h(rec);
+            CHK_Z( itr.get(rec) );
+            count++;
+        } while (itr.next().ok());
+        itr.close();
+        CHK_EQ(5, count);
+
+        CHK_Z(jungle::DB::close(snap));
+        return 0;
+    };
+    jungle::DB::setDebugParams(dp);
+
+    // Put 10 records atomically.
+    std::list<jungle::Record> recs;
+    for (size_t ii=5; ii<15; ++ii) {
+        jungle::Record rr;
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        rr.kv.alloc(key_str, val_str);
+        recs.push_back(rr);
+    }
+    CHK_Z( db->setRecordBatch(recs) );
+    for (jungle::Record& rr: recs) {
+        rr.free();
+    }
+
+    // After batch update succeeds, and create snapshot.
+    // We should see all records from the snapshot.
+    jungle::DB* snap = nullptr;
+    CHK_Z( db->openSnapshot(&snap) );
+    for (size_t ii=0; ii<15; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        jungle::SizedBuf value_out;
+        jungle::SizedBuf::Holder h(value_out);
+        CHK_Z( snap->get( jungle::SizedBuf(key_str), value_out ) );
+        CHK_EQ( val_str, value_out.toString() );
+    }
+
+    // Same to iterator.
+    jungle::Iterator itr;
+    itr.init(snap);
+    size_t count = 0;
+    do {
+        jungle::Record rec;
+        jungle::Record::Holder h(rec);
+        CHK_Z( itr.get(rec) );
+        count++;
+    } while (itr.next().ok());
+    itr.close();
+    CHK_EQ(15, count);
+
+    CHK_Z(jungle::DB::close(snap));
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 }
 using namespace snapshot_test;
 
@@ -1072,6 +1181,7 @@ int main(int argc, char** argv) {
     ts.doTest("snapshot with compaction test", snapshot_with_compaction_test);
     ts.doTest("latest snapshot test", latest_snapshot_test);
     ts.doTest("empty db snapshot test", empty_db_snapshot_test);
+    ts.doTest("race with set batch test", race_with_set_batch);
 
     return 0;
 }

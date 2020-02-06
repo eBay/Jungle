@@ -109,9 +109,7 @@ public:
                         std::list<LogFileInfo*>*& log_file_list_out);
     Status closeSnapshot(DB* snap_handle);
 
-    Status setByBulkLoader(std::list<Record*>& batch,
-                           TableMgr* table_mgr,
-                           bool last_batch = false);
+    Status setMulti(const std::list<Record>& batch);
 
     Status setSN(const Record& rec);
 
@@ -166,6 +164,8 @@ public:
     Status close();
 
     Status syncSeqnum(TableMgr* t_mgr);
+
+    void execBackPressure(uint64_t elapsed_us);
 
     inline const DBConfig* getDbConfig() const { return opt.dbConfig; }
 
@@ -328,6 +328,10 @@ protected:
 
     // Number of set calls since the last flush.
     std::atomic<int64_t> numSetRecords;
+
+    // If non-zero, records up to this number (inclusive) will be
+    // visible to user.
+    std::atomic<uint64_t> visibleSeqBarrier;
 
     // Logger.
     SimpleLogger* myLog;

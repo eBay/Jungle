@@ -1784,6 +1784,227 @@ int async_remove_file_test() {
     return 0;
 }
 
+int set_batch_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Put 5 records.
+    for (size_t ii=0; ii<5; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+    }
+
+    // Set debug callback.
+    jungle::DebugParams dp;
+    dp.newLogBatchCb =
+        [db](const jungle::DebugParams::GenericCbParams& pp) -> int {
+        for (size_t ii=0; ii<15; ++ii) {
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            jungle::SizedBuf value_out;
+            jungle::SizedBuf::Holder h(value_out);
+            jungle::Status s = db->get( jungle::SizedBuf(key_str), value_out );
+            if (ii < 5) {
+                CHK_Z(s);
+                CHK_EQ( val_str, value_out.toString() );
+            } else {
+                // Otherwise they should not be visible yet.
+                CHK_FALSE(s);
+            }
+        }
+
+        // Same to iterator.
+        jungle::Iterator itr;
+        itr.init(db);
+        size_t count = 0;
+        do {
+            jungle::Record rec;
+            jungle::Record::Holder h(rec);
+            CHK_Z( itr.get(rec) );
+            count++;
+        } while (itr.next().ok());
+        itr.close();
+        CHK_EQ(5, count);
+        return 0;
+    };
+    jungle::DB::setDebugParams(dp);
+
+    // Put 10 records atomically.
+    std::list<jungle::Record> recs;
+    for (size_t ii=5; ii<15; ++ii) {
+        jungle::Record rr;
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        rr.kv.alloc(key_str, val_str);
+        recs.push_back(rr);
+    }
+    CHK_Z( db->setRecordBatch(recs) );
+    for (jungle::Record& rr: recs) {
+        rr.free();
+    }
+
+    // After batch update succeeds, we should see all records.
+    for (size_t ii=0; ii<15; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        jungle::SizedBuf value_out;
+        jungle::SizedBuf::Holder h(value_out);
+        CHK_Z( db->get( jungle::SizedBuf(key_str), value_out ) );
+        CHK_EQ( val_str, value_out.toString() );
+    }
+
+    // Same to iterator.
+    jungle::Iterator itr;
+    itr.init(db);
+    size_t count = 0;
+    do {
+        jungle::Record rec;
+        jungle::Record::Holder h(rec);
+        CHK_Z( itr.get(rec) );
+        count++;
+    } while (itr.next().ok());
+    itr.close();
+    CHK_EQ(15, count);
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int set_batch_invalid_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Case 1: mixed sequence number.
+    {   std::list<jungle::Record> recs;
+        for (size_t ii=0; ii<10; ++ii) {
+            jungle::Record rr;
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            rr.kv.alloc(key_str, val_str);
+            if (ii % 2 == 0) rr.seqNum = ii + 1;
+            recs.push_back(rr);
+        }
+        CHK_GT( 0, db->setRecordBatch(recs) );
+        for (jungle::Record& rr: recs) {
+            rr.free();
+        }
+    }
+
+    // Case 2: not increasing order.
+    {   std::list<jungle::Record> recs;
+        for (size_t ii=0; ii<10; ++ii) {
+            jungle::Record rr;
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            rr.kv.alloc(key_str, val_str);
+            rr.seqNum = 100 - ii;
+            recs.push_back(rr);
+        }
+        CHK_GT( 0, db->setRecordBatch(recs) );
+        for (jungle::Record& rr: recs) {
+            rr.free();
+        }
+    }
+
+    // Case 3: duplicate seq numbers.
+    {   std::list<jungle::Record> recs;
+        for (size_t ii=0; ii<10; ++ii) {
+            jungle::Record rr;
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            rr.kv.alloc(key_str, val_str);
+            rr.seqNum = 100 + ii / 2;
+            recs.push_back(rr);
+        }
+        CHK_GT( 0, db->setRecordBatch(recs) );
+        for (jungle::Record& rr: recs) {
+            rr.free();
+        }
+    }
+
+    // Normal records, should succeed.
+    {   std::list<jungle::Record> recs;
+        for (size_t ii=0; ii<10; ++ii) {
+            jungle::Record rr;
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            rr.kv.alloc(key_str, val_str);
+            rr.seqNum = 100 + ii;
+            recs.push_back(rr);
+        }
+        CHK_Z( db->setRecordBatch(recs) );
+        for (jungle::Record& rr: recs) {
+            rr.free();
+        }
+    }
+
+    // Case 4: seq number smaller than current max.
+    {   std::list<jungle::Record> recs;
+        for (size_t ii=0; ii<10; ++ii) {
+            jungle::Record rr;
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            rr.kv.alloc(key_str, val_str);
+            rr.seqNum = 10 + ii;
+            recs.push_back(rr);
+        }
+        CHK_GT( 0, db->setRecordBatch(recs) );
+        for (jungle::Record& rr: recs) {
+            rr.free();
+        }
+    }
+
+    // Only succeeded records should be visible.
+    for (size_t ii=0; ii<10; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        jungle::Record rec_out;
+        jungle::Record::Holder h(rec_out);
+        CHK_Z( db->getRecordByKey(jungle::SizedBuf(key_str), rec_out) );
+        CHK_EQ( val_str, rec_out.kv.value.toString() );
+        CHK_EQ( 100 + ii, rec_out.seqNum );
+    }
+
+    // Same to iterator.
+    jungle::Iterator itr;
+    itr.init(db);
+    size_t count = 0;
+    do {
+        jungle::Record rec;
+        jungle::Record::Holder h(rec);
+        CHK_Z( itr.get(rec) );
+        count++;
+    } while (itr.next().ok());
+    itr.close();
+    CHK_EQ(10, count);
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -1819,6 +2040,8 @@ int main(int argc, char** argv) {
     ts.doTest("different number of L0 partitions test", different_l0_partitions);
     ts.doTest("add new log file race test", add_new_log_file_race_test);
     ts.doTest("async remove file test", async_remove_file_test);
+    ts.doTest("set batch test", set_batch_test);
+    ts.doTest("set batch invalid test", set_batch_invalid_test);
 
     return 0;
 }

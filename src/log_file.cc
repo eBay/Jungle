@@ -360,11 +360,13 @@ Status LogFile::get(const uint64_t chk,
                     const SizedBuf& key,
                     uint64_t* key_hash,
                     Record& rec_out,
+                    bool allow_flushed_log,
                     bool allow_tombstone)
 {
     touch();
     Status s;
-    EP( mTable->getRecordByKey(chk, key, key_hash, rec_out, allow_tombstone) );
+    EP( mTable->getRecordByKey(chk, key, key_hash, rec_out,
+                               allow_flushed_log, allow_tombstone) );
     return Status();
 }
 
