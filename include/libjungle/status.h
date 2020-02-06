@@ -86,6 +86,7 @@ public:
         FILE_SIZE_MISMATCH              = -59,
         INCOMPLETE_LOG                  = -60,
         UNKNOWN_LOG_FLAG                = -61,
+        EMPTY_BATCH                     = -62,
 
         ERROR                           = -32768
     };

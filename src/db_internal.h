@@ -100,7 +100,7 @@ public:
         flags.onGoingBgTasks.fetch_sub(1);
     }
 
-    void updateOpHistory();
+    void updateOpHistory(size_t amount = 1);
 
     enum OpType {
         OPTYPE_READ = 0x1,

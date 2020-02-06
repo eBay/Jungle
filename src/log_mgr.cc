@@ -39,6 +39,7 @@ LogMgr::LogMgr(DB* parent_db, const LogMgrOptions& _options)
     , throttlingRate(0)
     , lastFlushIntervalMs(0)
     , numSetRecords(0)
+    , visibleSeqBarrier(0)
     , myLog(nullptr)
     , vlSync(VERBOSE_LOG_SUPPRESS_MS)
     {}
@@ -383,41 +384,6 @@ Status LogMgr::closeSnapshot(DB* snap_handle) {
     return Status();
 }
 
-Status LogMgr::setByBulkLoader(std::list<Record*>& batch,
-                               TableMgr* table_mgr,
-                               bool last_batch)
-{
-    // Return error in read-only mode.
-    if (getDbConfig()->readOnly) return Status::WRITE_VIOLATION;
-
-    Status s;
-
-    uint64_t log_file_num = 0;
-    EP(mani->getMaxLogFileNum(log_file_num));
-    LogFileInfoGuard g_li(mani->getLogFileInfoP(log_file_num));
-
-    if (g_li.empty() || g_li.ptr->isRemoved()) {
-        // This shouldn't happen.
-        assert(0);
-        return Status::ERROR;
-    }
-
-    for (Record*& rec: batch) {
-        // In bulk loading mode, user cannot assign seq number.
-        g_li.file()->assignSeqNum(*rec);
-
-        // All seq numbers need to be synchronized.
-        g_li.file()->updateSeqNumByBulkLoader(rec->seqNum);
-        mani->setLastSyncedLog(log_file_num);
-        mani->setLastFlushedLog(log_file_num);
-    }
-
-    std::list<uint64_t> dummy;
-    s = table_mgr->setBatch(batch, dummy, !last_batch);
-
-    return s;
-}
-
 Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
                              LogFileInfoGuard& new_log_file_info)
 {
@@ -473,6 +439,42 @@ Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
     new_log_file_info = LogFileInfoGuard(lf_info);
 
     return Status();
+}
+
+void LogMgr::execBackPressure(uint64_t elapsed_us) {
+    if (throttlingRate > 0) {
+        DBMgr* mgr = DBMgr::getWithoutInit();
+        GlobalConfig* g_config = mgr->getGlobalConfig();
+
+        // Throttling.
+        double exp_us = 1000000.0 / throttlingRate.load();
+
+        size_t effective_time_ms =
+            std::min( lastFlushIntervalMs.load(),
+                      (int64_t)THROTTLING_EFFECTIVE_TIME_MS );
+        size_t num_log_files = mani->getNumLogFiles();
+        size_t log_files_limit = g_config->flusherMinLogFilesToTrigger * 2;
+        if (num_log_files > log_files_limit) {
+            effective_time_ms *= (num_log_files - log_files_limit);
+        }
+
+        uint64_t throttle_age_ms = throttlingRateTimer.getUs() / 1000;
+        if ( effective_time_ms &&
+             throttle_age_ms < effective_time_ms ) {
+            // Should consider age.
+            exp_us *= (effective_time_ms - throttle_age_ms);
+            exp_us /= effective_time_ms;
+
+            double cur_us = elapsed_us;
+            if ( exp_us > cur_us ) {
+                // Throttle incoming writes.
+                double remaining_us = exp_us - cur_us;
+                if (remaining_us > 1.0) {
+                    Timer::sleepUs((uint64_t)remaining_us);
+                }
+            }
+        }
+    }
 }
 
 Status LogMgr::setSN(const Record& rec) {
@@ -546,41 +548,102 @@ Status LogMgr::setSN(const Record& rec) {
     }
 
     wm.unlock();
-    if (throttlingRate > 0) {
-        DBMgr* mgr = DBMgr::getWithoutInit();
-        GlobalConfig* g_config = mgr->getGlobalConfig();
+    execBackPressure(tt.getUs());
 
-        // Throttling.
-        double exp_us = 1000000.0 / throttlingRate.load();
+    numSetRecords.fetch_add(1);
+    return Status();
+}
 
-        size_t effective_time_ms =
-            std::min( lastFlushIntervalMs.load(),
-                      (int64_t)THROTTLING_EFFECTIVE_TIME_MS );
-        size_t num_log_files = mani->getNumLogFiles();
-        size_t log_files_limit = g_config->flusherMinLogFilesToTrigger * 2;
-        if (num_log_files > log_files_limit) {
-            effective_time_ms *= (num_log_files - log_files_limit);
+Status LogMgr::setMulti(const std::list<Record>& batch) {
+    Timer tt;
+
+    Status s;
+    uint64_t log_file_num = 0;
+    uint64_t max_log_file_num = 0;
+
+    if (parentDb) parentDb->p->updateOpHistory();
+
+    // Return error in read-only mode.
+    if (getDbConfig()->readOnly) return Status::WRITE_VIOLATION;
+
+    // `batch` should contain at least one record.
+    if (!batch.size()) return Status::EMPTY_BATCH;
+
+    DBMgr* dbm = DBMgr::getWithoutInit();
+    DebugParams dp = dbm->getDebugParams();
+
+    const Record& first_rec = *batch.begin();
+
+    // All writes will be serialized, except for throttling part.
+    std::unique_lock<std::recursive_mutex> wm(writeMutex); // -----------------
+
+    uint64_t max_seq = 0;
+    getMaxSeqNum(max_seq); // empty log should be tolerated.
+    visibleSeqBarrier = max_seq;
+    GcFunc gc_vs( [this]{ this->visibleSeqBarrier = 0; } );
+
+    // Get latest log file.
+    LogFileInfo* lf_info = nullptr;
+    do {
+        EP(mani->getMaxLogFileNum(max_log_file_num));
+        log_file_num = max_log_file_num;
+
+        if ( valid_number(first_rec.seqNum) &&
+             getDbConfig()->allowOverwriteSeqNum ) {
+            // Batch set doesn't allow overwriting existing seq numbers.
+            s = mani->getLogFileNumBySeq(first_rec.seqNum, log_file_num);
+            if (s) return Status::INVALID_SEQNUM;
         }
+        lf_info = mani->getLogFileInfoP(log_file_num);
 
-        uint64_t throttle_age_ms = throttlingRateTimer.getUs() / 1000;
-        if ( effective_time_ms &&
-             throttle_age_ms < effective_time_ms ) {
-            // Should consider age.
-            exp_us *= (effective_time_ms - throttle_age_ms);
-            exp_us /= effective_time_ms;
+    } while (!lf_info || lf_info->isRemoved());
+    LogFileInfoGuard g_li(lf_info);
 
-            double cur_us = tt.getUs();
-            if ( exp_us > cur_us ) {
-                // Throttle incoming writes.
-                double remaining_us = exp_us - cur_us;
-                if (remaining_us > 1.0) {
-                    Timer::sleepUs((uint64_t)remaining_us);
-                }
+    // Check given sequence numbers.
+    // It should be
+    //   1) all NOT_INITIALIZED or
+    //   2) increasing order greater than the current max.
+    if (!valid_number(first_rec.seqNum)) {
+        for (auto& entry: batch) {
+            const Record& rr = entry;
+            if (valid_number(rr.seqNum)) return Status::INVALID_SEQNUM;
+        }
+    } else {
+        uint64_t prev_seq = 0;
+        for (auto& entry: batch) {
+            const Record& rr = entry;
+            if ( !valid_number(rr.seqNum) ||
+                 rr.seqNum <= max_seq ||
+                 rr.seqNum <= prev_seq ) {
+                return Status::INVALID_SEQNUM;
             }
+            prev_seq = rr.seqNum;
         }
     }
 
-    numSetRecords.fetch_add(1);
+    for (auto& entry: batch) {
+        const Record& rr = entry;
+
+        // Don't need to consider overwriting.
+        if ( !g_li->file->isValidToWrite() ) {
+            addNewLogFile(g_li, g_li);
+
+            if (dp.addNewLogFileCb) {
+                dp.addNewLogFileCb(DebugParams::GenericCbParams());
+            }
+        }
+        EP( g_li->file->setSN(rr) );
+    }
+    if (dp.newLogBatchCb) {
+        dp.newLogBatchCb(DebugParams::GenericCbParams());
+    }
+
+    gc_vs.gcNow();
+    wm.unlock(); // -----------------------------------------------------------
+
+    execBackPressure(tt.getUs());
+    numSetRecords.fetch_add(batch.size());
+
     return Status();
 }
 
@@ -593,6 +656,14 @@ Status LogMgr::getSN(const uint64_t seq_num, Record& rec_out) {
     EP( mani->getLogFileInfoBySeq(seq_num, linfo) );
     LogFileInfoGuard gg(linfo);
     if (gg.empty() || gg.ptr->isRemoved()) {
+        return Status::KEY_NOT_FOUND;
+    }
+
+    uint64_t max_seq = gg->file->getMaxSeqNum();
+    uint64_t visible_seq_barrier = visibleSeqBarrier;
+    if ( seq_num > max_seq ||
+         ( visible_seq_barrier &&
+           seq_num > visible_seq_barrier ) ) {
         return Status::KEY_NOT_FOUND;
     }
 
@@ -615,13 +686,15 @@ Status LogMgr::get(const uint64_t chk,
 
     if (parentDb) parentDb->p->updateOpHistory();
 
+    uint64_t chk_local = chk;
     if (valid_number(chk)) {
         // Snapshot: beyond the last flushed log.
         assert(l_list);
         auto entry = l_list->rbegin();
         while (entry != l_list->rend()) {
             LogFileInfo* l_info = *entry;
-            s = l_info->file->get(chk, key, hash_values, rec_out, true);
+            s = l_info->file->get(chk_local, key, hash_values, rec_out,
+                                  true, true);
             if (s) return s;
             entry++;
         }
@@ -635,7 +708,8 @@ Status LogMgr::get(const uint64_t chk,
             for (int64_t ii = max_log_num; ii >= (int64_t)min_log_num; --ii) {
                 LogFileInfoGuard li(mani->getLogFileInfoP(ii));
                 if (li.empty() || li.ptr->isRemoved()) continue;
-                s = li->file->get(chk, key, hash_values, rec_out, true);
+                s = li->file->get(chk_local, key, hash_values, rec_out,
+                                  false, true);
                 if (s) {
                     return s;
                 }
@@ -653,7 +727,19 @@ Status LogMgr::get(const uint64_t chk,
             for (int ii = num-1; ii>=0; --ii) {
                 LogFileInfo* l_info = l_files[ii];
                 if (l_info->isRemoved()) continue;
-                s = l_info->file->get(chk, key, hash_values, rec_out, true);
+
+                // Reserve max seq number as a temporary snapshot.
+                chk_local = l_info->file->getMaxSeqNum();
+
+                // WARNING: Fetching `visibleSeqBarrier` should be done AFTER
+                //          fetching max seq number.
+                uint64_t visible_seq_barrier = visibleSeqBarrier;
+                if (visible_seq_barrier) {
+                    chk_local = std::min(chk_local, visible_seq_barrier);
+                }
+
+                s = l_info->file->get(chk_local, key, hash_values, rec_out,
+                                      false, true);
                 if (s) {
                     found = true;
                     break;
@@ -1139,6 +1225,12 @@ Status LogMgr::getMaxSeqNum(uint64_t& seq_num_out) {
     uint64_t ln_max = 0;
     uint64_t max_seq = NOT_INITIALIZED;
     const size_t MAX_TRY = 16;
+
+    uint64_t visible_seq_barrier = visibleSeqBarrier;
+    if (visible_seq_barrier) {
+        seq_num_out = visible_seq_barrier;
+        return Status();
+    }
 
    for (size_t num_tries = 0; num_tries < MAX_TRY; num_tries++) {
     EP( mani->getMaxLogFileNum(ln_max) );

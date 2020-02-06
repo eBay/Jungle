@@ -332,14 +332,11 @@ Status DB::setRecordByKey(const Record& rec) {
     return p->logMgr->setSN(rec_local);
 }
 
-Status DB::setRecordByKeyMulti(std::list<Record*>& batch,
-                               bool last_batch)
+Status DB::setRecordBatch(const std::list<Record>& batch)
 {
     Status s;
     EP( p->checkHandleValidity(DBInternal::OPTYPE_WRITE) );
-
-    if (!p->dbConfig.bulkLoading) return Status::INVALID_MODE;
-    return p->logMgr->setByBulkLoader(batch, p->tableMgr, last_batch);
+    return p->logMgr->setMulti(batch);
 }
 
 Status DB::getMaxSeqNum(uint64_t& seq_num_out) {
@@ -815,10 +812,10 @@ void DB::DBInternal::waitForBgTasks() {
               flags.onGoingBgTasks.load(), ticks);
 }
 
-void DB::DBInternal::updateOpHistory() {
+void DB::DBInternal::updateOpHistory(size_t amount) {
     DBMgr* mgr = DBMgr::getWithoutInit();
     if (!mgr) return;
-    mgr->updateOpHistory();
+    mgr->updateOpHistory(amount);
 }
 
 Status DB::DBInternal::checkHandleValidity(OpType op_type) {

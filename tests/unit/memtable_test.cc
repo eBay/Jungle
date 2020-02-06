@@ -61,7 +61,7 @@ int memtable_key_itr_test() {
         sprintf(valbuf, "value%zu_%zu", ii, idx[ii]);
         SizedBuf key(keybuf);
         Record rec_out;
-        CHK_Z(mt.getRecordByKey(NOT_INITIALIZED, key, nullptr, rec_out, false));
+        CHK_Z(mt.getRecordByKey(NOT_INITIALIZED, key, nullptr, rec_out, false, false));
         CHK_EQ(SizedBuf(valbuf), rec_out.kv.value);
     }
 
