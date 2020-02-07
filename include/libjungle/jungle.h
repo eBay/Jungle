@@ -137,6 +137,16 @@ struct DebugParams {
     uint64_t urgentCompactionRatio;
 
     /**
+     * If non-zero, compaction will be triggered when the accumulated
+     * number of writes to a DB is bigger than this number.
+     * e.g.) 10000 -> trigger compaction for every 10K writes.
+     *
+     * If `DbConfig::numWritesToCompact` is also set, smaller number
+     * will take effect.
+     */
+    uint64_t urgentCompactionNumWrites;
+
+    /**
      * If non-zero, every file removal or truncation during rollback
      * will sleep this amount of time.
      */
