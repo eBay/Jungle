@@ -361,12 +361,14 @@ void DBMgr::setDebugParams(const DebugParams& to,
               "compaction delay %zu %zu, "
               "urgent compaction size %zu, "
               "urgent compaction ratio %zu, "
+              "urgent compaction writes %zu, "
               "rollback delay %zu",
               effective_time_sec,
               debugParams.compactionDelayUs,
               debugParams.compactionItrScanDelayUs,
               debugParams.urgentCompactionFilesize,
               debugParams.urgentCompactionRatio,
+              debugParams.urgentCompactionNumWrites,
               debugParams.rollbackDelayUs);
 }
 

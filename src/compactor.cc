@@ -171,11 +171,23 @@ void Compactor::work(WorkerOptions* opt_base) {
                 if (found) break;
             }
 
+            uint64_t num_writes_to_compact = db_config.numWritesToCompact;
+            if ( dbm->isDebugParamsEffective() &&
+                 dbm->getDebugParams().urgentCompactionNumWrites ) {
+                if (!num_writes_to_compact) {
+                    num_writes_to_compact =
+                        dbm->getDebugParams().urgentCompactionNumWrites;
+                } else {
+                    num_writes_to_compact =
+                        std::min( num_writes_to_compact,
+                                  dbm->getDebugParams().urgentCompactionNumWrites );
+                }
+            }
             if ( !found &&
                  num_levels >= 2 &&
-                 db_config.numWritesToCompact &&
+                 num_writes_to_compact &&
                  dbwrap->db->p->tableMgr->getNumWrittenRecords() >
-                     db_config.numWritesToCompact ) {
+                     num_writes_to_compact ) {
                 target_db = dbwrap->db;
                 target_table = nullptr;
                 target_level = (std::rand() % (num_levels - 1)) + 1;
@@ -198,6 +210,8 @@ void Compactor::work(WorkerOptions* opt_base) {
             s = target_db->p->tableMgr->compactL0(c_opt, target_hash_num);
 
         } else {
+            target_db->p->tableMgr->resetNumWrittenRecords();
+
             if (target_strategy == TableMgr::INTERLEVEL) {
                 s = target_db->p->tableMgr->compactLevelItr
                     ( c_opt, target_table, target_level );
@@ -225,7 +239,6 @@ void Compactor::work(WorkerOptions* opt_base) {
                 assert(0);
             }
             if (target_table) target_table->done();
-            target_db->p->tableMgr->resetNumWrittenRecords();
         }
 
         // Do not sleep next time to continue
