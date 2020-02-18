@@ -68,8 +68,8 @@ public:
         , logFileTtl_sec(0)
         , maxKeepingMemtables(0)
         , maxKeepingCheckpoints(10)
-        , maxEntriesInLogFile(16384)        // 16K
-        , maxLogFileSize(4194304)           // 4MB
+        , maxEntriesInLogFile(16384)        // 16 KiB
+        , maxLogFileSize(4194304)           // 4 MiB
         , cmpFunc(nullptr)
         , cmpFuncParam(nullptr)
         , compactionCbFunc(nullptr)
@@ -77,7 +77,7 @@ public:
         , throttlingThreshold(10000)
         , bulkLoading(false)
         , numL0Partitions(4)
-        , minFileSizeToCompact(16777216)    // 16MB
+        , minFileSizeToCompact(16777216)    // 16 MiB
         , minBlockReuseCycleToCompact(0)
         , maxBlockReuseCycle(1)
         , compactionFactor(300)             // 300%
@@ -86,9 +86,9 @@ public:
         , useBloomFilterForGet(true)
         , bloomFilterBitsPerUnit(0.0)
         , nextLevelExtension(true)
-        , maxL0TableSize(1073741824)            // 1GB
-        , maxL1TableSize(2684354560)            // 2.5GB
-        , maxL1Size((uint64_t)120 * 1073741824) // 120 GB
+        , maxL0TableSize(1073741824)                // 1 GiB
+        , maxL1TableSize(2684354560)                // 2.5 GiB
+        , maxL1Size((uint64_t)1024 * 1073741824)    // 1 TiB
         , maxParallelWritesPerJob(0)
         , readOnly(false)
         , preFlushDirtyInterval_sec(5)

@@ -106,6 +106,7 @@ struct DebugParams {
         , tableSetBatchCb(nullptr)
         , addNewLogFileCb(nullptr)
         , newLogBatchCb(nullptr)
+        , forceMerge(false)
         {}
 
     /**
@@ -179,6 +180,12 @@ struct DebugParams {
      * visible.
      */
     std::function< void(const GenericCbParams&) > newLogBatchCb;
+
+    /**
+     * If true, merge will proceed the task even with the small number
+     * of tables in the level.
+     */
+    bool forceMerge;
 };
 
 using UserHandler = std::function< void(Status, void*) >;

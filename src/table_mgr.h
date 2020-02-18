@@ -189,6 +189,9 @@ public:
                            TableInfo* victim_table,
                            size_t level);
 
+    Status migrateLevel(const CompactOptions& options,
+                        size_t level);
+
     Status compactInPlace(const CompactOptions& options,
                           TableInfo* victim_table,
                           size_t level,
