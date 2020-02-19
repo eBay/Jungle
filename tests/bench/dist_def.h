@@ -180,7 +180,7 @@ struct DistDef {
      *
      * @return Information string.
      */
-    std::string toString() {
+    std::string toString() const {
         std::stringstream ss;
 
         if (type == RANDOM || type == NORMAL) {

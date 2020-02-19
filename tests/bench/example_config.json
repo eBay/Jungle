@@ -22,11 +22,13 @@
   "workers": [
     {
       "type": "writer",
-      "rate": 2000
+      "rate": 1000,
+      "num_clones": 2
     },
     {
       "type": "point_reader",
-      "rate": 2000
+      "rate": 2000,
+      "num_clones": 2
     },
     {
       "type": "range_reader",
@@ -42,12 +44,10 @@
     "cache_size_mb": 1024,
     "wal_size_mb": 64,
     "compaction_factor": 240,
-    "max_tiering_limit": 10,
-    "merge_mode": "appending",
     "block_reuse_factor": 0,
     "l0_table_size_mb": 1024,
     "l1_table_size_mb": 2560,
-    "l1_size_mb": 122880,
+    "l1_size_mb": 1048576,
     "bloom_filter_bits": 10.0,
     "num_table_writers": 8,
     "num_compactor_threads": 2
