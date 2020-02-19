@@ -93,12 +93,14 @@ struct TableInfo {
                       "ref count %zu -> %zu status %d mflag %s",
                       level, number, count, count-1, status.load(),
                       (migration ? "ON" : "OFF") );
-            // NOTE: We should not remove file object if this
-            //       table is being migrated to next level, as
-            //       next level's table info will reuse it.
-            if (count == 1 && !migration) {
-                file->destroySelf();
-                delete file;
+            if (count == 1) {
+                // NOTE: We should not remove file object if this
+                //       table is being migrated to next level, as
+                //       next level's table info will reuse it.
+                if (!migration) {
+                    file->destroySelf();
+                    delete file;
+                }
                 delete this;
             }
             return;
