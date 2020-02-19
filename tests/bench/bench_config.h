@@ -88,7 +88,12 @@ struct BenchConfig {
             for (size_t ii = 0; ii < num; ++ii) {
                 WorkerDef ww = WorkerDef::load(w_obj[ii]);
                 if (ww.type != WorkerDef::UNKNOWN) {
-                    conf.workerDefs.push_back(ww);
+                    size_t num_clones = 1;
+                    _jint(num_clones, w_obj[ii], "num_clones");
+
+                    for (size_t jj = 0; jj < num_clones; ++jj) {
+                        conf.workerDefs.push_back(ww);
+                    }
                 }
             }
         }

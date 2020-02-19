@@ -67,7 +67,7 @@ struct WorkerDef {
         return WorkerDef(type, rate, batch);
     }
 
-    std::string toString() {
+    std::string toString() const {
         char msg[128];
         static std::unordered_map<int, std::string>
             w_type_name
@@ -89,6 +89,25 @@ struct WorkerDef {
             ss << ", batch " << batchSize.toString();
         }
         return ss.str();
+    }
+
+    std::string getThreadName() const {
+        std::string ret = "bench_";
+        switch (type) {
+        case WRITER:
+            ret += "w";
+            break;
+        case POINT_READER:
+            ret += "p";
+            break;
+        case RANGE_READER:
+            ret += "r";
+            break;
+        default:
+            ret += "u";
+            break;
+        }
+        return ret;
     }
 
     Type type;

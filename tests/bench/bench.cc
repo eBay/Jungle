@@ -526,7 +526,8 @@ int bench_worker(TestSuite::ThreadArgs* base_args) {
     const WorkerDef& my_def = args->conf.workerDefs[args->wId];
 
 #ifdef __linux__
-    std::string t_name = "bench_w_" + std::to_string(args->wId);
+    std::string t_name = my_def.getThreadName() + "_" +
+                         std::to_string(args->wId);
     pthread_setname_np(pthread_self(), t_name.c_str());
 #endif
 
@@ -681,12 +682,12 @@ int displayer(TestSuite::ThreadArgs* base_args) {
                 dd.set( 4, 2, "--" );
             }
             // Instant write throughput.
-            dd.set( 4, 3, "%s/s",
+            dd.set( 4, 3, "I %s/s",
                     TestSuite::sizeThroughputStr
                                ( w_amt - args->stat.amountWriteByte,
                                  inst_time_us ).c_str() );
             // Average write throughput.
-            dd.set( 4, 4, "%s/s",
+            dd.set( 4, 4, "A %s/s",
                     TestSuite::sizeThroughputStr
                                ( w_amt, tt.getTimeUs() ).c_str() );
             args->stat.amountWriteByte = w_amt;
@@ -698,9 +699,9 @@ int displayer(TestSuite::ThreadArgs* base_args) {
             cpu_inst_base = cur_cpu_ms;
             args->stat.cpuMs = cpu_ms;
             // Instant usage (since last display).
-            dd.set( 6, 1, "%.1f %%", (double)cpu_ms_inst / inst_time_ms * 100 );
+            dd.set( 6, 1, "I %.1f %%", (double)cpu_ms_inst / inst_time_ms * 100 );
             // Overall average.
-            dd.set( 6, 2, "%.1f %%", (double)cpu_ms / tt.getTimeMs() * 100 );
+            dd.set( 6, 2, "A %.1f %%", (double)cpu_ms / tt.getTimeMs() * 100 );
 
             // RSS.
             uint64_t rss_amount = get_mem_usage();
