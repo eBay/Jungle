@@ -456,7 +456,7 @@ Status TableManifest::removeTableFile(size_t level,
                        t_info->minKey.toReadableString().c_str(),
                        t_info->refCount.load(),
                        cur_level->numTables.load() );
-
+            return Status();
         }
         cursor = skiplist_next(cur_level->tables, cursor);
         skiplist_release_node(&t_info->snode);

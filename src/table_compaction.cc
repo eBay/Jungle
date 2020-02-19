@@ -40,6 +40,10 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     DebugParams d_params = mgr->getDebugParams();
 
     bool is_last_level = (level + 1 == mani->getNumLevels());
+    if (is_last_level && level >= 1) {
+        return migrateLevel(options, level);
+    }
+
     TableInfo* local_victim = findLocalVictim( level, victim_table,
                                                WORKING_SET_SIZE, false );
     if (!local_victim) return Status::TABLE_NOT_FOUND;
@@ -376,6 +380,29 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
             rr.tFile = nullptr;
         }
         mani->removeTableFile(level, local_victim);
+
+        // NOTE:
+        //   As an optimization, if this level is neither zero nor last one,
+        //   create an empty table for the same range, to avoid unnecessary
+        //   split in the future.
+        //
+        //   This operation will be safe against the race with compaction
+        //   that tries to write some keys into this range, as long as we
+        //   hold lock for `local_victim`.
+        if (level > 0 && !is_last_level) {
+            size_t num_tables_lv = 0;
+            // Only if the number of tables is not enough, if there are
+            // many (more than the threshold), we don't need to do this.
+            mani->getNumTables(level, num_tables_lv);
+            if (num_tables_lv < db_config->numL0Partitions * 2) {
+                TableFileOptions t_opt;
+                TableFile* cur_file = nullptr;
+                s = createNewTableFile(level, cur_file, t_opt);
+                if (s) {
+                    mani->addTableFile(level, 0, local_victim->minKey, cur_file);
+                }
+            }
+        }
     }
 
     // WARNING:
@@ -415,6 +442,83 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
 
     for (TableInfo*& entry: tables) entry->done();
     for (RecGroupItr*& entry: new_tables) delete entry;
+    return s;
+   }
+}
+
+Status TableMgr::migrateLevel(const CompactOptions& options,
+                              size_t level)
+{
+    if (level >= mani->getNumLevels()) return Status::INVALID_LEVEL;
+
+    Status s;
+    Timer tt;
+    SizedBuf empty_key;
+
+    // Only the current last level can do this.
+    bool is_last_level = (level + 1 == mani->getNumLevels());
+    if (!is_last_level) return Status::INVALID_LEVEL;
+
+    _log_info( myLog, "interlevel compaction %zu -> %zu, do migration",
+               level, level+1 );
+
+    // List of overlapping tables (before compaction) in the next level.
+    std::list<TableInfo*> tables;
+    mani->getTablesRange(level, empty_key, empty_key, tables);
+    if (tables.empty()) return Status::INVALID_LEVEL;
+
+   try {
+    // Lock level (only one interlevel compaction is allowed at a time).
+    LevelLockHolder lv_holder(this, level);
+    if (!lv_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    // Lock all tables in the current level.
+    // The other tables will be locked below (in `setBatchLsm()`).
+    TableLockHolder tl_src_holder(this, table_list_to_number(tables));
+    if (!tl_src_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    mani->extendLevel();
+
+    {   // Grab lock, add first, and then remove next.
+        std::lock_guard<std::mutex> l(mani->getLock());
+
+        // WARNING:
+        //   We should add in descending order of min key.
+        //   Otherwise, if there is a point query in the middle,
+        //   it may go to wrong (newly created) table which
+        //   causes false "key not found".
+        auto eer = tables.rbegin();
+        while (eer != tables.rend()) {
+            TableInfo* ti = *eer;
+            ti->setMigration();
+            TC( mani->addTableFile( level + 1, 0, ti->minKey, ti->file ) );
+            eer++;
+        }
+
+        auto eef = tables.begin();
+        while (eef != tables.end()) {
+            TableInfo* ti = *eef;
+            mani->removeTableFile(level, ti);
+            eef++;
+        }
+    }
+
+    mani->store();
+    mani->sync();
+
+    // Update throttling rate.
+    uint64_t elapsed_us = std::max( tt.getUs(), (uint64_t)1 );
+    _log_info( myLog, "migration done: compaction %zu -> %zu, "
+               "%zu moved tables, %zu us",
+               level, level+1, tables.size(), elapsed_us );
+
+    for (TableInfo*& entry: tables) entry->done();
+    return Status();
+
+   } catch (Status s) { // ------------------------------------------------
+    _log_err(myLog, "compaction failed: %d", (int)s);
+
+    for (TableInfo*& entry: tables) entry->done();
     return s;
    }
 }

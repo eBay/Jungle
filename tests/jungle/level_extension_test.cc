@@ -177,10 +177,11 @@ int interlevel_compaction_cancel_test() {
     CHK_Z(jungle::DB::open(&db, filename, config));
 
     size_t NUM = 10000;
+    const char V_FMT_ORIG[] = "vo%0100zu";
     const char V_FMT[] = "v%0100zu";
 
     // Write KVs.
-    CHK_Z(_set_keys(db, 0, NUM, 1, "k%06zu", V_FMT));
+    CHK_Z(_set_keys(db, 0, NUM, 1, "k%06zu", V_FMT_ORIG));
 
     // Sync & flush.
     CHK_Z(db->sync(false));
@@ -188,6 +189,17 @@ int interlevel_compaction_cancel_test() {
 
     // Do L0 compaction.
     jungle::CompactOptions c_opt;
+    for (size_t ii=0; ii<config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(c_opt, ii));
+    }
+
+    // Do initial interlevel compaction to extend level.
+    CHK_Z( db->compactLevel(c_opt, 1) );
+
+    // Write more keys.
+    CHK_Z(_set_keys(db, 0, NUM, 1, "k%06zu", V_FMT));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
     for (size_t ii=0; ii<config.numL0Partitions; ++ii) {
         CHK_Z(db->compactL0(c_opt, ii));
     }
@@ -384,34 +396,11 @@ int split_cancel_test() {
 
     // Set delay for split.
     jungle::DebugParams d_params;
-    // 150 ms per record.
-    d_params.compactionDelayUs = 150*1000;
-    jungle::setDebugParams(d_params);
-
-    // Interlevel compaction.
-    WorkerArgs w_args;
-    w_args.db = db;
-    w_args.type = WorkerArgs::INTERLEVEL;
-    w_args.expResult = jungle::Status::COMPACTION_CANCELLED;
-    TestSuite::ThreadHolder h(&w_args, compaction_worker, nullptr);
-    TestSuite::sleep_sec(1, "wait for worker to start");
-
-    // Close DB, it should cancel the interlevel compaction.
-    CHK_Z(jungle::DB::close(db));
-    h.join();
-    CHK_Z(h.getResult());
-
-    CHK_Z(jungle::DB::open(&db, filename, config));
-
-    // Check.
-    CHK_Z(_get_keys(db, 0, NUM, 1, "k%06zu", V_FMT));
-    CHK_Z(_iterate_keys(db, 0, NUM-1, 1, "k%06zu", V_FMT));
-
-    // Again, set delay to 2nd phase at this time.
     d_params.compactionDelayUs = 0;
     d_params.compactionItrScanDelayUs = 150*1000;
     jungle::setDebugParams(d_params);
 
+    WorkerArgs w_args;
     w_args.db = db;
     w_args.type = WorkerArgs::SPLIT;
     w_args.expResult = jungle::Status::COMPACTION_CANCELLED;
@@ -510,6 +499,7 @@ int merge_cancel_test() {
     // Set delay for merge.
     jungle::DebugParams d_params;
     d_params.compactionItrScanDelayUs = 500*1000;
+    d_params.forceMerge = true;
     jungle::setDebugParams(d_params);
 
     // Merge.
@@ -541,6 +531,11 @@ int merge_cancel_test() {
     CHK_Z(_non_existing_keys(db, 0, NUM/2, 1, "k%06zu"));
     CHK_Z(_get_keys(db, NUM/2, NUM, 1, "k%06zu", V_FMT));
     CHK_Z(_iterate_keys(db, NUM/2, NUM-1, 1, "k%06zu", V_FMT));
+
+    // Merge should fail if we clear force flag.
+    d_params.forceMerge = false;
+    jungle::setDebugParams(d_params);
+    CHK_GT( 0, db->mergeLevel(c_opt, 1) );
 
     CHK_Z(jungle::DB::close(db));
     CHK_Z(jungle::shutdown());

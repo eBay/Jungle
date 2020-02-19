@@ -58,6 +58,7 @@ struct TableInfo {
         , file(nullptr)
         , refCount(0)
         , removed(false)
+        , migration(false)
         , status( query_purpose ? QUERY_PURPOSE : NORMAL )
         , stack(nullptr)
         , baseTable(true)
@@ -89,11 +90,17 @@ struct TableInfo {
             uint64_t count = refCount.fetch_sub(1);
             SimpleLogger* temp = file->getLogger();
             _log_info(temp, "removed level %zu file %zu "
-                      "ref count %zu -> %zu status %d",
-                      level, number, count, count-1, status.load());
+                      "ref count %zu -> %zu status %d mflag %s",
+                      level, number, count, count-1, status.load(),
+                      (migration ? "ON" : "OFF") );
             if (count == 1) {
-                file->destroySelf();
-                delete file;
+                // NOTE: We should not remove file object if this
+                //       table is being migrated to next level, as
+                //       next level's table info will reuse it.
+                if (!migration) {
+                    file->destroySelf();
+                    delete file;
+                }
                 delete this;
             }
             return;
@@ -105,6 +112,9 @@ struct TableInfo {
     uint64_t getRefCount() const { return refCount.load(MOR); }
     void setRemoved()   { removed.store(true, MOR); }
     bool isRemoved()    { return removed.load(MOR); }
+
+    void setMigration()   { migration.store(true, MOR); }
+    bool isMigrating()    { return migration.load(MOR); }
 
     void setCompactSrc()    { return status.store(COMPACT_SRC, MOR); }
     void setNormal()        { return status.store(NORMAL, MOR); }
@@ -135,6 +145,9 @@ struct TableInfo {
 
     // Flag indicating whether or not this file is removed.
     std::atomic<bool> removed;
+
+    // Flag indicating that this table is being migrated.
+    std::atomic<bool> migration;
 
     // Current table status.
     std::atomic<Status> status;
