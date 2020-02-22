@@ -105,7 +105,7 @@ fdb_config TableFile::FdbHandle::getFdbSettings(const DBConfig* db_config) {
     //   to new file, which may spoil the block cache of ForestDB,
     //   due to unnecessary doc block caching that will not be read again.
     //   We should disable caching doc block.
-    config.do_not_cache_doc_blocks = false;
+    config.do_not_cache_doc_blocks = true;
 
     // Disable auto compaction,
     // temporarily enable block reuse.
