@@ -22,6 +22,8 @@ limitations under the License.
 #include "skiplist.h"
 #include "table_mgr.h"
 
+#include <third_party/forestdb/include/libforestdb/forestdb.h>
+
 #include <iostream>
 #include <sstream>
 
@@ -129,6 +131,9 @@ void CmdHandler::handleCmd(DBWrap* target_dbw) {
     } else if ( tokens[0] == "loglevel" ) {
         ret_str = hLogLevel(target_dbw, tokens);
 
+    } else if ( tokens[0] == "logcachestats" ) {
+        ret_str = hLogCacheStats(target_dbw, tokens);
+
     }
 
     std::ofstream ofs;
@@ -186,6 +191,16 @@ std::string CmdHandler::hLogLevel(DBWrap* target_dbw,
            << " " << new_lv << std::endl;
     }
     return ss.str();
+}
+
+std::string CmdHandler::hLogCacheStats(DBWrap* target_dbw,
+                                       const std::vector<std::string>& tokens)
+{
+    DBMgr* dbm = DBMgr::getWithoutInit();
+    if (!dbm) return "DB manager not found";
+
+    fdb_print_cache_stats();
+    return "done, path: " + dbm->getGlobalConfig()->globalLogPath;
 }
 
 } // namespace jungle
