@@ -106,6 +106,7 @@ Status TableMgr::pickVictimTable(size_t level,
                 stack_size++;
             }
         }
+        wss_avg += w_size;
 
         _log_trace( myLog, "table %zu wss %zu total %zu policy %d",
                     t_info->number, w_size, t_size, policy );
@@ -173,7 +174,6 @@ Status TableMgr::pickVictimTable(size_t level,
         } else {
             assert(0);
         }
-        wss_avg += w_size;
     }
     if (tables.size()) {
         wss_avg /= tables.size();
