@@ -6,6 +6,7 @@ set -ex
 RECOMPILE_FDB=true
 
 if [ -d third_party/forestdb ]; then
+    git submodule update
     pushd third_party/forestdb
     if [ $(git rev-parse HEAD) == ${FORESTDB_COMMIT} ]; then
         RECOMPILE_FDB=false
@@ -14,7 +15,6 @@ if [ -d third_party/forestdb ]; then
         RECOMPILE_FDB=true
     fi
     popd
-    git submodule update
 fi
 
 if [ ! -f third_party/forestdb/CMakeLists.txt ]; then
