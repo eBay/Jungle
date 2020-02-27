@@ -116,6 +116,7 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     }
 
     uint64_t acc_size = 0;
+    uint64_t acc_records = 0;
     if ( !min_table || min_key_victim < min_table->minKey ) {
         // Should create a new table for min key.
         cur_group = new RecGroupItr(SizedBuf(), 0, nullptr);
@@ -141,15 +142,18 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
             TableStats stats_out;
             cur_group->table->file->getStats(stats_out);
             acc_size = stats_out.workingSetSizeByte;
-            _log_info( myLog, "acc size of table %zu: %zu",
+            acc_records = stats_out.numKvs;
+            _log_info( myLog, "acc size of table %zu: %zu, %zu records",
                        cur_group->table->number,
-                       acc_size );
+                       acc_size,
+                       acc_records );
         }
     }
 
     // Read all records from the victim table.
     uint64_t num_records_read = 0;
     uint64_t TABLE_LIMIT = db_config->getMaxTableSize(level + 1);
+    uint64_t TABLE_LIMIT_NUM = 0;
     size_t min_num_tables_for_new_level =
         std::max( (size_t)db_config->numL0Partitions * 2,
                   db_config->getMaxParallelWriters() );
@@ -161,13 +165,20 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
         // (basic assumption is that L0 is hash-partitioned so that it
         //  won't harm the key distribution of L1).
         uint64_t tmp_backup = TABLE_LIMIT;
+
         TABLE_LIMIT = victim_stats.workingSetSizeByte / min_num_tables_for_new_level;
         if (!TABLE_LIMIT) TABLE_LIMIT = tmp_backup;
-        _log_info(myLog, "table limit is adjusted to %zu, "
-                  "num tables %zu, victim WSS %zu",
+
+        TABLE_LIMIT_NUM = (victim_stats.numKvs / min_num_tables_for_new_level) + 1;
+        if (!TABLE_LIMIT_NUM) TABLE_LIMIT_NUM = tmp_backup;
+
+        _log_info(myLog, "table limit is adjusted to %zu and %zu, "
+                  "num tables %zu, victim WSS %zu, %zu records",
                   TABLE_LIMIT,
+                  TABLE_LIMIT_NUM,
                   min_num_tables_for_new_level,
-                  victim_stats.workingSetSizeByte);
+                  victim_stats.workingSetSizeByte,
+                  victim_stats.numKvs);
     }
 
     SizedBuf empty_key;
@@ -204,6 +215,7 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
                                          next_table );
             new_tables.push_back(cur_group);
             acc_size = 0;
+            acc_records = 0;
 
             // Skip tables whose range is not overlapping.
             while (t_itr != tables.end()) {
@@ -221,9 +233,11 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
                 TableStats stats_out;
                 cur_group->table->file->getStats(stats_out);
                 acc_size = stats_out.workingSetSizeByte;
-                _log_info( myLog, "acc size of table %zu: %zu",
+                acc_records = stats_out.numKvs;
+                _log_info( myLog, "acc size of table %zu: %zu, %zu records",
                            cur_group->table->number,
-                           acc_size );
+                           acc_size,
+                           acc_records );
             }
 
             if (next_table) {
@@ -236,29 +250,35 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
                            rec_out.kv.key.toReadableString().c_str() );
             }
 
-        } else if ( acc_size > TABLE_LIMIT ) {
+        } else if ( acc_size > TABLE_LIMIT ||
+                    ( TABLE_LIMIT_NUM &&
+                      acc_records > TABLE_LIMIT_NUM ) ) {
             // If not, but accumulated size exceeds the limit,
             // move to a new table that is not in `tables`.
             //
             // BUT, ONLY WHEN THE KEY IS BIGGER THAN THE LAST TABLE'S MAX KEY.
             if (rec_out.kv.key > max_key_table) {
                 _log_info( myLog, "rec key %s is greater than max table key %s, "
-                           "urgent split at level %zu, acc size %zu, limit %zu",
+                           "urgent split at level %zu, acc size %zu, "
+                           "acc records %zu, limit %zu",
                            rec_out.kv.key.toReadableString().c_str(),
                            max_key_table.toReadableString().c_str(),
                            level + 1,
                            acc_size,
+                           acc_records,
                            TABLE_LIMIT );
                 cur_group = new RecGroupItr( rec_out.kv.key,
                                              cur_index,
                                              nullptr);
                 new_tables.push_back(cur_group);
                 acc_size = 0;
+                acc_records = 0;
             }
             // We SHOULD NOT move table cursor (`t_itr`) here.
         }
 
         acc_size += (rec_out.size() + value_size_out + APPROX_META_SIZE);
+        acc_records++;
         num_records_read++;
 
         if (d_params.compactionDelayUs) {

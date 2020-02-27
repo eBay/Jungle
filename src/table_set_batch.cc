@@ -72,6 +72,11 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
    try {
     for (uint64_t ii = start_index; ii < start_index + count; ++ii) {
         if (!isCompactionAllowed()) {
+            // To avoid file corruption, we should flush all cached pages
+            // even for cancel.
+            Timer cancel_timer;
+            dst_file->sync();
+            _log_info(myLog, "cancel sync %zu us", cancel_timer.getUs());
             throw Status(Status::COMPACTION_CANCELLED);
         }
 
