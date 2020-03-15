@@ -316,7 +316,8 @@ Status BackupRestore::backup(FileOps* f_ops,
 Status BackupRestore::backup(FileOps* f_ops,
                              const std::string& filename,
                              const SizedBuf& ctx,
-                             size_t length)
+                             size_t length,
+                             bool call_fsync)
 {
     Status s;
     std::string dst_file = filename + ".bak";
@@ -327,6 +328,9 @@ Status BackupRestore::backup(FileOps* f_ops,
     TC( f_ops->open(&d_file, dst_file) );
     TC( f_ops->pwrite(d_file, ctx.data, length, 0) );
     f_ops->ftruncate(d_file, length);
+    if (call_fsync) {
+        f_ops->fsync(d_file);
+    }
     f_ops->close(d_file);
     delete d_file;
     return s;

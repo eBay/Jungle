@@ -204,7 +204,7 @@ public:
     Status load(const std::string& path,
                 const std::string& filename,
                 const uint64_t prefix_num);
-    Status store();
+    Status store(bool call_fsync);
     static Status copyFile(FileOps* f_ops,
                            const std::string& src_file,
                            const std::string& dst_file);
@@ -212,7 +212,6 @@ public:
                          const std::string& filename);
     static Status restore(FileOps* f_ops,
                           const std::string& filename);
-    Status sync();
 
     Status issueLogFileNumber(uint64_t& new_log_file_number);
 
