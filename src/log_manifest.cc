@@ -214,7 +214,7 @@ Status LogManifest::create(const std::string& path,
     EP( fOps->open(&mFile, mFileName.c_str()) );
 
     // Store initial data.
-    EP( store() );
+    EP( store(true) );
 
     spawnReclaimer();
     return Status();
@@ -432,13 +432,10 @@ Status LogManifest::load(const std::string& path,
    }
 }
 
-Status LogManifest::store() {
+Status LogManifest::store(bool call_fsync) {
     if (mFileName.empty() || !fOps) return Status::NOT_INITIALIZED;
 
     Status s;
-
-    // Tolerate backup failure.
-    //BackupRestore::backup(fOps, mFileName);
 
     SizedBuf mani_buf(4096);
     SizedBuf::Holder h_mani_buf(mani_buf);
@@ -500,16 +497,16 @@ Status LogManifest::store() {
     // Should truncate tail.
     fOps->ftruncate(mFile, ss.pos());
 
+    if (call_fsync) {
+        fOps->fsync(mFile);
+    }
+
     // After success, make a backup file one more time,
     // using the latest data.
     // Same as above, tolerate backup failure.
-    BackupRestore::backup(fOps, mFileName, mani_buf, ss.pos());
+    BackupRestore::backup(fOps, mFileName, mani_buf, ss.pos(), call_fsync);
 
     return s;
-}
-
-Status LogManifest::sync() {
-    return fOps->fsync(mFile);
 }
 
 Status LogManifest::issueLogFileNumber(uint64_t& new_log_file_number) {

@@ -123,8 +123,7 @@ Status LogMgr::init(const LogMgrOptions& _options) {
        }
 
         // Sync manifest file.
-        mani->store();
-        mani->sync();
+        mani->store(true);
     }
     mani->setLogger(myLog);
 
@@ -247,8 +246,7 @@ Status LogMgr::rollback(uint64_t seq_upto) {
 
     // Adjust manifest, and store.
     mani->setLastSyncedLog(linfo->logFileNum);
-    mani->store();
-    mani->sync();
+    mani->store(true);
     _log_info(myLog, "[ROLLBACK] now %zu is the last seqnum", seq_upto);
 
     DBMgr::get()->forceRemoveFiles();
@@ -298,8 +296,7 @@ Status LogMgr::removeStaleFiles() {
 
     if (need_mani_sync) {
         // Should sync manifest file.
-        mani->store();
-        mani->sync();
+        mani->store(true);
         _log_info(myLog, "done manifest sync for stale file removal");
     }
 
@@ -423,8 +420,8 @@ Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
                   new_log_num, _seq_str(start_seqnum).c_str());
 
         // Sync manifest file.
-        mani->store();
-        //mani->sync();
+        mani->store(false);
+
     } else {
         // Otherwise, other thread already added a new log file.
         ll.unlock();
@@ -835,10 +832,7 @@ Status LogMgr::syncInternal(bool call_fsync) {
 
     // Sync up manifest file next
     mani->setLastSyncedLog(last_synced_log);
-    EP( mani->store() );
-    if (call_fsync) {
-        EP( mani->sync() );
-    }
+    EP( mani->store(call_fsync) );
     _log_(log_level, myLog, "updated log manifest file.");
 
     return Status();
@@ -993,8 +987,7 @@ Status LogMgr::flush(const FlushOptions& options,
     }
 
     // Store log & table manifest file.
-    EP( mani->store() );
-    EP( mani->sync() );
+    EP( mani->store(true) );
     _log_debug(myLog, "Updated log manifest file.");
 
     if (num_records_flushed) {
