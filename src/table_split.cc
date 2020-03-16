@@ -254,8 +254,7 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
         }
         mani->removeTableFile(level, victim_table);
     }
-    mani->store();
-    mani->sync();
+    mani->store(true);
 
     elapsed_us = std::max( tt.getUs(), (uint64_t)1 );
     double split_rate = (double)num_records_read * 1000000 / elapsed_us;
@@ -417,8 +416,7 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
     if (!victim_table) local_victim->done();
     if (target_table) target_table->done();
 
-    mani->store();
-    mani->sync();
+    mani->store(true);
 
     return Status();
 

@@ -38,8 +38,7 @@ public:
                   const std::string& filename);
     Status load(const std::string& path,
                 const std::string& filename);
-    Status store();
-    Status sync();
+    Status store(bool call_fsync);
     Status addNewKVS(const std::string& kvs_name);
     Status getKVSID(const std::string& kvs_name,
                     uint64_t& kvs_id_out);

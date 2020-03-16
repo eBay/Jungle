@@ -107,7 +107,7 @@ Status TableManifest::create(const std::string& path,
     levels[0] = new LevelInfo();
 
     // Store initial data.
-    EP(store());
+    EP( store(false) );
 
     return Status();
 }
@@ -230,11 +230,10 @@ Status TableManifest::load(const std::string& path,
    }
 }
 
-Status TableManifest::store() {
+Status TableManifest::store(bool call_fsync) {
     if (mFileName.empty() || !fOps) return Status::NOT_INITIALIZED;
 
     Status s;
-    //EP(BackupRestore::backup(fOps, mFileName));
 
     RwSerializer ss(fOps, mFile);
 
@@ -316,9 +315,13 @@ Status TableManifest::store() {
     // Should truncate tail.
     fOps->ftruncate(mFile, ss.pos());
 
+    if (call_fsync) {
+        fOps->fsync(mFile);
+    }
+
     // After success, make a backup file one more time,
     // using the latest data.
-    EP(BackupRestore::backup(fOps, mFileName));
+    EP( BackupRestore::backup(fOps, mFileName, call_fsync) );
 
     return Status();
 }
@@ -341,10 +344,6 @@ Status TableManifest::storeTableStack(RwSerializer& ss,
         cur_table->file->appendCheckpoints(ss);
     }
     return Status();
-}
-
-Status TableManifest::sync() {
-    return fOps->fsync(mFile);
 }
 
 Status TableManifest::extendLevel() {

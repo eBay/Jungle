@@ -430,8 +430,7 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     //   If not, caller is responsible to release the table.
     if (!victim_table) local_victim->done();
 
-    mani->store();
-    mani->sync();
+    mani->store(true);
 
     // Update throttling rate.
     elapsed_us = std::max( tt.getUs(), (uint64_t)1 );
@@ -523,8 +522,7 @@ Status TableMgr::migrateLevel(const CompactOptions& options,
         }
     }
 
-    mani->store();
-    mani->sync();
+    mani->store(true);
 
     // Update throttling rate.
     uint64_t elapsed_us = std::max( tt.getUs(), (uint64_t)1 );
@@ -606,8 +604,7 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
     //   If not, caller is responsible to release the table.
     if (!victim_table) local_victim->done();
 
-    mani->store();
-    mani->sync();
+    mani->store(true);
     _log_info(myLog, "in-place compaction at level %zu done, %zu us",
               level, tt.getUs());
 
@@ -781,8 +778,7 @@ Status TableMgr::compactL0(const CompactOptions& options,
     }
 
     // Store manifest file.
-    mani->store();
-    mani->sync();
+    mani->store(true);
 
     if ( !dst_filename.empty() &&
          opt.fOps->exist(dst_filename) ) {
@@ -842,8 +838,7 @@ Status TableMgr::compactL0(const CompactOptions& options,
         for (TableInfo*& table: tables) table->done();
 
         // Store manifest file.
-        mani->store();
-        mani->sync();
+        mani->store(true);
 
     } else {
         // Level-extension mode:
@@ -868,8 +863,7 @@ Status TableMgr::compactL0(const CompactOptions& options,
         _log_warn( global_log, "[COMPACTION ERROR]: %s, %d",
                    s_log_msg_prefix.str().c_str(), s );
     }
-    mani->store();
-    mani->sync();
+    mani->store(true);
 
     for (TableInfo*& table: tables) table->done();
     compactStatus[hash_num]->store(false);

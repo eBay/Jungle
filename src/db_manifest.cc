@@ -60,7 +60,7 @@ Status DBManifest::create(const std::string& path,
     _log_info(myLog, "Create new DB manifest %s", mFileName.c_str());
     fOps->open(&mFile, mFileName.c_str());
 
-    store();
+    store(false);
 
     return Status();
 }
@@ -132,14 +132,13 @@ Status DBManifest::load(const std::string& path,
     return Status();
 }
 
-Status DBManifest::store()
+Status DBManifest::store(bool call_fsync)
 {
     if (mFileName.empty() || !fOps) return Status::NOT_INITIALIZED;
 
     _log_debug(myLog, "Store DB manifest %s", mFileName.c_str());
 
     Status s;
-    EP(BackupRestore::backup(fOps, mFileName));
 
     SizedBuf mani_buf(512);
     SizedBuf::Holder h_mani_buf(mani_buf);
@@ -181,16 +180,15 @@ Status DBManifest::store()
     // Should truncate tail.
     fOps->ftruncate(mFile, ss.pos());
 
+    if (call_fsync) {
+        fOps->fsync(mFile);
+    }
+
     // After success, make a backup file one more time,
     // using the latest data.
-    EP(BackupRestore::backup(fOps, mFileName));
+    EP( BackupRestore::backup(fOps, mFileName, call_fsync) );
 
     return Status();
-}
-
-Status DBManifest::sync()
-{
-    return fOps->fsync(mFile);
 }
 
 Status DBManifest::addNewKVS(const std::string& kvs_name)
