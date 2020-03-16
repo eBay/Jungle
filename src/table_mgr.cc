@@ -226,8 +226,7 @@ Status TableMgr::init(const TableMgrOptions& _options) {
         }
 
         // Store manifest file.
-        mani->store();
-        mani->sync();
+        mani->store(true);
     }
     logTableSettings(db_config);
 
@@ -344,8 +343,7 @@ Status TableMgr::closeSnapshot(DB* snap_handle) {
 
 Status TableMgr::storeManifest() {
     Status s;
-    EP(mani->store());
-    EP(mani->sync());
+    EP( mani->store(true) );
     return Status();
 }
 

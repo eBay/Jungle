@@ -170,10 +170,9 @@ public:
     Status load(const std::string& path,
                 const uint64_t prefix_num,
                 const std::string& filename);
-    Status store();
+    Status store(bool call_fsync);
     Status storeTableStack(RwSerializer& ss, TableInfo* base_table);
 
-    Status sync();
     Status extendLevel();
     Status issueTableNumber(uint64_t& new_table_number);
     Status addTableFile(size_t level_num,

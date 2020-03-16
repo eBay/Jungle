@@ -120,9 +120,11 @@ class BackupRestore {
 public:
     static Status copyFile(FileOps* f_ops,
                            const std::string& src_file,
-                           const std::string& dst_file);
+                           const std::string& dst_file,
+                           bool call_fsync);
     static Status backup(FileOps* f_ops,
-                         const std::string& filename);
+                         const std::string& filename,
+                         bool call_fsync);
     static Status backup(FileOps* f_ops,
                          const std::string& filename,
                          const SizedBuf& ctx,

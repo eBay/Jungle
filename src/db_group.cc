@@ -123,8 +123,7 @@ Status DBGroup::openDB(DB** ptr_out,
         s = db->p->mani->getKVSID(db_name, db->p->kvsID);
         if (!s) return s;
 
-        db->p->mani->store();
-        db->p->mani->sync();
+        db->p->mani->store(true);
     }
 
     db->p->kvsName = db_name;

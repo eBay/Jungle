@@ -771,8 +771,7 @@ void DB::DBInternal::destroy() {
 
     if (!kvsID) { // Only default DB.
         if (!dbConfig.readOnly) {
-            mani->store();
-            mani->sync();
+            mani->store(true);
         }
         DELETE(mani);
     }

@@ -267,7 +267,8 @@ bool RwSerializer::available(size_t nbyte) {
 
 Status BackupRestore::copyFile(FileOps* f_ops,
                                const std::string& src_file,
-                               const std::string& dst_file)
+                               const std::string& dst_file,
+                               bool call_fsync)
 {
     Status s;
     if (!f_ops->exist(src_file)) return Status::FILE_NOT_EXIST;
@@ -286,6 +287,9 @@ Status BackupRestore::copyFile(FileOps* f_ops,
     TC( f_ops->pread(s_file, tmp_buf.data, tmp_buf.size, 0) );
     TC( f_ops->pwrite(d_file, tmp_buf.data, tmp_buf.size, 0) );
     f_ops->ftruncate(d_file, file_size);
+    if (call_fsync) {
+        f_ops->fsync(d_file);
+    }
 
     f_ops->close(s_file);
     f_ops->close(d_file);
@@ -308,9 +312,10 @@ Status BackupRestore::copyFile(FileOps* f_ops,
 }
 
 Status BackupRestore::backup(FileOps* f_ops,
-                             const std::string& filename)
+                             const std::string& filename,
+                             bool call_fsync)
 {
-    return copyFile(f_ops, filename, filename + ".bak");
+    return copyFile(f_ops, filename, filename + ".bak", call_fsync);
 }
 
 Status BackupRestore::backup(FileOps* f_ops,
@@ -347,7 +352,7 @@ Status BackupRestore::backup(FileOps* f_ops,
 Status BackupRestore::restore(FileOps* f_ops,
                               const std::string& filename)
 {
-    return copyFile(f_ops, filename + ".bak", filename);
+    return copyFile(f_ops, filename + ".bak", filename, true);
 }
 
 std::string HexDump::toString(const std::string& str) {
