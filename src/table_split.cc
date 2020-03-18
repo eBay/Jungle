@@ -90,14 +90,18 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     uint64_t NUM_OUTPUT_TABLES =
         (victim_stats.workingSetSizeByte / TABLE_LIMIT) + 1;
     uint64_t EXP_DOCS = (victim_stats.numKvs / NUM_OUTPUT_TABLES) + 1;
+    uint64_t EXP_SIZE =
+        (victim_stats.workingSetSizeByte / NUM_OUTPUT_TABLES) * 1.1; // 10% headroom.
     bool moved_to_new_table = true;
     _log_info(myLog, "split table WSS %zu limit %zu num docs %zu "
-              "output tables %zu expected docs per table %zu",
+              "output tables %zu expected docs per table %zu "
+              "expected size per table %zu",
               victim_stats.workingSetSizeByte,
               TABLE_LIMIT,
               victim_stats.numKvs,
               NUM_OUTPUT_TABLES,
-              EXP_DOCS);
+              EXP_DOCS,
+              EXP_SIZE);
 
     TableFile::Iterator* itr = new TableFile::Iterator();
     EP( itr->init(nullptr, victim_table->file, empty_key, empty_key) );
@@ -111,6 +115,7 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     if (level == 1) numL1Compactions.fetch_add(1);
 
     uint64_t cur_docs_acc = 0;
+    uint64_t cur_size_acc = 0;
 
     // Initial scan to get
     //   1) number of files after split, and
@@ -146,6 +151,7 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
         }
 
         cur_docs_acc++;
+        cur_size_acc += value_size_out;
         num_records_read++;
 
         if (d_params.compactionDelayUs) {
@@ -153,9 +159,19 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
             Timer::sleepUs(d_params.compactionDelayUs);
         }
 
-        if (cur_docs_acc > EXP_DOCS) {
+        // WARNING:
+        //   In case of value size skew, we should make sure that
+        //   accumulated size should be at least bigger than 70% of
+        //   expected split table size.
+        //
+        //   If we don't do this, there we be split/merge thrashing.
+        //   Split result will be unbalanced -> merge them again ->
+        //   split again -> ...
+        if ( cur_docs_acc > EXP_DOCS &&
+             cur_size_acc > EXP_SIZE * 0.7 ) {
             // Go to next table.
             cur_docs_acc = 0;
+            cur_size_acc = 0;
             moved_to_new_table = true;
         }
     } while (itr->next().ok());

@@ -1033,6 +1033,81 @@ int snapshot_test() {
     return 0;
 }
 
+int unbalanced_split_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    // Disable background threads.
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 0;
+    g_config.numCompactorThreads = 0;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.numL0Partitions = 4;
+    config.nextLevelExtension = true;
+    config.maxL1TableSize = 1024 * 1024;
+    config.bloomFilterBitsPerUnit = 10.0;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    size_t NUM = 10000;
+    const char V_FMT[] = "v%0800zu";
+
+    // Write KVs.
+    CHK_Z(_set_keys(db, 0, NUM, 1, "k%06zu", V_FMT));
+
+    // Sync & flush.
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+
+    // Do L0 compaction.
+    jungle::CompactOptions c_opt;
+    for (size_t ii=0; ii<config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(c_opt, ii));
+    }
+
+    // Overwrite keys with very small value in range between R1 and R2, and
+    // put very big values in range R3 and R4.
+    size_t R1 = 0, R2 = 600, R3 = 1000, R4 = 1200;
+    char small_value_str[10];
+    jungle::SizedBuf small_value(small_value_str);
+    jungle::SizedBuf big_value(5*1024);
+    jungle::SizedBuf::Holder h_big_value(big_value);
+    char key_str[MAX_TEST_LEN];
+
+    for (size_t ii=R1; ii<R2; ++ii) {
+        sprintf(key_str, "k%06zu", ii);
+        jungle::SizedBuf key_buf(key_str);
+        CHK_Z( db->set( jungle::KV(key_buf, small_value) ) );
+    }
+
+    for (size_t ii=R3; ii<R4; ++ii) {
+        sprintf(key_str, "k%06zu", ii);
+        jungle::SizedBuf key_buf(key_str);
+        CHK_Z( db->set( jungle::KV(key_buf, big_value) ) );
+    }
+
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    for (size_t ii=0; ii<config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(c_opt, ii));
+    }
+
+    CHK_Z(db->splitLevel(c_opt, 1));
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+
 } using namespace level_extension_test;
 
 int main(int argc, char** argv) {
@@ -1066,6 +1141,9 @@ int main(int argc, char** argv) {
 
     ts.doTest("snapshot test",
               snapshot_test);
+
+    ts.doTest("unbalanced split test",
+              unbalanced_split_test);
 
     return 0;
 }
