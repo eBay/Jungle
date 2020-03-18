@@ -57,7 +57,13 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
 {
     const DBConfig* db_config = getDbConfig();
     (void)db_config;
+
     DBMgr* mgr = DBMgr::getWithoutInit();
+
+    const GlobalConfig* global_config = mgr->getGlobalConfig();
+    const GlobalConfig::CompactionThrottlingOptions& t_opt =
+        global_config->ctOpt;
+
     DebugParams d_params = mgr->getDebugParams();
 
     Status s;
@@ -67,6 +73,7 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
 
     Timer elapsed_timer;
     Timer sync_timer;
+    Timer throttling_timer(t_opt.resolution_ms);
     sync_timer.setDurationMs(db_config->preFlushDirtyInterval_sec * 1000);
 
    try {
@@ -99,8 +106,26 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
 
         // Periodic flushing to avoid burst disk write & freeze,
         // which have great impact on (user-facing) latency.
-        if (sync_timer.timeoutAndReset()) {
+        if (sync_timer.timeout()) {
             dst_file->sync();
+            // Resetting timer should be done after fsync,
+            // as it may take long time.
+            sync_timer.reset();
+            throttling_timer.reset();
+        }
+
+        // Do throttling, if enabled.
+        if ( t_opt.resolution_ms &&
+             t_opt.throttlingFactor &&
+             throttling_timer.timeout() ) {
+            uint32_t factor = std::min(t_opt.throttlingFactor, (uint32_t)99);
+            uint64_t elapsed_ms = throttling_timer.getMs();
+            uint64_t to_sleep_ms =
+                elapsed_ms * factor / (100 - factor);
+            if (to_sleep_ms) {
+                Timer::sleepMs(to_sleep_ms);
+            }
+            throttling_timer.reset();
         }
     }
 

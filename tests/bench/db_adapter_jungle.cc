@@ -70,6 +70,8 @@ int JungleAdapter::open(const std::string& db_file,
     g_config.itcOpt.startHour = 0;
     g_config.itcOpt.endHour = 0;
 
+    g_config.ctOpt.throttlingFactor = 0;
+
     jungle::init(g_config);
 
     jungle::DBConfig config;
