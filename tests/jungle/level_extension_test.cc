@@ -1033,7 +1033,7 @@ int snapshot_test() {
     return 0;
 }
 
-int unbalanced_split_test() {
+int unbalanced_split_test(bool reversed) {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
 
@@ -1074,6 +1074,13 @@ int unbalanced_split_test() {
     // Overwrite keys with very small value in range between R1 and R2, and
     // put very big values in range R3 and R4.
     size_t R1 = 0, R2 = 600, R3 = 1000, R4 = 1200;
+    if (reversed) {
+        R3 = 0;
+        R4 = 200;
+        R1 = 600;
+        R2 = 1200;
+    }
+
     char small_value_str[10];
     jungle::SizedBuf small_value(small_value_str);
     jungle::SizedBuf big_value(5*1024);
@@ -1106,7 +1113,6 @@ int unbalanced_split_test() {
     TEST_SUITE_CLEANUP_PATH();
     return 0;
 }
-
 
 } using namespace level_extension_test;
 
@@ -1143,7 +1149,8 @@ int main(int argc, char** argv) {
               snapshot_test);
 
     ts.doTest("unbalanced split test",
-              unbalanced_split_test);
+              unbalanced_split_test,
+              TestRange<bool>({false, true}));
 
     return 0;
 }

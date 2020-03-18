@@ -167,13 +167,19 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
         //   If we don't do this, there we be split/merge thrashing.
         //   Split result will be unbalanced -> merge them again ->
         //   split again -> ...
-        if ( cur_docs_acc > EXP_DOCS &&
-             cur_size_acc > EXP_SIZE * 0.7 ) {
+        //
+        //   Also, even though the number of records doesn't meet the
+        //   condition, we should go to next table if table size goes
+        //   beyond the limit.
+        if ( ( cur_docs_acc > EXP_DOCS &&
+               cur_size_acc > EXP_SIZE * 0.7 ) ||
+             cur_size_acc > EXP_SIZE ) {
             // Go to next table.
             cur_docs_acc = 0;
             cur_size_acc = 0;
             moved_to_new_table = true;
         }
+
     } while (itr->next().ok());
     itr->close();
     DELETE(itr);
