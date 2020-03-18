@@ -483,6 +483,48 @@ public:
     IdleTimeCompactionOptions itcOpt;
 
     /**
+     * Settings for compaction (inclugin split/merge) throttling.
+     *
+     * Throttling is disabled by default, so that compactor thread
+     * will do compaction at its best if below values are unchanged.
+     */
+    struct CompactionThrottlingOptions {
+        CompactionThrottlingOptions()
+            : resolution_ms(200)
+            , throttlingFactor(0)
+            {}
+
+        /**
+         * Time interval to execute throttling.
+         */
+        uint32_t resolution_ms;
+
+        /**
+         * A number deciding how much it will throttle the compaction,
+         * ranged between 0 to 99.
+         * If
+         *   1) zero, throttling is completely disabled.
+         *   2) F, compactor thread's utilization will be at most (100-X) %.
+         *     e.g.)
+         *       F = 10, compactor will run at 90% of its max speed.
+         *       F = 50, compactor will run at 50% of its max speed.
+         *       F = 80, compactor will run at 20% of its max speed.
+         */
+        uint32_t throttlingFactor;
+    };
+
+    /**
+     * Compaction throttling options.
+     *
+     * It can be used to reduce the influence on user-facing latency
+     * by heavy IO of compaction tasks.
+     *
+     * Interlevel/in-place compactions, split, and merge will get affected.
+     * Log flushing (to L0 tables) will have no effect.
+     */
+    CompactionThrottlingOptions ctOpt;
+
+    /**
      * Shutdown system logger on shutdown of Jungle.
      */
     bool shutdownLogger;

@@ -61,9 +61,14 @@ void DBMgr::printGlobalConfig() {
                       gConfig.itcOpt.startHour, gConfig.itcOpt.endHour,
                       (tz_gap >= 0)?'+':'-', tz_gap_abs / 60, tz_gap_abs % 60);
         }
+
     } else {
         _log_info(myLog, "idle time compaction disabled");
     }
+
+    _log_info(myLog, "compaction throttling resolution %zu ms factor %zu",
+              gConfig.ctOpt.resolution_ms,
+              gConfig.ctOpt.throttlingFactor);
 }
 
 void DBMgr::initInternal(const GlobalConfig& config) {
