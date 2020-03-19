@@ -736,5 +736,24 @@ uint64_t TableMgr::getBoosterLimit(size_t level) const {
     return 0;
 }
 
+void TableMgr::doCompactionThrottling
+               ( const GlobalConfig::CompactionThrottlingOptions& t_opt,
+                 Timer& throttling_timer )
+{
+    // Do throttling, if enabled.
+    if ( t_opt.resolution_ms &&
+         t_opt.throttlingFactor &&
+         throttling_timer.timeout() ) {
+        uint32_t factor = std::min(t_opt.throttlingFactor, (uint32_t)99);
+        uint64_t elapsed_ms = throttling_timer.getMs();
+        uint64_t to_sleep_ms =
+            elapsed_ms * factor / (100 - factor);
+        if (to_sleep_ms) {
+            Timer::sleepMs(to_sleep_ms);
+        }
+        throttling_timer.reset();
+    }
+}
+
 } // namespace jungle
 

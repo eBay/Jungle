@@ -256,6 +256,10 @@ public:
 
     void resetNumWrittenRecords() { numWrittenRecords = 0; }
 
+    static void doCompactionThrottling
+                (const GlobalConfig::CompactionThrottlingOptions& t_opt,
+                 Timer& throttling_timer);
+
     struct Iterator {
     public:
         Iterator();
