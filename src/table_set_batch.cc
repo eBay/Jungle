@@ -59,12 +59,11 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
     (void)db_config;
 
     DBMgr* mgr = DBMgr::getWithoutInit();
+    DebugParams d_params = mgr->getDebugParams();
 
     const GlobalConfig* global_config = mgr->getGlobalConfig();
     const GlobalConfig::CompactionThrottlingOptions& t_opt =
         global_config->ctOpt;
-
-    DebugParams d_params = mgr->getDebugParams();
 
     Status s;
     TableFile::Iterator itr;
@@ -115,18 +114,7 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
         }
 
         // Do throttling, if enabled.
-        if ( t_opt.resolution_ms &&
-             t_opt.throttlingFactor &&
-             throttling_timer.timeout() ) {
-            uint32_t factor = std::min(t_opt.throttlingFactor, (uint32_t)99);
-            uint64_t elapsed_ms = throttling_timer.getMs();
-            uint64_t to_sleep_ms =
-                elapsed_ms * factor / (100 - factor);
-            if (to_sleep_ms) {
-                Timer::sleepMs(to_sleep_ms);
-            }
-            throttling_timer.reset();
-        }
+        TableMgr::doCompactionThrottling(t_opt, throttling_timer);
     }
 
     // Final commit, and generate snapshot on it.

@@ -65,6 +65,10 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     DBMgr* mgr = DBMgr::getWithoutInit();
     DebugParams d_params = mgr->getDebugParams();
 
+    const GlobalConfig* global_config = mgr->getGlobalConfig();
+    const GlobalConfig::CompactionThrottlingOptions& t_opt =
+        global_config->ctOpt;
+
     const DBConfig* db_config = getDbConfig();
     Status s;
     SizedBuf empty_key;
@@ -117,6 +121,8 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     uint64_t cur_docs_acc = 0;
     uint64_t cur_size_acc = 0;
 
+    Timer throttling_timer(t_opt.resolution_ms);
+
     // Initial scan to get
     //   1) number of files after split, and
     //   2) min keys for each new file.
@@ -159,6 +165,9 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
             Timer::sleepUs(d_params.compactionDelayUs);
         }
 
+        // Do throttling, if enabled.
+        TableMgr::doCompactionThrottling(t_opt, throttling_timer);
+
         // WARNING:
         //   In case of value size skew, we should make sure that
         //   accumulated size should be at least bigger than 70% of
@@ -188,7 +197,8 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     double scan_rate = (double)num_records_read * 1000000 / elapsed_us;
     size_t num_new_tables = min_keys.size();
 
-    _log_info(myLog, "split table %zu_%zu, level %zu, %zu records, %zu files, "
+    _log_info(myLog, "reading table %zu_%zu for split, level %zu, "
+              "%zu records, %zu files, "
               "initial scan %zu us, %.1f iops",
               opt.prefixNum, victim_table->number,
               level, num_records_read, num_new_tables,

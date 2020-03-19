@@ -39,6 +39,10 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     DBMgr* mgr = DBMgr::getWithoutInit();
     DebugParams d_params = mgr->getDebugParams();
 
+    const GlobalConfig* global_config = mgr->getGlobalConfig();
+    const GlobalConfig::CompactionThrottlingOptions& t_opt =
+        global_config->ctOpt;
+
     bool is_last_level = (level + 1 == mani->getNumLevels());
     if (is_last_level && level >= 1) {
         return migrateLevel(options, level);
@@ -189,6 +193,8 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     // Reserve 10% more headroom, just in case.
     offsets.reserve(victim_stats.approxDocCount * 11 / 10);
 
+    Timer throttling_timer(t_opt.resolution_ms);
+
     // Initial scan to get
     //   1) number of files after split, and
     //   2) min keys for each new file.
@@ -285,6 +291,9 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
             // If debug parameter is given, sleep here.
             Timer::sleepUs(d_params.compactionDelayUs);
         }
+
+        // Do throttling, if enabled.
+        TableMgr::doCompactionThrottling(t_opt, throttling_timer);
 
     } while (itr->next().ok());
     itr->close();
