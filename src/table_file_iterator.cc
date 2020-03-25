@@ -138,7 +138,13 @@ Status TableFile::Iterator::initSN(DB* snap_handle,
         minSeq = 0;
     }
     if (valid_number(max_seq)) {
-        maxSeq = std::min(snap_seqnum, max_seq);
+        // If `snap_seqnum` is zero and `max_seq` is given,
+        // we should honor `max_seq`.
+        if (snap_seqnum) {
+            maxSeq = std::min(snap_seqnum, max_seq);
+        } else {
+            maxSeq = max_seq;
+        }
     } else {
         maxSeq = 0;
     }

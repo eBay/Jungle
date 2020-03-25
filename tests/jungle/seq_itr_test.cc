@@ -535,6 +535,114 @@ int itr_seq_min_max_logs() {
     return 0;
 }
 
+int itr_seq_out_of_range_table() {
+    jungle::DB* db;
+    jungle::Status s;
+
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename)
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.maxEntriesInLogFile = 5;
+    s = jungle::DB::open(&db, filename, config);
+    CHK_Z(s);
+
+    // Set KV pairs.
+    int NUM = 100;
+    std::vector<jungle::KV> kv(NUM);
+
+    CHK_Z(_init_kv_pairs(NUM, kv, "key1_", "value1_"));
+    CHK_Z(_set_byseq_kv_pairs(0, NUM, 0, db, kv));
+
+    // Sync and flush.
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+
+    // Iterator up to 50.
+    jungle::Iterator itr;
+    CHK_Z(itr.initSN(db, 1, 50));
+    size_t count = 0;
+    do {
+        jungle::Record rec_out;
+        jungle::Record::Holder h(rec_out);
+        s = itr.get(rec_out);
+        if (!s) break;
+        count++;
+    } while (itr.next().ok());
+    itr.close();
+    CHK_EQ(50, count);
+
+    // Close DB.
+    s = jungle::DB::close(db);
+    CHK_Z(s);
+
+    // Free all resources for jungle.
+    jungle::shutdown();
+    _free_kv_pairs(NUM, kv);
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int itr_seq_out_of_range_snapshot() {
+    jungle::DB* db;
+    jungle::Status s;
+
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename)
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.maxEntriesInLogFile = 5;
+    s = jungle::DB::open(&db, filename, config);
+    CHK_Z(s);
+
+    // Set KV pairs.
+    int NUM = 100;
+    std::vector<jungle::KV> kv(NUM);
+
+    CHK_Z(_init_kv_pairs(NUM, kv, "key1_", "value1_"));
+    CHK_Z(_set_byseq_kv_pairs(0, NUM, 0, db, kv));
+
+    // Sync and flush.
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+
+    // Open snapshot and then iterator.
+    // FIXME: If there is no write after
+    //        flushing logs and then creating persistent checkpoint,
+    //        opening snapshot fails.
+    jungle::DB* snap_out = nullptr;
+    CHK_Z(db->openSnapshot(&snap_out));
+
+    jungle::Iterator itr;
+    CHK_Z(itr.initSN(snap_out, 1, 50));
+    size_t count = 0;
+    do {
+        jungle::Record rec_out;
+        jungle::Record::Holder h(rec_out);
+        s = itr.get(rec_out);
+        if (!s) break;
+        count++;
+    } while (itr.next().ok());
+    itr.close();
+    CHK_EQ(50, count);
+
+    // Close DB.
+    CHK_Z(jungle::DB::close(snap_out));
+    CHK_Z(jungle::DB::close(db));
+
+    // Free all resources for jungle.
+    jungle::shutdown();
+    _free_kv_pairs(NUM, kv);
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -547,6 +655,8 @@ int main(int argc, char** argv) {
     ts.doTest("seq itr preserve log files test", itr_seq_preserve_log_file_test);
     ts.doTest("seq itr seek test", itr_seq_seek);
     ts.doTest("seq itr min max test", itr_seq_min_max_logs);
+    ts.doTest("seq itr out of range table test", itr_seq_out_of_range_table);
+    ts.doTest("seq itr out of range snapshot test", itr_seq_out_of_range_snapshot);
 
     return 0;
 }
