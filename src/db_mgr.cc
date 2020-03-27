@@ -166,6 +166,7 @@ DBMgr::DBMgr()
 }
 
 DBMgr::~DBMgr() {
+    _log_info(myLog, "destroying DB manager");
     {   // Remove all pending files.
         std::lock_guard<std::mutex> l(filesToRemoveLock);
         for (auto& entry: filesToRemove) {

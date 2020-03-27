@@ -315,7 +315,8 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     for (auto entry: results) {
         LsmFlushResult& rr = entry;
         delete rr.tFile;
-        rr.minKey.free();
+        // WARNING: `rr.minKey` has reference to `min_keys`
+        //          so we should not free it here again.
     }
     if (level == 1) numL1Compactions.fetch_sub(1);
     return s;
