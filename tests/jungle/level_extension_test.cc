@@ -1114,6 +1114,73 @@ int unbalanced_split_test(bool reversed) {
     return 0;
 }
 
+int split_cancel_restart_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 1;
+    g_config.numCompactorThreads = 1;
+    g_config.numTableWriters = 1;
+    g_config.flusherMinRecordsToTrigger = 1000;
+    g_config.compactorSleepDuration_ms = 1000;
+    jungle::init(g_config);
+
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.maxL0TableSize = 1024*1024;
+    config.maxL1TableSize = 1024*1024;
+    config.minFileSizeToCompact = 128*1024;
+    config.compactionFactor = 120;
+    config.bloomFilterBitsPerUnit = 10;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    std::string value_str(1000, 'c');
+    const size_t NUM = 10000;
+
+    for (size_t ii=0; ii<NUM; ++ii) {
+        std::string key = "k" + std::to_string(ii);
+        CHK_Z( db->set( jungle::KV(key, value_str) ) );
+    }
+
+    // Sync & flush.
+    db->sync(false);
+    db->flushLogs();
+
+    TestSuite::sleep_sec(3, "wait for L0 -> L1 compaction");
+
+    CHK_Z( jungle::DB::close(db) );
+
+    config.maxL1TableSize = 512*1024;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // Set delay for compaction.
+    jungle::DebugParams d_params;
+    d_params.compactionItrScanDelayUs = 100*1000;
+    jungle::setDebugParams(d_params);
+
+    TestSuite::sleep_sec(2, "wait for split");
+
+    // Sync & flush.
+    db->sync(false);
+    db->flushLogs();
+
+    CHK_Z( jungle::DB::close(db) );
+
+    jungle::init(g_config);
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    TestSuite::sleep_sec(2, "wait for split");
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace level_extension_test;
 
 int main(int argc, char** argv) {
@@ -1151,6 +1218,9 @@ int main(int argc, char** argv) {
     ts.doTest("unbalanced split test",
               unbalanced_split_test,
               TestRange<bool>({false, true}));
+
+    ts.doTest("split cancel and restart test",
+              split_cancel_restart_test);
 
     return 0;
 }
