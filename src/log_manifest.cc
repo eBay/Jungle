@@ -498,14 +498,20 @@ Status LogManifest::store(bool call_fsync) {
     fOps->ftruncate(mFile, ss.pos());
 
     if (call_fsync) {
-        fOps->fsync(mFile);
+        s = fOps->fsync(mFile);
+
+        if (s) {
+            // WARNING:
+            //   We should update backup file only when the original manifest
+            //   file is synced. If not, there can be a possibility that
+            //   both files are corrupted at the same time.
+
+            // After success, make a backup file one more time,
+            // using the latest data.
+            // Same as above, tolerate backup failure.
+            BackupRestore::backup(fOps, mFileName, mani_buf, ss.pos(), call_fsync);
+        }
     }
-
-    // After success, make a backup file one more time,
-    // using the latest data.
-    // Same as above, tolerate backup failure.
-    BackupRestore::backup(fOps, mFileName, mani_buf, ss.pos(), call_fsync);
-
     return s;
 }
 
