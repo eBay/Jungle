@@ -316,14 +316,17 @@ Status TableManifest::store(bool call_fsync) {
     fOps->ftruncate(mFile, ss.pos());
 
     if (call_fsync) {
-        fOps->fsync(mFile);
+        s = fOps->fsync(mFile);
+        if (s) {
+            // Same as that in log manifest.
+
+            // After success, make a backup file one more time,
+            // using the latest data.
+            EP( BackupRestore::backup(fOps, mFileName, call_fsync) );
+        }
     }
 
-    // After success, make a backup file one more time,
-    // using the latest data.
-    EP( BackupRestore::backup(fOps, mFileName, call_fsync) );
-
-    return Status();
+    return s;
 }
 
 Status TableManifest::storeTableStack(RwSerializer& ss,
