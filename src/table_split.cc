@@ -204,7 +204,7 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
 
         if (min_keys.size() <= 1) {
             EXP_DOCS = (num_records_read / NUM_OUTPUT_TABLES) + 1;
-            EXP_SIZE = (total_size / NUM_OUTPUT_TABLES) + 1;
+            EXP_SIZE = (total_size / NUM_OUTPUT_TABLES) * 1.1;
             _log_warn(myLog, "total %zu records, %zu bytes, but number of "
                       "new tables is %zu, try re-scan with adjusted parameters: "
                       "%zu records %zu byte",
@@ -233,7 +233,7 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
               "%zu records, %zu bytes, %zu files, "
               "initial scan %zu us, %.1f iops",
               opt.prefixNum, victim_table->number,
-              level, num_records_read, num_new_tables, total_size,
+              level, num_records_read, total_size, num_new_tables,
               elapsed_us, scan_rate);
 
     size_t max_writers = db_config->getMaxParallelWriters();
