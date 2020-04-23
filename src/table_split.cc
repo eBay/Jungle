@@ -203,6 +203,7 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
         DELETE(itr);
 
         if (min_keys.size() <= 1) {
+            if (NUM_OUTPUT_TABLES <= 1) ++NUM_OUTPUT_TABLES;
             EXP_DOCS = (num_records_read / NUM_OUTPUT_TABLES) + 1;
             EXP_SIZE = (total_size / NUM_OUTPUT_TABLES) * 1.1;
             _log_warn(myLog, "total %zu records, %zu bytes, but number of "
@@ -219,6 +220,10 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
             itr = new TableFile::Iterator();
             TC( itr->init(nullptr, victim_table->file, empty_key, empty_key) );
             scan_retry = true;
+            cur_docs_acc = cur_size_acc = total_size = num_records_read = 0;
+            offsets.clear();
+            moved_to_new_table = false;
+
         } else {
             scan_retry = false;
         }
