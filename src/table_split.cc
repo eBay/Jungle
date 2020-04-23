@@ -160,8 +160,8 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
 
             cur_docs_acc++;
             num_records_read++;
-            cur_size_acc += value_size_out;
-            total_size += value_size_out;
+            cur_size_acc += (rec_out.size() + value_size_out);
+            total_size += (rec_out.size() + value_size_out);
 
             if (d_params.compactionDelayUs) {
                 // If debug parameter is given, sleep here.
