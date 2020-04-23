@@ -119,89 +119,121 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     if (level == 1) numL1Compactions.fetch_add(1);
 
     uint64_t cur_docs_acc = 0;
-    uint64_t cur_size_acc = 0;
+    uint64_t cur_size_acc = 0, total_size = 0;
 
     Timer throttling_timer(t_opt.resolution_ms);
+    bool scan_retry = false;
 
-    // Initial scan to get
-    //   1) number of files after split, and
-    //   2) min keys for each new file.
     do {
-        if (!isCompactionAllowed()) {
-            throw Status(Status::COMPACTION_CANCELLED);
-        }
-
-        Record rec_out;
-        Record::Holder h_rec_out(rec_out);
-        size_t value_size_out = 0;
-        uint64_t offset_out = 0;
-        s = itr->getMeta(rec_out, value_size_out, offset_out);
-        if (!s) break;
-
-        offsets.push_back(offset_out);
-        uint64_t cur_index = offsets.size() - 1;
-
-        if (moved_to_new_table) {
-            moved_to_new_table = false;
-
-            SizedBuf key_clone;
-            if (min_keys.size() == 0) {
-                // First split table: should inherit
-                // victim table's min key.
-                victim_table->minKey.copyTo(key_clone);
-            } else {
-                rec_out.kv.key.copyTo(key_clone);
+        // Initial scan to get
+        //   1) number of files after split, and
+        //   2) min keys for each new file.
+        do {
+            if (!isCompactionAllowed()) {
+                throw Status(Status::COMPACTION_CANCELLED);
             }
-            min_keys.push_back( key_clone );
-            start_indexes.push_back( cur_index );
+
+            Record rec_out;
+            Record::Holder h_rec_out(rec_out);
+            size_t value_size_out = 0;
+            uint64_t offset_out = 0;
+            s = itr->getMeta(rec_out, value_size_out, offset_out);
+            if (!s) break;
+
+            offsets.push_back(offset_out);
+            uint64_t cur_index = offsets.size() - 1;
+
+            if (moved_to_new_table) {
+                moved_to_new_table = false;
+
+                SizedBuf key_clone;
+                if (min_keys.size() == 0) {
+                    // First split table: should inherit
+                    // victim table's min key.
+                    victim_table->minKey.copyTo(key_clone);
+                } else {
+                    rec_out.kv.key.copyTo(key_clone);
+                }
+                min_keys.push_back( key_clone );
+                start_indexes.push_back( cur_index );
+            }
+
+            cur_docs_acc++;
+            num_records_read++;
+            cur_size_acc += value_size_out;
+            total_size += value_size_out;
+
+            if (d_params.compactionDelayUs) {
+                // If debug parameter is given, sleep here.
+                Timer::sleepUs(d_params.compactionDelayUs);
+            }
+
+            // Do throttling, if enabled.
+            TableMgr::doCompactionThrottling(t_opt, throttling_timer);
+
+            // WARNING:
+            //   In case of value size skew, we should make sure that
+            //   accumulated size should be at least bigger than 70% of
+            //   expected split table size.
+            //
+            //   If we don't do this, there we be split/merge thrashing.
+            //   Split result will be unbalanced -> merge them again ->
+            //   split again -> ...
+            //
+            //   Also, even though the number of records doesn't meet the
+            //   condition, we should go to next table if table size goes
+            //   beyond the limit.
+            if ( ( cur_docs_acc > EXP_DOCS &&
+                   cur_size_acc > EXP_SIZE * 0.7 ) ||
+                 cur_size_acc > EXP_SIZE ) {
+                // Go to next table.
+                cur_docs_acc = 0;
+                cur_size_acc = 0;
+                moved_to_new_table = true;
+
+                if (!scan_retry && d_params.disruptSplit) {
+                    // If flag is set and the first try, prevent having new table.
+                    moved_to_new_table = false;
+                }
+            }
+
+        } while (itr->next().ok());
+
+        itr->close();
+        DELETE(itr);
+
+        if (min_keys.size() <= 1) {
+            EXP_DOCS = (num_records_read / NUM_OUTPUT_TABLES) + 1;
+            EXP_SIZE = (total_size / NUM_OUTPUT_TABLES) + 1;
+            _log_warn(myLog, "total %zu records, %zu bytes, but number of "
+                      "new tables is %zu, try re-scan with adjusted parameters: "
+                      "%zu records %zu byte",
+                      num_records_read, total_size,
+                      min_keys.size(), EXP_DOCS, EXP_SIZE);
+
+            if (scan_retry) {
+                _log_err(myLog, "second scanning failed again, cancel this task");
+                throw Status(Status::COMPACTION_CANCELLED);
+            }
+
+            itr = new TableFile::Iterator();
+            TC( itr->init(nullptr, victim_table->file, empty_key, empty_key) );
+            scan_retry = true;
+        } else {
+            scan_retry = false;
         }
 
-        cur_docs_acc++;
-        cur_size_acc += value_size_out;
-        num_records_read++;
-
-        if (d_params.compactionDelayUs) {
-            // If debug parameter is given, sleep here.
-            Timer::sleepUs(d_params.compactionDelayUs);
-        }
-
-        // Do throttling, if enabled.
-        TableMgr::doCompactionThrottling(t_opt, throttling_timer);
-
-        // WARNING:
-        //   In case of value size skew, we should make sure that
-        //   accumulated size should be at least bigger than 70% of
-        //   expected split table size.
-        //
-        //   If we don't do this, there we be split/merge thrashing.
-        //   Split result will be unbalanced -> merge them again ->
-        //   split again -> ...
-        //
-        //   Also, even though the number of records doesn't meet the
-        //   condition, we should go to next table if table size goes
-        //   beyond the limit.
-        if ( ( cur_docs_acc > EXP_DOCS &&
-               cur_size_acc > EXP_SIZE * 0.7 ) ||
-             cur_size_acc > EXP_SIZE ) {
-            // Go to next table.
-            cur_docs_acc = 0;
-            cur_size_acc = 0;
-            moved_to_new_table = true;
-        }
-
-    } while (itr->next().ok());
-    itr->close();
-    DELETE(itr);
+    } while (scan_retry);
 
     uint64_t elapsed_us = std::max( tt.getUs(), (uint64_t)1 );
     double scan_rate = (double)num_records_read * 1000000 / elapsed_us;
     size_t num_new_tables = min_keys.size();
 
     _log_info(myLog, "reading table %zu_%zu for split, level %zu, "
-              "%zu records, %zu files, "
+              "%zu records, %zu bytes, %zu files, "
               "initial scan %zu us, %.1f iops",
               opt.prefixNum, victim_table->number,
-              level, num_records_read, num_new_tables,
+              level, num_records_read, num_new_tables, total_size,
               elapsed_us, scan_rate);
 
     size_t max_writers = db_config->getMaxParallelWriters();

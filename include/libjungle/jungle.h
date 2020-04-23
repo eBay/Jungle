@@ -103,6 +103,7 @@ struct DebugParams {
         , urgentCompactionRatio(0)
         , rollbackDelayUs(0)
         , logDetailsOfKeyNotFound(false)
+        , disruptSplit(false)
         , tableSetBatchCb(nullptr)
         , addNewLogFileCb(nullptr)
         , newLogBatchCb(nullptr)
@@ -157,6 +158,11 @@ struct DebugParams {
      * If `true`, leave detailed logs if given key is not found.
      */
     bool logDetailsOfKeyNotFound;
+
+    /**
+     * If `true`, split pre-scanning will result only one output table.
+     */
+    bool disruptSplit;
 
     struct GenericCbParams {
         GenericCbParams() {}
