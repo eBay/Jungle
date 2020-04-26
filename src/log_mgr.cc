@@ -1286,7 +1286,26 @@ Status LogMgr::getMinSeqNum(uint64_t& seq_num_out) {
         // Nothing has been flushed yet. Get min seq.
         min_seq = li->file->getMinSeqNum();
         if (!valid_number(min_seq)) {
-            return Status::LOG_NOT_EXIST;
+            uint64_t ln_max = 0;
+            EP( mani->getMaxLogFileNum(ln_max) );
+            if (ln_max <= ln_min) {
+                return Status::LOG_NOT_EXIST;
+            }
+            // If there are more log file, we should scan.
+            for (size_t ii = ln_min+1; ii <= ln_max; ++ii) {
+                LogFileInfoGuard ll(mani->getLogFileInfoP(ii, true));
+                if (!ll.ptr || ll.ptr->isRemoved()) continue;
+
+                min_seq = ll.ptr->file->getFlushedSeqNum();
+                if (valid_number(min_seq)) break;
+
+                min_seq = ll.ptr->file->getMinSeqNum();
+                if (valid_number(min_seq)) break;
+            }
+            if (!valid_number(min_seq)) {
+                // All log files don't have meaningful data.
+                return Status::LOG_NOT_EXIST;
+            }
         }
     }
     seq_num_out = min_seq;
