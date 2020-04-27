@@ -2005,6 +2005,53 @@ int set_batch_invalid_test() {
     return 0;
 }
 
+int empty_log_file_Test(size_t num_reopen) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+
+    // Open and immediately close.
+    for (size_t ii=0; ii<num_reopen; ++ii) {
+        CHK_Z( jungle::DB::open(&db, filename, config) );
+        CHK_Z( jungle::DB::close(db) );
+    }
+
+    // Re-open and put some records.
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    const size_t NUM = 50;
+    for (size_t ii=0; ii<NUM; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+    }
+
+    // Get min seq number.
+    uint64_t min_seq = 0;
+    CHK_Z( db->getMinSeqNum(min_seq) );
+    CHK_EQ(1, min_seq);
+
+    // Close and reopen.
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // Min seq number should be the same.
+    CHK_Z( db->getMinSeqNum(min_seq) );
+    CHK_EQ(1, min_seq);
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -2042,6 +2089,8 @@ int main(int argc, char** argv) {
     ts.doTest("async remove file test", async_remove_file_test);
     ts.doTest("set batch test", set_batch_test);
     ts.doTest("set batch invalid test", set_batch_invalid_test);
+    ts.doTest("empty log file test", empty_log_file_Test,
+              TestRange<size_t>( {1, 10} ) );
 
     return 0;
 }
