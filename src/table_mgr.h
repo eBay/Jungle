@@ -41,17 +41,33 @@ public:
         : fOps(nullptr)
         , prefixNum(0)
         , dbConfig(nullptr)
+        , compressionEnabled(false)
         {}
 
+    /**
+     * DB path.
+     */
     std::string path;
 
+    /**
+     * File system operations.
+     */
     FileOps* fOps;
 
-    // KVS ID.
+    /**
+     * KVS ID.
+     */
     uint64_t prefixNum;
 
-    // Pointer to the parent DB handle's config.
+    /**
+     * Pointer to the parent DB handle's config.
+     */
     const DBConfig* dbConfig;
+
+    /**
+     * Cached setting from `dbConfig`.
+     */
+    bool compressionEnabled;
 };
 
 class TableStats {
@@ -214,9 +230,13 @@ public:
 
     Status getAvailCheckpoints(std::list<uint64_t>& chk_out);
 
+    DB* getParentDb() const { return parentDb; }
+
     const DBConfig* getDbConfig() const { return opt.dbConfig; }
 
     const TableMgrOptions* getTableMgrOptions() const { return &opt; }
+
+    bool isCompressionEnabled() const { return opt.compressionEnabled; }
 
     uint32_t getNumL0Partitions() const { return numL0Partitions; }
 

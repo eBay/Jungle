@@ -54,10 +54,11 @@ bool TableFile::isFdbDocTombstone(fdb_doc* doc)
     SizedBuf::Holder h_user_meta_out(user_meta_out); // auto free.
 
     SizedBuf raw_meta(doc->metalen, doc->meta);;
-    bool is_tombstone_out = false;
-    rawMetaToUserMeta(raw_meta, is_tombstone_out, user_meta_out);
 
-    if (doc->deleted) is_tombstone_out = true;
+    InternalMeta i_meta;
+    rawMetaToUserMeta(raw_meta, i_meta, user_meta_out);
+
+    if (doc->deleted) i_meta.isTombstone = true;
 
     // If custom tombstone function exists, call and check it.
     if (db_config->compactionCbFunc) {
@@ -69,10 +70,10 @@ bool TableFile::isFdbDocTombstone(fdb_doc* doc)
 
         CompactionCbDecision dec = db_config->compactionCbFunc(params);
         if (dec == CompactionCbDecision::DROP) {
-            is_tombstone_out = true;
+            i_meta.isTombstone = true;
         }
     }
-    return is_tombstone_out;
+    return i_meta.isTombstone;
 }
 
 Status TableFile::compactToManully(FdbHandle* compact_handle,

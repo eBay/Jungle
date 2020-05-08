@@ -183,17 +183,31 @@ Status TableFile::Iterator::get(Record& rec_out) {
     SizedBuf raw_meta(doc->metalen, doc->meta);;
     SizedBuf::Holder h_raw_meta(raw_meta); // auto free raw meta.
     raw_meta.setNeedToFree();
-    bool is_tombstone_out = false;
-    TableFile::rawMetaToUserMeta(raw_meta, is_tombstone_out, user_meta_out);
+
+    InternalMeta i_meta;
+    TableFile::rawMetaToUserMeta(raw_meta, i_meta, user_meta_out);
 
     user_meta_out.moveTo( rec_out.meta );
 
+    // Decompress if needed.
+    DB* parent_db = tFile->tableMgr->getParentDb();
+    const DBConfig* db_config = tFile->tableMgr->getDbConfig();
+   try {
+    Status s;
+    TC( tFile->decompressValue(parent_db, db_config, rec_out, i_meta) );
+
     rec_out.seqNum = doc->seqnum;
-    rec_out.type = (is_tombstone_out || doc->deleted)
+    rec_out.type = (i_meta.isTombstone || doc->deleted)
                    ? Record::DELETION
                    : Record::INSERTION;
 
     return Status();
+
+   } catch (Status s) {
+    rec_out.kv.free();
+    rec_out.meta.free();
+    return s;
+   }
 }
 
 Status TableFile::Iterator::getMeta(Record& rec_out,
@@ -223,13 +237,14 @@ Status TableFile::Iterator::getMeta(Record& rec_out,
     SizedBuf raw_meta(doc->metalen, doc->meta);;
     SizedBuf::Holder h_raw_meta(raw_meta); // auto free raw meta.
     raw_meta.setNeedToFree();
-    bool is_tombstone_out = false;
-    TableFile::rawMetaToUserMeta(raw_meta, is_tombstone_out, user_meta_out);
+
+    InternalMeta i_meta;
+    TableFile::rawMetaToUserMeta(raw_meta, i_meta, user_meta_out);
 
     user_meta_out.moveTo( rec_out.meta );
 
     rec_out.seqNum = doc->seqnum;
-    rec_out.type = (is_tombstone_out || doc->deleted)
+    rec_out.type = (i_meta.isTombstone || doc->deleted)
                    ? Record::DELETION
                    : Record::INSERTION;
 

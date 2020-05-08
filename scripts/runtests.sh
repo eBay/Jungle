@@ -32,3 +32,4 @@ $VALGRIND ./tests/compaction_test --abort-on-failure
 $VALGRIND ./tests/mt_test --abort-on-failure
 $VALGRIND ./tests/log_reclaim_test --abort-on-failure
 $VALGRIND ./tests/level_extension_test --abort-on-failure
+$VALGRIND ./tests/compression_test --abort-on-failure

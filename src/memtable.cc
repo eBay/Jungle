@@ -34,8 +34,6 @@ limitations under the License.
 
 namespace jungle {
 
-#define REC_LEN_SIZE (20)
-
 MemTable::RecNode::RecNode(const SizedBuf& _key) {
     skiplist_init_node(&snode);
     recList = new RecList();
@@ -157,7 +155,15 @@ uint64_t record_flags(Record* rec) {
 }
 
 Record::Type get_record_type_from_flags(uint64_t flags) {
-    return static_cast<Record::Type>(flags & 0xff);
+    return static_cast<Record::Type>(flags & 0x0f);
+}
+
+const uint64_t FLAG_COMPRESSED = 0x10;
+void record_flags_set_compressed(uint64_t& flags) {
+    flags |= FLAG_COMPRESSED;
+}
+bool record_flags_is_compressed(const uint64_t flags) {
+    return flags & FLAG_COMPRESSED;
 }
 
 uint64_t flush_marker_flags() {
@@ -553,6 +559,16 @@ Status MemTable::sync(FileOps* f_ops,
     return Status();
 }
 
+size_t MemTable::getLengthMetaSize(uint64_t flags) {
+    if (record_flags_is_compressed(flags)) {
+        return sizeof(uint64_t) +       // seq number.
+               sizeof(uint32_t) * 4;    // K+M+V+O lengths.
+    } else {
+        return sizeof(uint64_t) +       // seq number.
+               sizeof(uint32_t) * 3;    // K+M+V lengths.
+    }
+}
+
 Status MemTable::loadRecord(RwSerializer& rws,
                             uint64_t flags,
                             uint64_t& seqnum_out)
@@ -561,17 +577,27 @@ Status MemTable::loadRecord(RwSerializer& rws,
     Record* rec = new Record();
     rec->type = get_record_type_from_flags(flags);
 
+    const bool COMPRESSION = record_flags_is_compressed(flags);
+    const DBConfig* db_config = logFile->logMgr->getDbConfig();
+    DB* parent_db = logFile->logMgr->getParentDb();
+
+    const size_t LOCAL_COMP_BUF_SIZE = 4096;
+    char local_comp_buf[LOCAL_COMP_BUF_SIZE];
+
+    const size_t LEN_META_SIZE = getLengthMetaSize(flags);
+
   try{
     uint32_t crc_len = 0;
     uint8_t len_buf[32];
-    if (!rws.available(4 + REC_LEN_SIZE + 4)) {
+    // CRC of length meta + length meta + CRC of KMV.
+    if (!rws.available(4 + LEN_META_SIZE + 4)) {
         throw Status(Status::INCOMPLETE_LOG);
     }
 
     TC_( crc_len = rws.getU32(s) );
-    TC( rws.get(len_buf, REC_LEN_SIZE) );
+    TC( rws.get(len_buf, LEN_META_SIZE) );
 
-    uint32_t crc_len_chk = crc32_8(len_buf, REC_LEN_SIZE, 0);
+    uint32_t crc_len_chk = crc32_8(len_buf, LEN_META_SIZE, 0);
     if (crc_len != crc_len_chk) {
         _log_err(myLog, "crc error %x != %x, at %zu",
                  crc_len, crc_len_chk, rws.pos() - sizeof(crc_len));
@@ -585,6 +611,10 @@ Status MemTable::loadRecord(RwSerializer& rws,
     uint32_t k_size = len_buf_rw.getU32(s);
     uint32_t m_size = len_buf_rw.getU32(s);
     uint32_t v_size = len_buf_rw.getU32(s);
+    uint32_t o_size = v_size;
+    if (COMPRESSION) {
+        o_size = len_buf_rw.getU32(s);
+    }
 
     uint32_t crc_data = 0;
     TC_( crc_data = rws.getU32(s) );
@@ -610,9 +640,43 @@ Status MemTable::loadRecord(RwSerializer& rws,
         if (!rws.available(v_size)) {
             throw Status(Status::INCOMPLETE_LOG);
         }
-        rec->kv.value.alloc(v_size, nullptr);
-        TC( rws.get(rec->kv.value.data, v_size) );
-        crc_data_chk = crc32_8(rec->kv.value.data, v_size, crc_data_chk);
+
+        // If not compressed, `o_size == v_size`.
+        rec->kv.value.alloc(o_size);
+
+        if (COMPRESSION) {
+            if (!db_config->compOpt.cbDecompress) {
+                _log_fatal(myLog, "found compressed record %s, but decompression "
+                           "function is not given",
+                           rec->kv.key.toReadableString().c_str());
+                throw Status(Status::INVALID_CONFIG);
+            }
+
+            SizedBuf comp_buf(v_size, local_comp_buf);
+            SizedBuf::Holder h_comp_buf(comp_buf);
+
+            if (v_size > LOCAL_COMP_BUF_SIZE) {
+                // Size is bigger than local buffer, allocate from heap.
+                comp_buf.alloc(v_size);
+            }
+            TC( rws.get(comp_buf.data, v_size) );
+            ssize_t output_len =
+                db_config->compOpt.cbDecompress(parent_db, comp_buf, rec->kv.value);
+            if (output_len != o_size) {
+                _log_fatal(myLog, "decompression failed: %zd, db %s, "
+                           "key %s, offset %zu",
+                           output_len,
+                           parent_db->getPath().c_str(),
+                           rec->kv.key.toReadableString().c_str(),
+                           rws.pos() - v_size);
+                throw Status(Status::DECOMPRESSION_FAILED);
+            }
+            crc_data_chk = crc32_8(comp_buf.data, v_size, crc_data_chk);
+
+        } else {
+            TC( rws.get(rec->kv.value.data, v_size) );
+            crc_data_chk = crc32_8(rec->kv.value.data, v_size, crc_data_chk);
+        }
     }
 
     if (crc_data != crc_data_chk) {
@@ -841,7 +905,10 @@ Status MemTable::findOffsetOfSeq(SimpleLogger* logger,
         FlagType type = identify_type(flags);
         if (type == FlagType::RECORD) {
             // Just read length part and then skip.
-            if (!rws.available(4 + REC_LEN_SIZE + 4)) {
+            const size_t LEN_META_SIZE = getLengthMetaSize(flags);
+
+            // CRC of length meta + length meta + CRC of KMV.
+            if (!rws.available(4 + LEN_META_SIZE + 4)) {
                 s = Status::INCOMPLETE_LOG;
                 m = "not enough bytes for record";
                 break;
@@ -849,9 +916,9 @@ Status MemTable::findOffsetOfSeq(SimpleLogger* logger,
             uint32_t crc_len = 0;
             uint8_t len_buf[32];
             EP_( crc_len = rws.getU32(s) );
-            EP( rws.get(len_buf, REC_LEN_SIZE) );
+            EP( rws.get(len_buf, LEN_META_SIZE) );
 
-            uint32_t crc_len_chk = crc32_8(len_buf, REC_LEN_SIZE, 0);
+            uint32_t crc_len_chk = crc32_8(len_buf, LEN_META_SIZE, 0);
             if (crc_len != crc_len_chk) {
                 _log_err(logger, "crc error %x != %x", crc_len, crc_len_chk);
                 std::stringstream ss;
@@ -975,11 +1042,22 @@ Status MemTable::flush(RwSerializer& rws)
     const size_t REC_META_LEN =
         // Flags           CRC for length     seq number
         sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint64_t) +
-        // KMV lengths         CRC for KMV
-        sizeof(uint32_t) * 3 + sizeof(uint32_t);
+        // KMV(O) lengths         CRC for KMV
+        sizeof(uint32_t) * 4 + sizeof(uint32_t);
 
     const size_t PAGE_LIMIT =
         DBMgr::getWithoutInit()->getGlobalConfig()->memTableFlushBufferSize;
+
+    DB* parent_db = logFile->logMgr->getParentDb();
+    const DBConfig* db_config = logFile->logMgr->getDbConfig();
+
+    // Compression is enabled only when all three callbacks are given.
+    const bool COMPRESSION = db_config->compOpt.cbGetMaxSize &&
+                             db_config->compOpt.cbCompress &&
+                             db_config->compOpt.cbDecompress;
+    // Local compression buffer to avoid frequent memory allocation.
+    const ssize_t LOCAL_COMP_BUF_SIZE = 4096;
+    char local_comp_buf[LOCAL_COMP_BUF_SIZE];
 
     // Keep extra headroom.
     SizedBuf tmp_buf(PAGE_LIMIT * 2);
@@ -996,16 +1074,17 @@ Status MemTable::flush(RwSerializer& rws)
         if (rec->seqNum > seqnum_upto) break;
 
         // << Record format >>
-        // flags                8 bytes (first byte: 0x0)
-        // CRC32 of lengths     4 bytes
-        // seq numnber          8 bytes
-        // key length (A)       4 bytes
-        // meta length (B)      4 bytes
-        // value length (C)     4 bytes
-        // CRC32 of KMV         4 bytes
-        // key                  A
-        // meta                 B
-        // value                C
+        // flags                            8 bytes (first byte: 0x0)
+        // CRC32 of lengths                 4 bytes
+        // seq numnber                      8 bytes
+        // key length (A)                   4 bytes
+        // meta length (B)                  4 bytes
+        // value length (C)                 4 bytes
+        // [ original value length (D)      4 bytes ] only when compressed
+        // CRC32 of KMV                     4 bytes
+        // key                              A
+        // meta                             B
+        // value                            C
 
         if (ss_tmp_buf.pos() + REC_META_LEN > PAGE_LIMIT) {
             // Flush and reset the position.
@@ -1013,13 +1092,49 @@ Status MemTable::flush(RwSerializer& rws)
             ss_tmp_buf.pos(0);
         }
 
-        TC( ss_tmp_buf.putU64(record_flags(rec)) );
+        ssize_t comp_buf_size = 0; // Output buffer size.
+        ssize_t comp_size = 0; // Actual compressed size.
+
+        SizedBuf comp_buf;
+        SizedBuf::Holder h_comp_buf(comp_buf);
+        // Refer to the local buffer by default.
+        comp_buf.referTo( SizedBuf(LOCAL_COMP_BUF_SIZE, local_comp_buf) );
+
+        uint64_t rec_flags = record_flags(rec);
+        if (COMPRESSION && rec->type == Record::Type::INSERTION) {
+            // If compression is enabled, ask if we compress this record.
+            comp_buf_size = db_config->compOpt.cbGetMaxSize(parent_db, *rec);
+            if (comp_buf_size > 0) {
+                if (comp_buf_size > LOCAL_COMP_BUF_SIZE) {
+                    // Bigger than the local buffer size, allocate a new.
+                    comp_buf.alloc(comp_buf_size);
+                }
+                // Do compression.
+                comp_size = db_config->compOpt.cbCompress(parent_db, *rec, comp_buf);
+                if (comp_size > 0) {
+                    // Compression succeeded, set the flag.
+                    record_flags_set_compressed(rec_flags);
+                } else if (comp_size < 0) {
+                    _log_err( myLog, "compression failed: %zd, db %s, key %s",
+                              comp_size,
+                              parent_db->getPath().c_str(),
+                              rec->kv.key.toReadableString().c_str() );
+                }
+                // Otherwise: if `comp_size == 0`,
+                //            that implies cancelling compression.
+            }
+        }
+
+        TC( ss_tmp_buf.putU64(rec_flags) );
 
         // Put seqnum + length info to `len_buf`.
         RwSerializer len_buf_s(len_buf, 32);
         len_buf_s.putU64(rec->seqNum);
         len_buf_s.putU32(rec->kv.key.size);
         len_buf_s.putU32(rec->meta.size);
+        if (comp_size > 0) {
+            len_buf_s.putU32(comp_size);
+        }
         len_buf_s.putU32(rec->kv.value.size);
         uint64_t len_buf_size = len_buf_s.pos();
 
@@ -1029,10 +1144,18 @@ Status MemTable::flush(RwSerializer& rws)
         TC( ss_tmp_buf.putU32(crc_len) );
         TC( ss_tmp_buf.put(len_buf, len_buf_size) );
 
+        // Reference buffer to data to be written.
+        SizedBuf value_ref;
+        if (comp_size > 0) {
+            value_ref.set(comp_size, comp_buf.data);
+        } else {
+            value_ref.referTo(rec->kv.value);
+        }
+
         // Calculate CRC of data, and put the CRC to `tmp_buf`.
         uint32_t crc_data = crc32_8(rec->kv.key.data, rec->kv.key.size, 0);
         crc_data = crc32_8(rec->meta.data, rec->meta.size, crc_data);
-        crc_data = crc32_8(rec->kv.value.data, rec->kv.value.size, crc_data);
+        crc_data = crc32_8(value_ref.data, value_ref.size, crc_data);
         TC( ss_tmp_buf.putU32(crc_data) );
 
         size_t data_len = rec->kv.key.size + rec->kv.value.size + rec->meta.size;
@@ -1044,7 +1167,7 @@ Status MemTable::flush(RwSerializer& rws)
             // Write to file directly.
             TC( rws.put(rec->kv.key.data, rec->kv.key.size) );
             TC( rws.put(rec->meta.data, rec->meta.size) );
-            TC( rws.put(rec->kv.value.data, rec->kv.value.size) );
+            TC( rws.put(value_ref.data, value_ref.size) );
 
         } else {
             if (ss_tmp_buf.pos() + data_len > PAGE_LIMIT) {
@@ -1059,7 +1182,7 @@ Status MemTable::flush(RwSerializer& rws)
             // Write to buffer.
             TC( ss_tmp_buf.put(rec->kv.key.data, rec->kv.key.size) );
             TC( ss_tmp_buf.put(rec->meta.data, rec->meta.size) );
-            TC( ss_tmp_buf.put(rec->kv.value.data, rec->kv.value.size) );
+            TC( ss_tmp_buf.put(value_ref.data, value_ref.size) );
         }
 
         num_flushed++;

@@ -127,6 +127,12 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
                    g_conf->numTableWriters,
                    db_config->getMaxParallelWriters() );
     }
+
+    _log_info(myLog, "given compression callbacks: "
+              "cbGetMaxSize %s, cbCompress %s, cbDecompress %s",
+              db_config->compOpt.cbGetMaxSize ? "O" : "X",
+              db_config->compOpt.cbCompress ? "O" : "X",
+              db_config->compOpt.cbDecompress ? "O" : "X");
 }
 
 Status TableMgr::init(const TableMgrOptions& _options) {
@@ -134,6 +140,13 @@ Status TableMgr::init(const TableMgrOptions& _options) {
 
     opt = _options;
     const DBConfig* db_config = getDbConfig();
+
+    if ( db_config->compOpt.cbGetMaxSize &&
+         db_config->compOpt.cbCompress &&
+         db_config->compOpt.cbDecompress ) {
+        // Cache the compression setting.
+        opt.compressionEnabled = true;
+    }
 
     compactStatus.resize(db_config->numL0Partitions);
     for (size_t ii=0; ii<compactStatus.size(); ++ii) {

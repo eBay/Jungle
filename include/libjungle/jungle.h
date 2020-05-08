@@ -210,7 +210,7 @@ class DB {
     friend class FlusherQueue;
     friend class LogMgr;
     friend class LogReclaimer;
-    friend class Merger;
+    friend class MemTable;
     friend class TableMgr;
 
 public:
@@ -669,6 +669,13 @@ public:
      * @return Log level.
      */
     int getLogLevel() const;
+
+    /**
+     * Get the DB path of this instance.
+     *
+     * @return DB path.
+     */
+    std::string getPath() const;
 
 private:
     DB();

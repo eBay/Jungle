@@ -183,6 +183,8 @@ private:
     };
 
 // === FUNCTIONS
+    static size_t getLengthMetaSize(uint64_t flags);
+
     Status getReady();
 
 // === VARIABLES

@@ -115,19 +115,12 @@ public:
                         const uint64_t checkpoint);
     Status closeSnapshot(DB* snap_handle);
 
-    static void userMetaToRawMeta(const SizedBuf& user_meta,
-                                  bool is_tombstone,
-                                  SizedBuf& raw_meta_out);
-
-    static void rawMetaToUserMeta(const SizedBuf& raw_meta,
-                                  bool& is_tombstone_out,
-                                  SizedBuf& user_meta_out);
-
     Status sync();
 
     Status setSingle(uint32_t key_hash_val,
                      const Record& rec,
-                     uint64_t& offset_out);
+                     uint64_t& offset_out,
+                     bool set_as_it_is = false);
 
     Status setBatch(std::list<Record*>& batch,
                     std::list<uint64_t>& checkpoints,
@@ -255,12 +248,24 @@ public:
 
 private:
 // === TYPES
-    // Compaction is triggered only when file size is bigger than 4MB.
+    /**
+     * Compaction is triggered only when file size is bigger than 4MB.
+     */
     static const uint64_t MIN_COMPACT_FILE_SIZE = 4*1024*1024;
-    // Compact when `active size < file size * 50 %`.
+
+    /**
+     * Compact when `active size < file size * 50 %`.
+     */
     static const uint64_t COMPACT_RATIO = 50;
-    // Additional size added to user meta.
+
+    /**
+     * Additional size added to user meta.
+     */
     static const size_t META_ADD_SIZE = 9;
+
+    static const uint32_t TF_FLAG_TOMBSTONE    = 0x1;
+
+    static const uint32_t TF_FLAG_COMPRESSED   = 0x2;
 
     struct FdbHandle {
         FdbHandle(TableFile* _parent,
@@ -294,7 +299,37 @@ private:
         FdbHandle* handle;
     };
 
+    struct InternalMeta {
+        InternalMeta()
+            : isTombstone(false), isCompressed(false), originalValueLen(0)
+            {}
+        bool isTombstone;
+        bool isCompressed;
+        uint32_t originalValueLen;
+    };
+
 // === FUNCTIONS
+    static void userMetaToRawMeta(const SizedBuf& user_meta,
+                                  const InternalMeta& internal_meta,
+                                  SizedBuf& raw_meta_out);
+
+    static void rawMetaToUserMeta(const SizedBuf& raw_meta,
+                                  InternalMeta& internal_meta_out,
+                                  SizedBuf& user_meta_out);
+
+    static uint32_t tfExtractFlags(const SizedBuf& raw_meta);
+
+    static bool tfIsTombstone(uint32_t flags);
+
+    static bool tfIsCompressed(uint32_t flags);
+
+    static size_t getInternalMetaLen(const InternalMeta& meta);
+
+    Status decompressValue(DB* parent_db,
+                           const DBConfig* db_config,
+                           Record& rec_io,
+                           const InternalMeta& i_meta);
+
     void initBooster(size_t level, const DBConfig* db_config);
 
     Status setCheckpoint(Record* rec,

@@ -74,7 +74,6 @@ class DBMgr {
     friend class CmdHandler;
     friend class Compactor;
     friend class LogReclaimer;
-    friend class Merger;
 
 public:
     static const size_t MAX_OP_HISTORY = 360;   // 1 hour.

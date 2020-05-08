@@ -92,6 +92,11 @@ add_executable(log_reclaim_test ${LOG_RECLAIM_TEST})
 target_link_libraries(log_reclaim_test ${JUNGLE_TEST_DEPS})
 add_dependencies(log_reclaim_test static_lib)
 
+set(COMPRESSION_TEST ${TEST_DIR}/jungle/compression_test.cc)
+add_executable(compression_test ${COMPRESSION_TEST})
+target_link_libraries(compression_test ${JUNGLE_TEST_DEPS})
+add_dependencies(compression_test static_lib)
+
 set(MT_TEST ${TEST_DIR}/jungle/mt_test.cc)
 add_executable(mt_test ${MT_TEST})
 target_link_libraries(mt_test ${JUNGLE_TEST_DEPS})
