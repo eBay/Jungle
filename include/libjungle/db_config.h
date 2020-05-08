@@ -59,6 +59,7 @@ typedef CompactionCbDecision (*CompactionCbFunc)
                              (const CompactionCbParams& params);
 #endif
 
+class DB;
 class DBConfig {
 public:
     DBConfig()
@@ -349,6 +350,68 @@ public:
      * which may cause burst IO and high latency.
      */
     uint32_t preFlushDirtyInterval_sec;
+
+    /**
+     * Type definition for pluggable compression options.
+     */
+    struct CompressionOptions {
+        CompressionOptions()
+            : cbGetMaxSize(nullptr)
+            , cbCompress(nullptr)
+            , cbDecompress(nullptr)
+            {}
+
+        /**
+         * Callback function to get the maximum (worst case) size of
+         * the expected output data after the compression.
+         *
+         * @param DB* Jungle instance.
+         * @param Record& Record to compress.
+         * @return The maximum size of the expected output data.
+         *         If this function returns 0 or negative value,
+         *         Jungle will not compress this record.
+         */
+        std::function< ssize_t(DB*, const Record&) > cbGetMaxSize;
+
+        /**
+         * Callback function to compress the given record value.
+         *
+         * @param DB* Jungle instance.
+         * @param Record& Record to compress.
+         * @param SizedBuf&
+         *     Buffer where the compression output data will
+         *     be stored. The size of this buffer will be the same as
+         *     the return value of `cbGetMaxSize`. Jungle will manage
+         *     the allocation and deallocation of this buffer.
+         * @return The actual size of compressed data.
+         *         If the return value is negative, Jungle will treat it
+         *         as an error code.
+         *         If it returns 0, Jungle will treat it as the cancellation
+         *         of the record compression, not an error.
+         */
+        std::function< ssize_t(DB*, const Record&, SizedBuf&) > cbCompress;
+
+        /**
+         * Callback function to decompress the given compressed data.
+         *
+         * @param DB* Jungle instance.
+         * @param SizedBuf& Compressed data to decompress.
+         * @param SizedBuf&
+         *     Buffer where the decompression output data will be
+         *     stored. The size of this buffer will be the same as
+         *     the original data size before the compression. Jungle
+         *     will manage the allocation and deallocation of this buffer.
+         * @return The size of decompressed data.
+         *         If the return value does not match the size of
+         *         output buffer, Jungle will treat it as an error code.
+         */
+        std::function< ssize_t(DB*, const SizedBuf&, SizedBuf&) > cbDecompress;
+    };
+
+    /**
+     * Compression options.
+     */
+    CompressionOptions compOpt;
 };
 
 class GlobalConfig {

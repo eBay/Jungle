@@ -722,6 +722,10 @@ int DB::getLogLevel() const {
     return p->myLog->getLogLevel();
 }
 
+std::string DB::getPath() const {
+    return p->path;
+}
+
 void DB::setDebugParams(const DebugParams& to,
                         size_t effective_time_sec)
 {

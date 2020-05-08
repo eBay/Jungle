@@ -176,6 +176,8 @@ public:
 
     size_t getNumLogFiles();
 
+    DB* getParentDb() const { return parentDb; }
+
     struct Iterator {
     public:
         Iterator();

@@ -23,6 +23,7 @@ limitations under the License.
 
 namespace jungle {
 
+// Used for log -> L0 flush.
 void TableMgr::setTableFile( std::list<Record*>& batch,
                              std::list<uint64_t>& checkpoints,
                              bool bulk_load_mode,
@@ -48,6 +49,7 @@ void TableMgr::setTableFile( std::list<Record*>& batch,
     }
 }
 
+// Used for in-place/inter-level compaction, split/merge.
 void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
                                    TableFile* src_file,
                                    TableFile* dst_file,
@@ -96,7 +98,12 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
         }
         uint32_t key_hash_val = getMurmurHash32(rec_out.kv.key);;
         uint64_t offset_out = 0; // not used.
-        dst_file->setSingle(key_hash_val, rec_out, offset_out);
+
+        // WARNING:
+        //   Since `rec_out` from `getByOffset` contains raw meta and
+        //   compressed value (if enabled), we should skip processing
+        //   meta and compression.
+        dst_file->setSingle(key_hash_val, rec_out, offset_out, true);
 
         if (d_params.compactionItrScanDelayUs) {
             // If debug parameter is given, sleep here.

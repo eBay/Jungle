@@ -220,7 +220,6 @@ TableFile::FdbHandleGuard::~FdbHandleGuard() {
     if (handle) tFile->returnHandle(handle);
 }
 
-
 TableFile::TableFile(const TableMgr* table_mgr)
     : myNumber(NOT_INITIALIZED)
     , fOps(nullptr)
@@ -636,15 +635,19 @@ Status TableFile::setCheckpoint(Record* rec,
 }
 
 void TableFile::userMetaToRawMeta(const SizedBuf& user_meta,
-                                  bool is_tombstone,
+                                  const InternalMeta& internal_meta,
                                   SizedBuf& raw_meta_out)
 {
-    // Add 9 bytes in front:
-    //   identifier (1 byte) + version (4 bytes) + flags (4 bytes).
+    // Add 9+ bytes in front:
+    //   identifier                 1 byte
+    //   version                    4 bytes
+    //   flags                      4 bytes
+    // [ original value length      4 bytes ] only if compressed
 
     // NOTE: Even though `user_meta` is empty, we should put 9 bytes.
+    const size_t I_META_SIZE = getInternalMetaLen(internal_meta);
     if (!raw_meta_out.size) {
-        raw_meta_out.alloc(user_meta.size + META_ADD_SIZE);
+        raw_meta_out.alloc(user_meta.size + I_META_SIZE);
     }
     RwSerializer rw(raw_meta_out);
 
@@ -655,15 +658,21 @@ void TableFile::userMetaToRawMeta(const SizedBuf& user_meta,
 
     // Flags.
     uint32_t flags = 0x0;
-    if (is_tombstone) flags |= 0x1;
+    if (internal_meta.isTombstone) flags |= TF_FLAG_TOMBSTONE;
+    if (internal_meta.isCompressed) flags |= TF_FLAG_COMPRESSED;
     rw.putU32(flags);
+
+    // Original value length (if compressed).
+    if (internal_meta.isCompressed) {
+        rw.putU32(internal_meta.originalValueLen);
+    }
 
     // User meta.
     rw.put(user_meta.data, user_meta.size);
 }
 
 void TableFile::rawMetaToUserMeta(const SizedBuf& raw_meta,
-                                  bool& is_tombstone_out,
+                                  InternalMeta& internal_meta_out,
                                   SizedBuf& user_meta_out)
 {
     if (raw_meta.empty()) return;
@@ -684,16 +693,37 @@ void TableFile::rawMetaToUserMeta(const SizedBuf& raw_meta,
 
     // Flags.
     uint32_t flags = rw.getU32();
-    if (flags & 0x1) is_tombstone_out = true;
+    if (flags & TF_FLAG_TOMBSTONE) internal_meta_out.isTombstone = true;
+    if (flags & TF_FLAG_COMPRESSED) internal_meta_out.isCompressed = true;
+
+    if (internal_meta_out.isCompressed) {
+        // Original value length (if compressed).
+        internal_meta_out.originalValueLen = rw.getU32();
+    }
 
     // User meta.
-    if (raw_meta.size <= META_ADD_SIZE) {
+    if (rw.pos() >= raw_meta.size) {
         // Empty user meta.
         return;
     }
 
-    user_meta_out.alloc(raw_meta.size - META_ADD_SIZE);
+    user_meta_out.alloc(raw_meta.size - rw.pos());
     rw.get(user_meta_out.data, user_meta_out.size);
+}
+
+uint32_t TableFile::tfExtractFlags(const SizedBuf& raw_meta) {
+    RwSerializer rw(raw_meta);
+    rw.getU8();
+    rw.getU32();
+    return rw.getU32();
+}
+
+bool TableFile::tfIsTombstone(uint32_t flags) {
+    return (flags & TF_FLAG_TOMBSTONE);
+}
+
+bool TableFile::tfIsCompressed(uint32_t flags) {
+    return (flags & TF_FLAG_COMPRESSED);
 }
 
 Status TableFile::sync() {
@@ -702,9 +732,17 @@ Status TableFile::sync() {
     return Status();
 }
 
+size_t TableFile::getInternalMetaLen(const InternalMeta& meta) {
+    return sizeof(uint8_t) +    // Identifier
+           sizeof(uint32_t) +   // Version
+           sizeof(uint32_t) +   // Flags
+           (meta.isCompressed ? sizeof(uint32_t) : 0);  // Length (if compressed)
+}
+
 Status TableFile::setSingle(uint32_t key_hash_val,
                             const Record& rec,
-                            uint64_t& offset_out)
+                            uint64_t& offset_out,
+                            bool set_as_it_is)
 {
     fdb_doc doc;
     fdb_status fs;
@@ -714,25 +752,89 @@ Status TableFile::setSingle(uint32_t key_hash_val,
     doc.key = rec.kv.key.data;
     doc.keylen = rec.kv.key.size;
 
-    char tmp_buf[512];
-    SizedBuf raw_meta_static(rec.meta.size + META_ADD_SIZE, tmp_buf);
+    DB* parent_db = tableMgr->getParentDb();
+    const DBConfig* db_config = tableMgr->getDbConfig();
+    const bool COMPRESSION = tableMgr->isCompressionEnabled();
+    InternalMeta i_meta;
+    i_meta.isTombstone = rec.isDel();
 
+    const size_t TMP_BUF_SIZE = 512;
+    char tmp_buf[TMP_BUF_SIZE];
+    SizedBuf raw_meta_static;
     SizedBuf raw_meta_alloc;
     SizedBuf::Holder h_raw_meta(raw_meta_alloc);
 
-    if (rec.meta.size < 500) {
-        userMetaToRawMeta(rec.meta, rec.isDel(), raw_meta_static);
-        doc.meta = raw_meta_static.data;
-        doc.metalen = raw_meta_static.size;
+    size_t original_value_size = rec.kv.value.size;
+    ssize_t comp_buf_size = 0; // Output buffer size.
+    ssize_t comp_size = 0; // Actual compressed size.
+
+    // Local compression buffer to avoid frequent memory allocation.
+    const ssize_t LOCAL_COMP_BUF_SIZE = 4096;
+    char local_comp_buf[LOCAL_COMP_BUF_SIZE];
+    SizedBuf comp_buf;
+    SizedBuf::Holder h_comp_buf(comp_buf);
+    // Refer to the local buffer by default.
+    comp_buf.referTo( SizedBuf(LOCAL_COMP_BUF_SIZE, local_comp_buf) );
+
+    if (set_as_it_is) {
+        // Store the given meta as it is.
+        doc.meta = rec.meta.data;
+        doc.metalen = rec.meta.size;
 
     } else {
-        userMetaToRawMeta(rec.meta, rec.isDel(), raw_meta_alloc);
-        doc.meta = raw_meta_alloc.data;
-        doc.metalen = raw_meta_alloc.size;
+        // Otherwise: prepend internal meta and do compression if enabled.
+
+        if (COMPRESSION && !i_meta.isTombstone) {
+            // If compression is enabled, ask if we compress this record.
+            comp_buf_size = db_config->compOpt.cbGetMaxSize(parent_db, rec);
+            if (comp_buf_size > 0) {
+                if (comp_buf_size > LOCAL_COMP_BUF_SIZE) {
+                    // Bigger than the local buffer size, allocate a new.
+                    comp_buf.alloc(comp_buf_size);
+                }
+                // Do compression.
+                comp_size = db_config->compOpt.cbCompress(parent_db, rec, comp_buf);
+                if (comp_size > 0) {
+                    // Compression succeeded, set the flag.
+                    i_meta.isCompressed = true;
+                    i_meta.originalValueLen = original_value_size;
+                } else if (comp_size < 0) {
+                    _log_err( myLog, "compression failed: %zd, db %s, key %s",
+                              comp_size,
+                              parent_db->getPath().c_str(),
+                              rec.kv.key.toReadableString().c_str() );
+                }
+                // Otherwise: if `comp_size == 0`,
+                //            that implies cancelling compression.
+            }
+        }
+
+        const size_t INTERNAL_META_SIZE = getInternalMetaLen(i_meta);
+
+        if (rec.meta.size + INTERNAL_META_SIZE < TMP_BUF_SIZE) {
+            // Use `tmp_buf`.
+            raw_meta_static.referTo
+                ( SizedBuf(rec.meta.size + INTERNAL_META_SIZE, tmp_buf) );
+            userMetaToRawMeta(rec.meta, i_meta, raw_meta_static);
+            doc.meta = raw_meta_static.data;
+            doc.metalen = raw_meta_static.size;
+
+        } else {
+            // Metadata is too big. Allocate a new.
+            userMetaToRawMeta(rec.meta, i_meta, raw_meta_alloc);
+            doc.meta = raw_meta_alloc.data;
+            doc.metalen = raw_meta_alloc.size;
+        }
     }
 
-    doc.body = rec.kv.value.data;
-    doc.bodylen = rec.kv.value.size;
+    if (i_meta.isCompressed) {
+        doc.body = comp_buf.data;
+        doc.bodylen = comp_size;
+    } else {
+        doc.body = rec.kv.value.data;
+        doc.bodylen = rec.kv.value.size;
+    }
+
     doc.seqnum = rec.seqNum;
     doc.flags = FDB_CUSTOM_SEQNUM;
 
@@ -883,6 +985,7 @@ Status TableFile::get(DB* snap_handle,
                       Record& rec_io,
                       bool meta_only)
 {
+    DB* parent_db = tableMgr->getParentDb();
     const DBConfig* db_config = tableMgr->getDbConfig();
 
     // Search bloom filter first if exists.
@@ -946,7 +1049,7 @@ Status TableFile::get(DB* snap_handle,
                 free(doc_by_offset.meta);
                 free(doc_by_offset.body);
             }
-        }
+        };
 
         if (!skip_normal_search) {
             if (meta_only) {
@@ -965,6 +1068,8 @@ Status TableFile::get(DB* snap_handle,
         return Status::KEY_NOT_FOUND;
     }
 
+   try {
+    Status s;
     rec_io.kv.value.set(doc->bodylen, doc->body);
     rec_io.kv.value.setNeedToFree();
 
@@ -973,19 +1078,64 @@ Status TableFile::get(DB* snap_handle,
     SizedBuf raw_meta(doc->metalen, doc->meta);;
     SizedBuf::Holder h_raw_meta(raw_meta); // auto free raw meta.
     raw_meta.setNeedToFree();
-    bool is_tombstone_out = false;
-    rawMetaToUserMeta(raw_meta, is_tombstone_out, user_meta_out);
+
+    InternalMeta i_meta_out;
+    rawMetaToUserMeta(raw_meta, i_meta_out, user_meta_out);
 
     user_meta_out.moveTo( rec_io.meta );
 
+    // Decompress if needed.
+    TC( decompressValue(parent_db, db_config, rec_io, i_meta_out) );
+
     rec_io.seqNum = doc->seqnum;
-    rec_io.type = (is_tombstone_out || doc->deleted)
+    rec_io.type = (i_meta_out.isTombstone || doc->deleted)
                   ? Record::DELETION
                   : Record::INSERTION;
 
     return Status();
+
+   } catch (Status s) {
+    rec_io.kv.value.free();
+    rec_io.meta.free();
+    return s;
+   }
 }
 
+Status TableFile::decompressValue(DB* parent_db,
+                                  const DBConfig* db_config,
+                                  Record& rec_io,
+                                  const InternalMeta& i_meta)
+{
+    if (!i_meta.isCompressed) return Status::OK;
+
+    if (!db_config->compOpt.cbDecompress) {
+        _log_fatal(myLog, "found compressed record %s, but decompression "
+                   "function is not given",
+                   rec_io.kv.key.toReadableString().c_str());
+        return Status::INVALID_CONFIG;
+    }
+
+    SizedBuf decomp_buf(i_meta.originalValueLen);
+    ssize_t output_len =
+        db_config->compOpt.cbDecompress(parent_db, rec_io.kv.value, decomp_buf);
+    if (output_len != i_meta.originalValueLen) {
+        _log_fatal(myLog, "decompression failed: %zd, db %s, key %s",
+                   output_len,
+                   parent_db->getPath().c_str(),
+                   rec_io.kv.key.toReadableString().c_str());
+        return Status::DECOMPRESSION_FAILED;
+    }
+
+    // Switch value and free the previous (compressed) one.
+    SizedBuf prev_buf = rec_io.kv.value;
+    rec_io.kv.value = decomp_buf;
+    prev_buf.free();
+    return Status::OK;
+}
+
+// WARNING:
+//   For performance gaining purpose, `rec_out` returned by
+//   this function will have RAW meta including internal flags.
 Status TableFile::getByOffset(DB* snap_handle,
                               uint64_t offset,
                               Record& rec_out)
@@ -1025,18 +1175,11 @@ Status TableFile::getByOffset(DB* snap_handle,
     rec_out.kv.value.set(doc->bodylen, doc->body);
     rec_out.kv.value.setNeedToFree();
 
-    // Decode meta.
-    SizedBuf user_meta_out;
-    SizedBuf raw_meta(doc->metalen, doc->meta);;
-    SizedBuf::Holder h_raw_meta(raw_meta); // auto free raw meta.
-    raw_meta.setNeedToFree();
-    bool is_tombstone_out = false;
-    rawMetaToUserMeta(raw_meta, is_tombstone_out, user_meta_out);
-
-    user_meta_out.moveTo( rec_out.meta );
+    rec_out.meta.set(doc->metalen, doc->meta);
+    rec_out.meta.setNeedToFree();
 
     rec_out.seqNum = doc->seqnum;
-    rec_out.type = (is_tombstone_out || doc->deleted)
+    rec_out.type = tfIsTombstone(0)
                    ? Record::DELETION
                    : Record::INSERTION;
 

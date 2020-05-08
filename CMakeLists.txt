@@ -26,14 +26,16 @@ endif()
 # Libraries
 #set(LIBZ z)
 
+# Find snappy
+include(cmake/FindSnappy.cmake)
 if (SNAPPY_OPTION STREQUAL "Enable")
-    include(cmake/FindSnappy.cmake)
-
     if (SNAPPY_FOUND)
         set(LIBSNAPPY ${SNAPPY_LIBRARIES})
+        add_definitions(-DSNAPPY_AVAILABLE=1)
     else()
-       MESSAGE(FATAL_ERROR "Can't find snappy, if you want to build without snappy set"
-               " \"-DSNAPPY_OPTION=Disable\"")
+        MESSAGE(FATAL_ERROR "Can't find snappy, "
+                "if you want to build without snappy set"
+                " \"-DSNAPPY_OPTION=Disable\"")    
     endif(SNAPPY_FOUND)
 endif()
 
@@ -213,5 +215,6 @@ if (CODE_COVERAGE GREATER 0)
                      log_reclaim_test
                      level_extension_test
                      table_lookup_booster_test
+                     compression_test
     )
 endif()
