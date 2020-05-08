@@ -533,7 +533,7 @@ Status LogFile::purgeMemTable() {
     return Status();
 }
 
-uint64_t LogFile::size() const {
+uint64_t LogFile::getMemTableSize() const {
     return mTable ? mTable->size() : 0;
 }
 
@@ -726,6 +726,7 @@ bool LogFile::isValidToWrite() {
     uint32_t max_log_entries = logMgr->getDbConfig()->maxEntriesInLogFile;
     if ( immutable ||
          fileSize > max_log_file_size ||
+         getMemTableSize() > max_log_file_size ||
          mTable->getNumLogs() >= max_log_entries )
         return false;
     return true;

@@ -69,7 +69,7 @@ public:
         , logFileTtl_sec(0)
         , maxKeepingMemtables(0)
         , maxKeepingCheckpoints(10)
-        , maxEntriesInLogFile(16384)        // 16 KiB
+        , maxEntriesInLogFile(16384)        // 16K
         , maxLogFileSize(4194304)           // 4 MiB
         , cmpFunc(nullptr)
         , cmpFuncParam(nullptr)

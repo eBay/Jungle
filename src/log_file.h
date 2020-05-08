@@ -87,7 +87,7 @@ public:
 
     bool isMemTablePurged() const { return memtablePurged; }
 
-    uint64_t size() const;
+    uint64_t getMemTableSize() const;
 
     Status sync();
 

@@ -917,6 +917,38 @@ int log_flush_zero_test() {
     return 0;
 }
 
+int moving_to_next_log_without_sync_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.numL0Partitions = 4;
+    config.maxLogFileSize = 1024*1024;
+    config.logSectionOnly = true;
+    config.logFileTtl_sec = 60;
+
+    jungle::DB* db;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    std::string val_payload(1024, 'x');
+    const size_t NUM = 2000;
+    for (size_t ii=0; ii<NUM; ++ii) {
+        std::string key_str = TestSuite::lzStr(6, ii);
+        CHK_Z( db->setSN(ii+1, jungle::KV(key_str, val_payload)) );
+    }
+    // No sync to file, but `log0000_00000001` file should exist.
+    CHK_TRUE( TestSuite::exist( filename + "/log0000_00000001" ) );
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
@@ -956,6 +988,9 @@ int main(int argc, char** argv) {
 
     ts.doTest("log flush upto zero test",
               log_flush_zero_test);
+
+    ts.doTest("moving to next log without sync test",
+              moving_to_next_log_without_sync_test);
 
 #if 0
     ts.doTest("reload empty files test",

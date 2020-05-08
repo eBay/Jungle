@@ -48,7 +48,7 @@ void LogManifest::reclaimExpiredLogFiles() {
 
         // Collect memory usage info
         if ( !info->file->isMemTablePurged() ) {
-            uint64_t size = info->file->size();
+            uint64_t size = info->file->getMemTableSize();
             if ( size > 0 ) {
                 size_message << ", logfile_" << info->logFileNum << ": " << size;
                 total_memtable_size += size;
