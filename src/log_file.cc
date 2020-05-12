@@ -27,7 +27,7 @@ namespace jungle {
 static uint8_t LOGFILE_FOOTER[8] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0xab, 0xcc};
 static uint32_t LOGFILE_VERSION = 0x1;
 
-LogFile::LogFile(const LogMgr* log_mgr)
+LogFile::LogFile(LogMgr* log_mgr)
     : logFileNum(0)
     , fHandle(nullptr)
     , mTable(nullptr)
@@ -248,8 +248,12 @@ Status LogFile::loadMemTable() {
     if (okToCloseFHandle()) {
         EP( closeFHandle() );
     }
+
     memtablePurged = false;
     _log_info(myLog, "loaded memtable of file %zu", logFileNum);
+
+    logMgr->increaseOpenMemtable();
+    logMgr->doLogReclaimIfNecessary();
 
     return Status();
 }
@@ -515,6 +519,7 @@ Status LogFile::purgeMemTable() {
 
     // Now all incoming request should not go to `mTable`.
     memtablePurged = true;
+    logMgr->decreaseOpenMemtable();
 
     if (mTable) {
         DELETE(mTable);

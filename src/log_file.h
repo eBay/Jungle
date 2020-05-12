@@ -35,7 +35,7 @@ class LogMgr;
 class LogFile {
     friend class MemTable;
 public:
-    LogFile(const LogMgr* log_mgr);
+    LogFile(LogMgr* log_mgr);
     ~LogFile();
 
     static std::string getLogFileName(const std::string& path,
@@ -221,7 +221,7 @@ private:
     PurgedMemTableMeta memTableOnFileMeta;
 
     // Parent log manager.
-    const LogMgr* logMgr;
+    LogMgr* logMgr;
 
     // Current file size.
     uint64_t fileSize;

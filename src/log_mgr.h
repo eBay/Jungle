@@ -148,6 +148,9 @@ public:
                  TableMgr* table_mgr);
 
     Status doLogReclaim();
+    Status doLogReclaimIfNecessary();
+    uint32_t increaseOpenMemtable() { return numMemtables.fetch_add(1) + 1; }
+    uint32_t decreaseOpenMemtable() { return numMemtables.fetch_sub(1) - 1; }
 
     Status checkpoint(uint64_t& seq_num_out, bool call_fsync = true);
     Status getAvailCheckpoints(std::list<uint64_t>& chk_out);
@@ -334,6 +337,9 @@ protected:
     // If non-zero, records up to this number (inclusive) will be
     // visible to user.
     std::atomic<uint64_t> visibleSeqBarrier;
+
+    // Number of memory loaded log files.
+    std::atomic<uint32_t> numMemtables;
 
     // Logger.
     SimpleLogger* myLog;

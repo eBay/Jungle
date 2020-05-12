@@ -76,7 +76,7 @@ struct LogFileInfo {
     void grab(bool load_memtable_if_needed = false) {
         refCount.fetch_add(1);
 
-        std::lock_guard<std::mutex> l(evictionLock);
+        std::lock_guard<std::recursive_mutex> l(evictionLock);
         if (load_memtable_if_needed) {
             if (file->isMemTablePurged()) {
                 file->loadMemTable();
@@ -128,7 +128,7 @@ struct LogFileInfo {
         if (evicted) {
             uint64_t count = refCount.fetch_sub(1);
             if (count == 1) {
-                std::lock_guard<std::mutex> l(evictionLock);
+                std::lock_guard<std::recursive_mutex> l(evictionLock);
                 // WARNING:
                 //   There shouldn't be another thread that called grab() before this.
                 uint64_t count_protected = refCount.load();
@@ -146,7 +146,7 @@ struct LogFileInfo {
     void setRemoved() { removed.store(true); }
     bool isRemoved() { return removed.load(); }
     void setEvicted() {
-        std::lock_guard<std::mutex> l(evictionLock);
+        std::lock_guard<std::recursive_mutex> l(evictionLock);
         evicted.store(true);
     }
     bool isEvicted() { return evicted.load(); }
@@ -170,7 +170,7 @@ struct LogFileInfo {
     std::atomic<bool> evicted;
 
     // Lock for loading & evicting mem-table.
-    std::mutex evictionLock;
+    std::recursive_mutex evictionLock;
 };
 
 struct LogFileInfoGuard {
@@ -191,7 +191,7 @@ struct LogFileInfoGuard {
 class LogMgr;
 class LogManifest {
 public:
-    LogManifest(const LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops);
+    LogManifest(LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops);
     ~LogManifest();
 
     bool isLogReclaimerActive();
@@ -278,7 +278,7 @@ private:
     // Entries are shared with `logFiles`.
     skiplist_raw logFilesBySeq;
 
-    const LogMgr* logMgr;
+    LogMgr* logMgr;
     SimpleLogger* myLog;
 };
 

@@ -145,7 +145,7 @@ void LogManifest::reclaimExpiredLogFiles() {
     }
 }
 
-LogManifest::LogManifest(const LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops)
+LogManifest::LogManifest(LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops)
     : fOps(_f_ops)
     , fLogOps(_f_l_ops)
     , mFile(nullptr)
@@ -559,7 +559,7 @@ Status LogManifest::getLogFileInfo(const uint64_t log_num,
     if (force_not_load_memtable) {
         info_out->grab();
     } else {
-        info_out->grab(isLogReclaimerActive());
+        info_out->grab(true);
     }
     skiplist_release_node(cursor);
     return Status();
@@ -582,7 +582,7 @@ Status LogManifest::getLogFileInfoRange(const uint64_t s_log_inc,
         if (force_not_load_memtable) {
             l_info->grab();
         } else {
-            l_info->grab(isLogReclaimerActive());
+            l_info->grab(true);
         }
         info_out.push_back(l_info);
 
@@ -626,7 +626,7 @@ Status LogManifest::getLogFileInfoBySeq(const uint64_t seq_num,
     if (force_not_load_memtable) {
         info_out->grab();
     } else {
-        info_out->grab(isLogReclaimerActive());
+        info_out->grab(true);
     }
     skiplist_release_node(cursor);
     return Status();
