@@ -38,7 +38,7 @@ int basic_log_reclaim_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -136,7 +136,7 @@ int multi_instances_reclaim_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 50;
     config.logSectionOnly = true;
@@ -267,7 +267,7 @@ int reload_log_in_reclaim_mode_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -356,7 +356,7 @@ int reload_with_empty_files_test_create() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10000;
     config.logSectionOnly = true;
@@ -400,7 +400,7 @@ int reload_with_empty_files_test_load() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10000;
     config.logSectionOnly = true;
@@ -445,7 +445,7 @@ int async_sync_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -507,7 +507,7 @@ int crash_after_adding_new_log_file_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -564,7 +564,7 @@ int log_rollback_basic_test(bool sync_before_rollback) {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -634,7 +634,7 @@ int log_rollback_multi_files_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -700,7 +700,7 @@ int log_rollback_and_reclaim_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -758,7 +758,7 @@ int log_rollback_with_concurrent_write_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -832,7 +832,7 @@ int urgent_reclaim_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -888,7 +888,7 @@ int log_flush_zero_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.numL0Partitions = 4;
     config.maxEntriesInLogFile = 10;
     config.logSectionOnly = true;
@@ -949,6 +949,63 @@ int moving_to_next_log_without_sync_test() {
     return 0;
 }
 
+int immediate_log_purging_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+
+    jungle::GlobalConfig g_config;
+    g_config.logFileReclaimerSleep_sec = 1;
+    g_config.flusherSleepDuration_ms = 3600 * 1000;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.maxKeepingMemtables = 8;
+    config.maxEntriesInLogFile = 10;
+    config.logSectionOnly = true;
+    config.logFileTtl_sec = 3600;
+
+    jungle::DB* db;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // Create 200 log files.
+    const size_t NUM = 2000;
+    for (size_t ii=0; ii<NUM; ++ii) {
+        std::string key_str = TestSuite::lzStr(6, ii);
+        std::string val_str = TestSuite::lzStr(6, ii);
+        CHK_Z( db->setSN(ii+1, jungle::KV(key_str, val_str)) );
+        if (ii % config.maxEntriesInLogFile == 0) {
+            CHK_Z( db->sync(false) );
+        }
+    }
+
+    // Truncate half.
+    CHK_Z( db->flushLogs(jungle::FlushOptions(), 1000) );
+
+    // Scan all logs which will cause burst memtable load.
+    for (size_t ii=1001; ii<NUM; ++ii) {
+        jungle::KV kv_out;
+        jungle::KV::Holder h(kv_out);
+        CHK_Z( db->getSN(ii+1, kv_out) );
+        TestSuite::sleep_ms(1);
+    }
+
+    jungle::DBStats stats;
+    db->getStats(stats);
+    // Number of open Memtables shouldn't exceed `numKeepingMemtables`.
+    // But considering some timing issues, we will allow up to 2x.
+    TestSuite::_msg("open memtables: %zu\n", stats.numOpenMemtables);
+    CHK_SM(stats.numOpenMemtables, 2 * config.maxKeepingMemtables);
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
@@ -991,6 +1048,9 @@ int main(int argc, char** argv) {
 
     ts.doTest("moving to next log without sync test",
               moving_to_next_log_without_sync_test);
+
+    ts.doTest("immediate log purging test",
+              immediate_log_purging_test);
 
 #if 0
     ts.doTest("reload empty files test",

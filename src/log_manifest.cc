@@ -90,8 +90,10 @@ void LogManifest::reclaimExpiredLogFiles() {
     // Log memory usage info
     thread_local uint64_t last_total_log_size = 0;
     if ( total_memtable_size != last_total_log_size ) {
-        _log_info(myLog, "memtable memory usage info, total %lu%s",
+        _log_info(myLog, "memtable memory usage info, total %lu bytes, "
+                  "%zu tables%s",
                   total_memtable_size,
+                  live_file_acc.size(),
                   size_message.str().c_str());
         last_total_log_size = total_memtable_size;
     }
