@@ -191,7 +191,7 @@ struct LogFileInfoGuard {
 class LogMgr;
 class LogManifest {
 public:
-    LogManifest(const LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops);
+    LogManifest(LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops);
     ~LogManifest();
 
     bool isLogReclaimerActive();
@@ -278,7 +278,7 @@ private:
     // Entries are shared with `logFiles`.
     skiplist_raw logFilesBySeq;
 
-    const LogMgr* logMgr;
+    LogMgr* logMgr;
     SimpleLogger* myLog;
 };
 

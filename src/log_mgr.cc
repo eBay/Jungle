@@ -40,6 +40,7 @@ LogMgr::LogMgr(DB* parent_db, const LogMgrOptions& _options)
     , lastFlushIntervalMs(0)
     , numSetRecords(0)
     , visibleSeqBarrier(0)
+    , numMemtables(0)
     , myLog(nullptr)
     , vlSync(VERBOSE_LOG_SUPPRESS_MS)
     {}
@@ -1130,6 +1131,17 @@ Status LogMgr::doLogReclaim() {
     assert(ow.op_sema->enabled);
 
     mani->reclaimExpiredLogFiles();
+    return Status();
+}
+
+Status LogMgr::doBackgroundLogReclaimIfNecessary() {
+    if (numMemtables > getDbConfig()->maxKeepingMemtables) {
+        DBMgr* db_mgr = DBMgr::getWithoutInit();
+        if (!db_mgr) {
+            return Status::NOT_INITIALIZED;
+        }
+        return db_mgr->workerMgr()->invokeWorker("reclaimer");
+    }
     return Status();
 }
 

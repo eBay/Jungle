@@ -145,7 +145,7 @@ void LogManifest::reclaimExpiredLogFiles() {
     }
 }
 
-LogManifest::LogManifest(const LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops)
+LogManifest::LogManifest(LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops)
     : fOps(_f_ops)
     , fLogOps(_f_l_ops)
     , mFile(nullptr)
