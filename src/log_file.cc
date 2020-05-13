@@ -519,21 +519,23 @@ Status LogFile::purgeMemTable() {
 
     // Now all incoming request should not go to `mTable`.
     memtablePurged = true;
-    logMgr->decreaseOpenMemtable();
+    uint32_t remaining_memtables = logMgr->decreaseOpenMemtable();
 
     if (mTable) {
         DELETE(mTable);
     }
     _log_info( myLog,
                "purged memtable of file %s %zu, %zu us, min seq %s, "
-               "max seq %s, flush seq %s, sync seq %s",
+               "max seq %s, flush seq %s, sync seq %s, %zu memtables "
+               "in memory",
                filename.c_str(),
                logFileNum,
                timer.getUs(),
                _seq_str( memTableOnFileMeta.minSeq ).c_str(),
                _seq_str( memTableOnFileMeta.maxSeq ).c_str(),
                _seq_str( memTableOnFileMeta.flushedSeq ).c_str(),
-               _seq_str( memTableOnFileMeta.syncedSeq ).c_str() );
+               _seq_str( memTableOnFileMeta.syncedSeq ).c_str(),
+               remaining_memtables );
 
     return Status();
 }
@@ -666,6 +668,9 @@ Status LogFile::destroySelf() {
     if (mTable) {
         delete mTable;
         mTable = nullptr;
+        if (immutable) {
+            logMgr->decreaseOpenMemtable();
+        }
     }
 
     return Status();
@@ -716,6 +721,10 @@ void LogFile::setImmutable() {
                    _seq_str(mTable->flushedSeqNum).c_str(),
                    _seq_str(mTable->syncedSeqNum).c_str(),
                    mTable->bytesSize.load() );
+        // Now memtable of this log file is able to be purged.
+        logMgr->increaseOpenMemtable();
+        logMgr->doBackgroundLogReclaimIfNecessary();
+
     } else {
         _log_info(myLog, "log file %s %zu becomes immutable",
                   filename.c_str(), logFileNum);

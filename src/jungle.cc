@@ -705,6 +705,10 @@ Status DB::getStats(DBStats& stats_out) {
         }
     }
 
+    if (p && p->logMgr) {
+        stats_out.numOpenMemtables = p->logMgr->getNumMemtables();
+    }
+
     TableStats t_stats;
     if (p && p->tableMgr) p->tableMgr->getStats(t_stats);
     stats_out.numKvs = t_stats.numKvs + num_kvs_log;

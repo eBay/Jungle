@@ -1135,11 +1135,19 @@ Status LogMgr::doLogReclaim() {
 }
 
 Status LogMgr::doBackgroundLogReclaimIfNecessary() {
-    if (numMemtables > getDbConfig()->maxKeepingMemtables) {
+    const DBConfig* db_config = getDbConfig();
+
+    // Only in log store mode.
+    if (!db_config->logSectionOnly) return Status();
+
+    if (numMemtables > db_config->maxKeepingMemtables) {
         DBMgr* db_mgr = DBMgr::getWithoutInit();
         if (!db_mgr) {
             return Status::NOT_INITIALIZED;
         }
+        _log_info(myLog, "trigger immediate log reclaim, %zu > %zu",
+                  numMemtables.load(),
+                  getDbConfig()->maxKeepingMemtables);
         return db_mgr->workerMgr()->invokeWorker("reclaimer");
     }
     return Status();

@@ -28,6 +28,7 @@ public:
         , workingSetSizeByte(0)
         , cacheSizeByte(0)
         , cacheUsedByte(0)
+        , numOpenMemtables(0)
         {}
 
     /**
@@ -49,6 +50,11 @@ public:
      * Amount of cache used (byte).
      */
     uint64_t cacheUsedByte;
+
+    /**
+     * Number of Memtables currently open.
+     */
+    uint32_t numOpenMemtables;
 };
 
 } // namespace jungle

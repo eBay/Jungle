@@ -76,6 +76,28 @@ struct LogFileInfo {
     void grab(bool load_memtable_if_needed = false) {
         refCount.fetch_add(1);
 
+        // WARNING:
+        //   We should put `lock_guard` here (after increasing
+        //   `refCount` and before the if-clause). If not, Memtable
+        //   purging can happen while the caller of this (`grab`)
+        //   function is doing something with the Memtable.
+        //
+        //   e.g.) T1 (calls `done`), T2 (calls `grab`)
+        //     T1: decrease `refCount` -> it becomes 0.
+        //     T1: grab `evictionLock`, `refCount` is still 0.
+        //         Start purging.
+        //        --- switch ---
+        //     T2: increase `refCount` by 1.
+        //         `load_memtable_if_needed = false`.
+        //     T2: `LogFile::mTable` is still not `nullptr`, or
+        //         `memtablePurged` is `false` yet.
+        //         Do something with `mTable`.
+        //        --- switch ---
+        //     T1: Delete `mTable`.
+        //        --- crash ---
+        //
+        // FIXME: Need to address this issue so that we can move
+        //        `lock_guard` inside the if-clause.
         std::lock_guard<std::mutex> l(evictionLock);
         if (load_memtable_if_needed) {
             if (file->isMemTablePurged()) {
