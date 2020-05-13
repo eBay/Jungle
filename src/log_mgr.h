@@ -148,7 +148,7 @@ public:
                  TableMgr* table_mgr);
 
     Status doLogReclaim();
-    Status doLogReclaimIfNecessary();
+    Status doBackgroundLogReclaimIfNecessary();
     uint32_t increaseOpenMemtable() { return numMemtables.fetch_add(1) + 1; }
     uint32_t decreaseOpenMemtable() { return numMemtables.fetch_sub(1) - 1; }
 

@@ -253,7 +253,7 @@ Status LogFile::loadMemTable() {
     _log_info(myLog, "loaded memtable of file %zu", logFileNum);
 
     logMgr->increaseOpenMemtable();
-    logMgr->doLogReclaimIfNecessary();
+    logMgr->doBackgroundLogReclaimIfNecessary();
 
     return Status();
 }

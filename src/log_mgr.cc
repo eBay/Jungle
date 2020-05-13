@@ -1134,9 +1134,13 @@ Status LogMgr::doLogReclaim() {
     return Status();
 }
 
-Status LogMgr::doLogReclaimIfNecessary() {
+Status LogMgr::doBackgroundLogReclaimIfNecessary() {
     if (numMemtables > getDbConfig()->maxKeepingMemtables) {
-        return doLogReclaim();
+        DBMgr* db_mgr = DBMgr::getWithoutInit();
+        if (!db_mgr) {
+            return Status::NOT_INITIALIZED;
+        }
+        return db_mgr->workerMgr()->invokeWorker("reclaimer");
     }
     return Status();
 }
