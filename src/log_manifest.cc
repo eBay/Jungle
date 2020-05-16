@@ -126,6 +126,7 @@ void LogManifest::reclaimExpiredLogFiles() {
                  !info->isEvicted() &&
                  !info->isRemoved() &&
                  info->file->isImmutable() &&
+                 !info->file->isMemTablePurged() &&
                  info->file->getLastAcc() > live_file_acc[limit - 1] ) {
                 _log_info(myLog, "will purge memtable of log file %zu (urgent), "
                           "last access %zu us ago, ref count %zu",
