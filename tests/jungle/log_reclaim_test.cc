@@ -1000,6 +1000,22 @@ int immediate_log_purging_test() {
     TestSuite::_msg("open memtables: %zu\n", stats.numOpenMemtables);
     CHK_SM(stats.numOpenMemtables, 2 * config.maxKeepingMemtables);
 
+    // Close and reopen.
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // Do the same thing.
+    for (size_t ii=1001; ii<NUM; ++ii) {
+        jungle::KV kv_out;
+        jungle::KV::Holder h(kv_out);
+        CHK_Z( db->getSN(ii+1, kv_out) );
+        TestSuite::sleep_ms(1);
+    }
+
+    db->getStats(stats);
+    TestSuite::_msg("open memtables: %zu\n", stats.numOpenMemtables);
+    CHK_SM(stats.numOpenMemtables, 2 * config.maxKeepingMemtables);
+
     CHK_Z( jungle::DB::close(db) );
     CHK_Z( jungle::shutdown() );
     TEST_SUITE_CLEANUP_PATH();

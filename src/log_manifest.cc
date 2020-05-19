@@ -185,7 +185,7 @@ LogManifest::~LogManifest() {
 }
 
 bool LogManifest::isLogReclaimerActive() {
-    return logMgr->isTtlMode();
+    return logMgr->isLogStoreMode();
 }
 
 void LogManifest::spawnReclaimer() {
@@ -650,6 +650,7 @@ Status LogManifest::addNewLogFile(uint64_t log_num,
     LogFileInfo* info = new LogFileInfo(log_num);
     if (!info) return Status::ALLOCATION_FAILURE;
 
+    if (log_file->isMemTablePurged()) info->evicted = true;
     info->file = log_file;
     info->startSeq = start_seqnum;
     skiplist_insert(&logFilesBySeq, &info->snodeBySeq);

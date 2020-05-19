@@ -200,7 +200,7 @@ Status LogFile::load(const std::string& _filename,
     memTableOnFileMeta.flushedSeq = flushed_seq;
     memTableOnFileMeta.syncedSeq = synced_seq;
     memTableOnFileMeta.maxSeq = synced_seq;
-    if (logMgr->isTtlMode()) {
+    if (logMgr->isLogStoreMode()) {
         // If reclaim mode, load mem-table lazily.
         memtablePurged = true;
         return Status();
