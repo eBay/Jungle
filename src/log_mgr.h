@@ -102,7 +102,7 @@ public:
 
     Status removeStaleFiles();
 
-    bool isTtlMode() const;
+    bool isLogStoreMode() const;
 
     Status openSnapshot(DB* snap_handle,
                         const uint64_t checkpoint,

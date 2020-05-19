@@ -304,7 +304,7 @@ Status LogMgr::removeStaleFiles() {
     return Status();
 }
 
-bool LogMgr::isTtlMode() const {
+bool LogMgr::isLogStoreMode() const {
     if ( getDbConfig()->logSectionOnly &&
          getDbConfig()->logFileTtl_sec ) {
         return true;
