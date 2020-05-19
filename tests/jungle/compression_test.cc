@@ -201,8 +201,13 @@ int compression_small_value_test(bool flush_to_table) {
         jungle::SizedBuf value_out;
         jungle::SizedBuf::Holder h_value_out(value_out);
         CHK_Z( db->get( jungle::SizedBuf(key_str), value_out) );
-
         CHK_EQ( val_str, value_out.toString() );
+
+        // meta only
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        CHK_Z( db->getRecordByKey( jungle::SizedBuf(key_str), rec_out, true ) );
+        CHK_TRUE( rec_out.meta.empty() );
     }
 
     CHK_Z( jungle::DB::close(db) );
@@ -254,8 +259,13 @@ int compression_mid_size_value_test(bool flush_to_table) {
         jungle::SizedBuf value_out;
         jungle::SizedBuf::Holder h_value_out(value_out);
         CHK_Z( db->get( jungle::SizedBuf(key_str), value_out) );
-
         CHK_EQ( original_value_arr[ii], value_out.toString() );
+
+        // meta only
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        CHK_Z( db->getRecordByKey( jungle::SizedBuf(key_str), rec_out, true ) );
+        CHK_TRUE( rec_out.meta.empty() );
     }
 
     CHK_Z( jungle::DB::close(db) );
@@ -307,8 +317,13 @@ int compression_large_value_test(bool flush_to_table) {
         jungle::SizedBuf value_out;
         jungle::SizedBuf::Holder h_value_out(value_out);
         CHK_Z( db->get( jungle::SizedBuf(key_str), value_out) );
-
         CHK_EQ( original_value_arr[ii], value_out.toString() );
+
+        // meta only
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        CHK_Z( db->getRecordByKey( jungle::SizedBuf(key_str), rec_out, true ) );
+        CHK_TRUE( rec_out.meta.empty() );
     }
 
     CHK_Z( jungle::DB::close(db) );
@@ -370,8 +385,13 @@ int selective_compression_by_max_size_test(bool flush_to_table) {
         jungle::SizedBuf value_out;
         jungle::SizedBuf::Holder h_value_out(value_out);
         CHK_Z( db->get( jungle::SizedBuf(key_str), value_out) );
-
         CHK_EQ( original_value_arr[ii], value_out.toString() );
+
+        // meta only
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        CHK_Z( db->getRecordByKey( jungle::SizedBuf(key_str), rec_out, true ) );
+        CHK_TRUE( rec_out.meta.empty() );
     }
 
     CHK_Z( jungle::DB::close(db) );
@@ -442,8 +462,13 @@ int selective_compression_by_compress_test(bool flush_to_table) {
         jungle::SizedBuf value_out;
         jungle::SizedBuf::Holder h_value_out(value_out);
         CHK_Z( db->get( jungle::SizedBuf(key_str), value_out) );
-
         CHK_EQ( original_value_arr[ii], value_out.toString() );
+
+        // meta only
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        CHK_Z( db->getRecordByKey( jungle::SizedBuf(key_str), rec_out, true ) );
+        CHK_TRUE( rec_out.meta.empty() );
     }
 
     CHK_Z( jungle::DB::close(db) );
@@ -501,7 +526,6 @@ int compression_with_tombstones_test(bool flush_to_table) {
 
         jungle::SizedBuf value_out;
         jungle::SizedBuf::Holder h_value_out(value_out);
-
         s = db->get( jungle::SizedBuf(key_str), value_out);
         if (ii % 2 == 0) {
             CHK_Z(s);
@@ -509,6 +533,12 @@ int compression_with_tombstones_test(bool flush_to_table) {
         } else {
             CHK_SM(s, 0);
         }
+
+        // meta only: should succeed on tombstones.
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        CHK_Z( db->getRecordByKey( jungle::SizedBuf(key_str), rec_out, true ) );
+        CHK_TRUE( rec_out.meta.empty() );
     }
 
     CHK_Z( jungle::DB::close(db) );
@@ -560,6 +590,12 @@ int compression_log_store_test() {
 
         CHK_EQ( key_str, kv_out.key.toString() );
         CHK_EQ( original_value_arr[ii], kv_out.value.toString() );
+
+        // meta only
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        CHK_Z( db->getRecordByKey( jungle::SizedBuf(key_str), rec_out, true ) );
+        CHK_TRUE( rec_out.meta.empty() );
     }
 
     CHK_Z( jungle::DB::close(db) );

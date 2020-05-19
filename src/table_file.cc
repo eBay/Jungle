@@ -1070,8 +1070,10 @@ Status TableFile::get(DB* snap_handle,
 
    try {
     Status s;
-    rec_io.kv.value.set(doc->bodylen, doc->body);
-    rec_io.kv.value.setNeedToFree();
+    if (!meta_only) {
+        rec_io.kv.value.set(doc->bodylen, doc->body);
+        rec_io.kv.value.setNeedToFree();
+    }
 
     // Decode meta.
     SizedBuf user_meta_out;
@@ -1107,6 +1109,10 @@ Status TableFile::decompressValue(DB* parent_db,
                                   const InternalMeta& i_meta)
 {
     if (!i_meta.isCompressed) return Status::OK;
+
+    // Output buffer may not be given in meta-only mode.
+    // In such cases, just ignore.
+    if (rec_io.kv.value.empty()) return Status::OK;
 
     if (!db_config->compOpt.cbDecompress) {
         _log_fatal(myLog, "found compressed record %s, but decompression "

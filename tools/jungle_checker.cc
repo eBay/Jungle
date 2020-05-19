@@ -238,7 +238,7 @@ static int dump_logs(const std::vector<std::string>& args) {
         s = db->p->logMgr->getSN(ii, rec_out);
         printf( "  seq: %zu\n", (size_t)ii );
         if (!s) {
-            printf("  READ FAILED\n");
+            printf("  READ FAILED: %d\n", (int)s);
             continue;
         }
         printf( "  key: %s\n",
