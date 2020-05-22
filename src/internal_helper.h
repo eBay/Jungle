@@ -497,6 +497,7 @@ public:
     static std::string toString(const void* pd, size_t len);
     static std::string toString(const SizedBuf& buf);
     static std::string rStr(const std::string& str, size_t limit = 16);
+    static SizedBuf hexStr2bin(const std::string& hexstr);
 };
 
 class FileMgr {

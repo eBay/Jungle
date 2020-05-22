@@ -46,6 +46,10 @@ private:
 
     std::string hLogCacheStats(DBWrap* target_dbw,
                                const std::vector<std::string>& tokens);
+
+    std::string hDumpKv(DBWrap* target_dbw,
+                        const std::vector<std::string>& tokens);
+
 };
 
 

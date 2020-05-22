@@ -391,28 +391,10 @@ static int dump_kv(const std::vector<std::string>& args) {
     SizedBuf::Holder h_key_buf(key_buf);
     if (hex_key) {
         // If hex key, check validity of given string.
-        if (given_key.size() == 0 || given_key.size() % 2) {
+        key_buf = HexDump::hexStr2bin(given_key);
+        if (key_buf.empty()) {
             std::cout << "incorrect hex value: " << given_key << std::endl;
             return -1;
-        }
-
-        key_buf.alloc(given_key.size() / 2);
-        for (size_t ii=0; ii<given_key.size(); ++ii) {
-            if ( ( given_key[ii] >= '0' &&
-                   given_key[ii] <= '9' ) ||
-                 ( given_key[ii] >= 'a' &&
-                   given_key[ii] <= 'f' ) ||
-                 ( given_key[ii] >= 'A' &&
-                   given_key[ii] <= 'F' ) ) {
-                if (ii && ii % 2 == 1) {
-                    std::string cur_hex = given_key.substr(ii - 1, 2);
-                    key_buf.data[ii/2] = std::stoul(cur_hex, nullptr, 16);
-                }
-
-            } else {
-                std::cout << "incorrect hex value: " << given_key << std::endl;
-                return -1;
-            }
         }
 
     } else {
@@ -435,7 +417,7 @@ static int dump_kv(const std::vector<std::string>& args) {
     //   => display meta of record with key starting with
     //      {0x0, 0xff} on terminal.
 
-    auto print_rec = [&args](Record& rec_out, size_t& idx) {
+    auto print_rec = [&](Record& rec_out, size_t& idx) {
         printf( "  key: %s\n",
                 HexDump::toString(rec_out.kv.key).c_str() );
         printf( "  meta: %s\n",
@@ -462,7 +444,7 @@ static int dump_kv(const std::vector<std::string>& args) {
         idx++;
     };
 
-    size_t idx = 0;
+    size_t count = 0;
     if (prefix_match || iterate) {
         jungle::Iterator itr;
         s = itr.init(db, key_buf);
@@ -481,13 +463,18 @@ static int dump_kv(const std::vector<std::string>& args) {
                 if ( rec_out.kv.key.size >= key_buf.size &&
                      SizedBuf::cmp( key_buf,
                                     SizedBuf( key_buf.size,
-                                              rec_out.kv.key.data) ) != 0 ) {
+                                              rec_out.kv.key.data ) ) != 0 ) {
                     break;
                 }
             }
-            print_rec(rec_out, idx);
+            print_rec(rec_out, count);
 
-            if (iterate && idx >= iterate_number) {
+            if (iterate && count >= iterate_number) {
+                break;
+            }
+            if (count >= 100) {
+                // To be safe, we limit the count by 100.
+                printf("more records may exist ...\n");
                 break;
             }
         } while (itr.next().ok());
@@ -501,7 +488,7 @@ static int dump_kv(const std::vector<std::string>& args) {
             printf("  READ FAILED: %d\n", (int)s);
             return -1;
         }
-        print_rec(rec_out, idx);
+        print_rec(rec_out, count);
     }
     return 0;
 }
