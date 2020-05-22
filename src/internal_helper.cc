@@ -392,6 +392,33 @@ std::string HexDump::rStr(const std::string& str, size_t limit) {
     return ss.str();
 }
 
+SizedBuf HexDump::hexStr2bin(const std::string& hexstr) {
+    if (hexstr.size() == 0 || hexstr.size() % 2) {
+        return SizedBuf();
+    }
+
+    SizedBuf key_buf;
+    key_buf.alloc(hexstr.size() / 2);
+    for (size_t ii=0; ii<hexstr.size(); ++ii) {
+        if ( ( hexstr[ii] >= '0' &&
+               hexstr[ii] <= '9' ) ||
+             ( hexstr[ii] >= 'a' &&
+               hexstr[ii] <= 'f' ) ||
+             ( hexstr[ii] >= 'A' &&
+               hexstr[ii] <= 'F' ) ) {
+            if (ii && ii % 2 == 1) {
+                std::string cur_hex = hexstr.substr(ii - 1, 2);
+                key_buf.data[ii/2] = std::stoul(cur_hex, nullptr, 16);
+            }
+
+        } else {
+            key_buf.free();
+            return SizedBuf();
+        }
+    }
+    return key_buf;
+}
+
 int FileMgr::scan(const std::string& path,
                   std::vector<std::string>& files_out)
 {
