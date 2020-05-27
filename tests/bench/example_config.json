@@ -50,6 +50,7 @@
     "l1_size_mb": 1048576,
     "bloom_filter_bits": 10.0,
     "num_table_writers": 8,
-    "num_compactor_threads": 2
+    "num_compactor_threads": 2,
+    "compression": false
   }
 }

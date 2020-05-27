@@ -28,7 +28,9 @@ endif()
 
 # Find snappy
 include(cmake/FindSnappy.cmake)
-if (SNAPPY_OPTION STREQUAL "Enable")
+if ( (SNAPPY_OPTION STREQUAL "Enable") OR 
+     (SNAPPY_OPTION STREQUAL "enable") )
+    message(STATUS "Snappy option is enabled.")
     if (SNAPPY_FOUND)
         set(LIBSNAPPY ${SNAPPY_LIBRARIES})
         add_definitions(-DSNAPPY_AVAILABLE=1)

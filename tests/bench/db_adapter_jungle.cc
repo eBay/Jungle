@@ -19,6 +19,10 @@ limitations under the License.
 #include "json_common.h"
 #include "libjungle/jungle.h"
 
+#ifdef SNAPPY_AVAILABLE
+#include "snappy-c.h"
+#endif
+
 namespace jungle_bench {
 
 jungle::SizedBuf conv_buf(const DbAdapter::Buffer& buf) {
@@ -34,6 +38,60 @@ DbAdapter::Buffer conv_buf(const jungle::SizedBuf& buf) {
 
 jungle::KV conv_kv(const DbAdapter::KvElem& elem) {
     return jungle::KV( conv_buf(elem.key), conv_buf(elem.value) );
+}
+
+ssize_t get_max_comp_size(jungle::DB* db,
+                          const jungle::Record& rec)
+{
+#if SNAPPY_AVAILABLE
+    return snappy_max_compressed_length(rec.kv.value.size) + 2;
+
+#else
+    // Compression is not available.
+    return 0;
+#endif
+}
+
+ssize_t compress(jungle::DB* db,
+                 const jungle::Record& src,
+                 jungle::SizedBuf& dst)
+{
+#if SNAPPY_AVAILABLE
+    dst.data[0] = 1;
+    dst.data[1] = 1;
+
+    size_t len = dst.size - 2;
+    int ret = snappy_compress( (char*)src.kv.value.data,
+                               src.kv.value.size,
+                               (char*)dst.data + 2,
+                               &len );
+    if (ret < 0) return ret;
+    return len;
+
+#else
+    // Compression is not available.
+    return 0;
+#endif
+}
+
+ssize_t decompress(jungle::DB* db,
+                   const jungle::SizedBuf& src,
+                   jungle::SizedBuf& dst)
+{
+#if SNAPPY_AVAILABLE
+    size_t uncomp_len = dst.size;
+    int ret = snappy_uncompress( (char*)src.data + 2,
+                                 src.size - 2,
+                                 (char*)dst.data,
+                                 &uncomp_len );
+    if (ret < 0) return ret;
+    return uncomp_len;
+
+#else
+    // It should not happen.
+    assert(0);
+    return -1;
+#endif
 }
 
 
@@ -109,6 +167,16 @@ int JungleAdapter::open(const std::string& db_file,
 
     //config.numWritesToCompact = 100000;
     //config.useBloomFilter = false;
+
+#if SNAPPY_AVAILABLE
+    bool compression_enabled = false;
+    _jbool(compression_enabled, configObj, "compression");
+    if (compression_enabled) {
+        config.compOpt.cbGetMaxSize = get_max_comp_size;
+        config.compOpt.cbCompress = compress;
+        config.compOpt.cbDecompress = decompress;
+    }
+#endif
 
     jungle::Status s = jungle::DB::open(&myDb, db_file, config);
     if (!s) return s.getValue();
