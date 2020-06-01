@@ -471,6 +471,12 @@ Status LogManifest::store(bool call_fsync) {
         LogFileInfo* info = _get_entry(cursor, LogFileInfo, snode);
         LogFile* l_file = info->file;
 
+        // WARNING: We should grab `info` due to below
+        //          seq number retrievals. Otherwise, there can
+        //          be a possibility of heap-use-after-free if
+        //          this file is being evicted by the reclaimer.
+        info->grab(false);
+
         ss.putU64(info->logFileNum);
         ss.putU64(l_file->getMinSeqNum());
         ss.putU64(l_file->getFlushedSeqNum());
@@ -479,6 +485,7 @@ Status LogManifest::store(bool call_fsync) {
                    "log %ld, min seq %ld, last flush %ld, last sync %ld",
                    info->logFileNum, l_file->getMinSeqNum(),
                    l_file->getFlushedSeqNum(), l_file->getSyncedSeqNum());
+        info->done();
 
         cursor = skiplist_next(&logFiles, cursor);
         skiplist_release_node(&info->snode);
