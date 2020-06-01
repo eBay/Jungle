@@ -705,8 +705,11 @@ Status DB::getStats(DBStats& stats_out) {
         }
     }
 
-    if (p && p->logMgr) {
-        stats_out.numOpenMemtables = p->logMgr->getNumMemtables();
+    if (p) {
+        if (p->logMgr) {
+            stats_out.numOpenMemtables = p->logMgr->getNumMemtables();
+        }
+        stats_out.numBgTasks = p->getNumBgTasks();
     }
 
     TableStats t_stats;

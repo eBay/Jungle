@@ -169,6 +169,10 @@ std::string CmdHandler::hGetStats(DBWrap* target_dbw,
     ss << "cache"
        << " " << stats_out.cacheUsedByte
        << " " << stats_out.cacheSizeByte << std::endl;
+    ss << "num_open_memtables"
+       << " " << stats_out.numOpenMemtables << std::endl;
+    ss << "num_bg_tasks"
+       << " " << stats_out.numBgTasks << std::endl;
 
     return ss.str();
 }

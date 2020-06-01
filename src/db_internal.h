@@ -100,6 +100,10 @@ public:
         flags.onGoingBgTasks.fetch_sub(1);
     }
 
+    size_t getNumBgTasks() const {
+        return flags.onGoingBgTasks.load();
+    }
+
     void updateOpHistory(size_t amount = 1);
 
     enum OpType {

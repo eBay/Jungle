@@ -29,32 +29,49 @@ public:
         , cacheSizeByte(0)
         , cacheUsedByte(0)
         , numOpenMemtables(0)
+        , numBgTasks(0)
         {}
 
     /**
+     * [Global]: process-wide global stat.
+     * [Local]: DB-specific stat.
+     */
+
+    /**
+     * [Local]
      * Approximate the number of key-value pairs in DB.
      */
     uint64_t numKvs;
 
     /**
+     * [Local]
      * Total working set (i.e., valid KV pairs) size.
      */
     uint64_t workingSetSizeByte;
 
     /**
+     * [Global]
      * Total block cache capacity (byte).
      */
     uint64_t cacheSizeByte;
 
     /**
+     * [Global]
      * Amount of cache used (byte).
      */
     uint64_t cacheUsedByte;
 
     /**
+     * [Local]
      * Number of Memtables currently open.
      */
     uint32_t numOpenMemtables;
+
+    /**
+     * [Local]
+     * Number of background tasks currently running.
+     */
+    uint32_t numBgTasks;
 };
 
 } // namespace jungle
