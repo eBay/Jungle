@@ -1327,8 +1327,8 @@ Status TableFile::getStats(TableStats& stats_out) {
     stats_out.totalSizeByte = info.file_size;
 
     // This should be a bug.
-    assert(stats_out.workingSetSizeByte < stats_out.totalSizeByte * 2);
-    if (stats_out.workingSetSizeByte > stats_out.totalSizeByte * 2) {
+    assert(stats_out.workingSetSizeByte < stats_out.totalSizeByte * 10);
+    if (stats_out.workingSetSizeByte > stats_out.totalSizeByte * 10) {
         _log_fatal(myLog, "found wrong WSS, %s, %zu / %zu",
                    filename.c_str(),
                    stats_out.workingSetSizeByte,
