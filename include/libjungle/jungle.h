@@ -101,6 +101,7 @@ struct DebugParams {
         , compactionItrScanDelayUs(0)
         , urgentCompactionFilesize(0)
         , urgentCompactionRatio(0)
+        , urgentCompactionNumWrites(0)
         , rollbackDelayUs(0)
         , logDetailsOfKeyNotFound(false)
         , disruptSplit(false)
