@@ -185,6 +185,11 @@ int JungleAdapter::open(const std::string& db_file,
     myDb->sync(false);
     myDb->flushLogs( jungle::FlushOptions() );
 
+    jungle::DebugParams jungle_d_params;
+    jungle_d_params.urgentCompactionRatio = 120;
+    jungle_d_params.urgentCompactionNumWrites = 10000;
+    //jungle::setDebugParams(jungle_d_params);
+
     return 0;
 }
 

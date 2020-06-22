@@ -93,6 +93,7 @@ public:
         , maxParallelWritesPerJob(0)
         , readOnly(false)
         , preFlushDirtyInterval_sec(5)
+        , numExpectedUserThreads(8)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -412,6 +413,13 @@ public:
      * Compression options.
      */
     CompressionOptions compOpt;
+
+    /**
+     * The expected number of user threads that will execute DB operations
+     * concurrently. It will be used for internal settings to optimize
+     * performance and resource usage.
+     */
+    uint32_t numExpectedUserThreads;
 };
 
 class GlobalConfig {

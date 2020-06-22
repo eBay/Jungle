@@ -145,6 +145,10 @@ fdb_config TableFile::FdbHandle::getFdbSettings(const DBConfig* db_config) {
     config.enable_background_compactor = true;
     config.num_compactor_threads = 1;
 
+    size_t upper_prime = PrimeNumber::getUpper(db_config->numExpectedUserThreads);
+    config.num_wal_partitions = upper_prime;
+    config.num_bcache_partitions = upper_prime;
+
     config.log_msg_level = 4;
     return config;
 }

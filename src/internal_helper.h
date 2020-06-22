@@ -685,5 +685,17 @@ public:
     }
 };
 
+class PrimeNumber {
+public:
+    /**
+     * Return the smallest prime number which is
+     * equal to or greater than the given value.
+     *
+     * @param value Value to find prime number.
+     * @return Prime number.
+     */
+    static size_t getUpper(size_t value);
+};
+
 } // namespace jungle
 
