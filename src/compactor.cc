@@ -156,13 +156,6 @@ void Compactor::work(WorkerOptions* opt_base) {
             std::vector<size_t> prob_dist(num_levels, 1);
             size_t start_level = RndGen::fromProbDist(prob_dist);
 
-            if ( dbm->isIdleTraffic() ||
-                 ( dbm->isDebugParamsEffective() &&
-                   dbm->getDebugParams().urgentCompactionRatio ) ) {
-                // Special compaction mode, L0 compaction first.
-                start_level = 0;
-            }
-
             bool found = false;
             for (size_t ii = start_level; ii < start_level + num_levels; ++ii) {
                 size_t lv = ii % num_levels;
@@ -183,14 +176,20 @@ void Compactor::work(WorkerOptions* opt_base) {
                                   dbm->getDebugParams().urgentCompactionNumWrites );
                 }
             }
-            if ( !found &&
+            // WARNING:
+            //   Under heavy load, L0 compaction will always hit and
+            //   that prevents the urgent compaction of L1+, which
+            //   doesn't help reducing space.
+            //   In such a case, we will trigger compaction of each
+            //   level alternately.
+            if ( start_level != 0 &&
                  num_levels >= 2 &&
                  num_writes_to_compact &&
                  dbwrap->db->p->tableMgr->getNumWrittenRecords() >
                      num_writes_to_compact ) {
                 target_db = dbwrap->db;
                 target_table = nullptr;
-                target_level = (std::rand() % (num_levels - 1)) + 1;
+                target_level = start_level;
                 target_strategy = TableMgr::INPLACE_OLD;
                 found = true;
             }

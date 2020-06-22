@@ -133,6 +133,10 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
               db_config->compOpt.cbGetMaxSize ? "O" : "X",
               db_config->compOpt.cbCompress ? "O" : "X",
               db_config->compOpt.cbDecompress ? "O" : "X");
+
+    _log_info(myLog, "expected user threads: %zu, upper prime %zu",
+              db_config->numExpectedUserThreads,
+              PrimeNumber::getUpper(db_config->numExpectedUserThreads));
 }
 
 Status TableMgr::init(const TableMgrOptions& _options) {
