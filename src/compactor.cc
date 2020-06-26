@@ -188,6 +188,14 @@ void Compactor::work(WorkerOptions* opt_base) {
                  dbwrap->db->p->tableMgr->getNumWrittenRecords() >
                      num_writes_to_compact ) {
                 target_db = dbwrap->db;
+                if (target_table) {
+                    // WARNING: If there is a table already chosen,
+                    //          we should release it here.
+                    _log_info(dbwrap->db->p->myLog,
+                              "urgent compaction, discard table %zu and "
+                              "find a new victim", target_table->number);
+                    target_table->done();
+                }
                 target_table = nullptr;
                 target_level = start_level;
                 target_strategy = TableMgr::INPLACE_OLD;

@@ -30,6 +30,9 @@ struct VictimCandidate {
     uint64_t total;
 };
 
+// WARNING:
+//   `victim_table_out` returned by this function
+//   should be released (i.e., done()) by the caller.
 Status TableMgr::pickVictimTable(size_t level,
                                  VictimPolicy policy,
                                  bool honor_limit,
