@@ -155,6 +155,9 @@ LogManifest::LogManifest(LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops)
     , lastFlushedLog(NOT_INITIALIZED)
     , lastSyncedLog(NOT_INITIALIZED)
     , maxLogFileNum(NOT_INITIALIZED)
+    , cachedManifest(32768)
+    , lenCachedManifest(0)
+    , fullBackupRequired(true)
     , logMgr(log_mgr)
     , myLog(nullptr)
 {
@@ -182,6 +185,11 @@ LogManifest::~LogManifest() {
     }
     skiplist_free(&logFiles);
     skiplist_free(&logFilesBySeq);
+
+    if (!cachedManifest.empty()) {
+        cachedManifest.free();
+    }
+    lenCachedManifest = 0;
 }
 
 bool LogManifest::isLogReclaimerActive() {
@@ -502,11 +510,45 @@ Status LogManifest::store(bool call_fsync) {
 
     ss.putU32(crc_val);
 
-    EP( fOps->pwrite(mFile, mani_buf.data, ss.pos(), 0) );
+    // We will skip the common data and write different part only,
+    // to reduce disk IOs (assuming that memory comparison is faster than disk write).
+    uint32_t first_diff_pos = 0;
+
+    if (lenCachedManifest) {
+        uint32_t min_len = std::min(cachedManifest.size, (uint32_t)ss.pos());
+
+        // FIXME: It will be a bit faster if we compare 8-byte chunk.
+        for (size_t ii = 0; ii < min_len; ++ii) {
+            if (cachedManifest.data[ii] != mani_buf.data[ii]) {
+                first_diff_pos = ii;
+                break;
+            }
+        }
+    }
+
+    if (ss.pos() > first_diff_pos) {
+        EP( fOps->pwrite( mFile,
+                          mani_buf.data + first_diff_pos,
+                          ss.pos() - first_diff_pos,
+                          first_diff_pos ) );
+    }
+    _log_trace(myLog, "new buffer size %zu, cached %zu, first diff %zu",
+               ss.pos(), lenCachedManifest, first_diff_pos);
+
+    while (ss.pos() > cachedManifest.size) {
+        size_t new_size = cachedManifest.size * 2;
+        cachedManifest.free();
+        cachedManifest.alloc(new_size);
+        _log_info(myLog, "buffer for log manifest cache increased %zu", new_size);
+    }
+
+    memcpy(cachedManifest.data, mani_buf.data, ss.pos());
+    lenCachedManifest = ss.pos();
 
     // Should truncate tail.
     fOps->ftruncate(mFile, ss.pos());
 
+    bool backup_done = false;
     if (call_fsync) {
         s = fOps->fsync(mFile);
 
@@ -519,9 +561,21 @@ Status LogManifest::store(bool call_fsync) {
             // After success, make a backup file one more time,
             // using the latest data.
             // Same as above, tolerate backup failure.
-            BackupRestore::backup(fOps, mFileName, mani_buf, ss.pos(), call_fsync);
+            Status s_backup = BackupRestore::backup
+                              ( fOps, mFileName, mani_buf,
+                                ss.pos(),
+                                fullBackupRequired ? 0 : first_diff_pos,
+                                call_fsync );
+            if (s_backup) {
+                backup_done = true;
+            }
         }
     }
+
+    // If backup file is not synced with `cachedManifest` this time,
+    // we should set this value to `true` so as to write the
+    // entire date next time.
+    fullBackupRequired = !backup_done;
     return s;
 }
 

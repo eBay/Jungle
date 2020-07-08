@@ -293,12 +293,33 @@ private:
     std::atomic<uint64_t> lastSyncedLog;
     std::atomic<uint64_t> maxLogFileNum;
 
-    // Log files by its file number.
+    /**
+     * Log files by its file number.
+     */
     skiplist_raw logFiles;
 
-    // Log files by its starting (minimum) seq number.
-    // Entries are shared with `logFiles`.
+    /**
+     * Log files by its starting (minimum) seq number.
+     * Entries are shared with `logFiles`.
+     */
     skiplist_raw logFilesBySeq;
+
+    /**
+     * Buffer for caching the last written manifest file data.
+     */
+    SizedBuf cachedManifest;
+
+    /**
+     * Actual length of data in `cachedManifest`, as `cachedManifest`
+     * reserves more memory.
+     */
+    size_t lenCachedManifest;
+
+    /**
+     * If `true`, there is a mismatch between `cachedManifest`
+     * and backup file, so that we cannot do partial write.
+     */
+    bool fullBackupRequired;
 
     LogMgr* logMgr;
     SimpleLogger* myLog;
