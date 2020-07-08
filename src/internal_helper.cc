@@ -323,6 +323,7 @@ Status BackupRestore::backup(FileOps* f_ops,
                              const std::string& filename,
                              const SizedBuf& ctx,
                              size_t length,
+                             size_t bytes_to_skip,
                              bool call_fsync)
 {
     Status s;
@@ -332,7 +333,12 @@ Status BackupRestore::backup(FileOps* f_ops,
 
    try {
     TC( f_ops->open(&d_file, dst_file) );
-    TC( f_ops->pwrite(d_file, ctx.data, length, 0) );
+    if (length > bytes_to_skip) {
+        TC( f_ops->pwrite( d_file,
+                           ctx.data + bytes_to_skip,
+                           length - bytes_to_skip,
+                           bytes_to_skip ) );
+    }
     f_ops->ftruncate(d_file, length);
     if (call_fsync) {
         f_ops->fsync(d_file);

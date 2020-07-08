@@ -1022,6 +1022,94 @@ int immediate_log_purging_test() {
     return 0;
 }
 
+int frequent_sync_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+
+    jungle::GlobalConfig g_config;
+    g_config.logFileReclaimerSleep_sec = 1;
+    g_config.flusherSleepDuration_ms = 3600 * 1000;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.maxKeepingMemtables = 8;
+    config.maxEntriesInLogFile = 10;
+    config.logSectionOnly = true;
+    config.logFileTtl_sec = 3600;
+
+    jungle::DB* db;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // Create 200 log files, and sync everytime.
+    const size_t NUM = 2000;
+    for (size_t ii=0; ii<NUM/2; ++ii) {
+        std::string key_str = TestSuite::lzStr(6, ii);
+        std::string val_str = TestSuite::lzStr(6, ii);
+        CHK_Z( db->setSN(ii+1, jungle::KV(key_str, val_str)) );
+        CHK_Z( db->sync( (ii % 100 == 0) ) );
+    }
+
+    // Close and reopen.
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // Check logs.
+    for (size_t ii=0; ii<NUM/2; ++ii) {
+        jungle::KV kv_out;
+        jungle::KV::Holder h(kv_out);
+        CHK_Z( db->getSN(ii+1, kv_out) );
+    }
+
+    for (size_t ii=NUM/2; ii<NUM; ++ii) {
+        std::string key_str = TestSuite::lzStr(6, ii);
+        std::string val_str = TestSuite::lzStr(6, ii);
+        CHK_Z( db->setSN(ii+1, jungle::KV(key_str, val_str)) );
+        CHK_Z( db->sync( (ii % 100 == 0) ) );
+    }
+
+    // Truncate half.
+    CHK_Z( db->flushLogs(jungle::FlushOptions(), 1000) );
+
+    // Close and reopen.
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // Check logs.
+    for (size_t ii=1001; ii<NUM; ++ii) {
+        jungle::KV kv_out;
+        jungle::KV::Holder h(kv_out);
+        CHK_Z( db->getSN(ii+1, kv_out) );
+    }
+
+    for (size_t ii=NUM; ii<NUM*2; ++ii) {
+        std::string key_str = TestSuite::lzStr(6, ii);
+        std::string val_str = TestSuite::lzStr(6, ii);
+        CHK_Z( db->setSN(ii+1, jungle::KV(key_str, val_str)) );
+        CHK_Z( db->sync( (ii % 100 == 0) ) );
+    }
+    CHK_Z( db->sync( true ) );
+
+    // Close and reopen.
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // Check logs.
+    for (size_t ii=1001; ii<NUM*2; ++ii) {
+        jungle::KV kv_out;
+        jungle::KV::Holder h(kv_out);
+        CHK_Z( db->getSN(ii+1, kv_out) );
+    }
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
@@ -1067,6 +1155,9 @@ int main(int argc, char** argv) {
 
     ts.doTest("immediate log purging test",
               immediate_log_purging_test);
+
+    ts.doTest("frequent sync test",
+              frequent_sync_test);
 
 #if 0
     ts.doTest("reload empty files test",
