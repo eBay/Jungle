@@ -25,6 +25,7 @@ limitations under the License.
 
 namespace jungle {
 
+// LCOV_EXCL_START
 inline void hex_dump_key(const SizedBuf& key, size_t maxlen, char** bp, size_t* len) {
     print_hex_options hex_opt = PRINT_HEX_OPTIONS_INITIALIZER;
     hex_opt.enable_colors = 0;
@@ -71,6 +72,7 @@ bool cmp_records_bool(const DBConfig* db_config,
 {
     return (cmp_records(db_config, l, r) < 0);
 }
+// LCOV_EXCL_STOP
 
 std::vector<uint64_t> table_list_to_number(const std::list<TableInfo*> src) {
     std::vector<uint64_t> ret(src.size());
