@@ -458,10 +458,6 @@ protected:
                                  TableInfo*& table1_out,
                                  TableInfo*& table2_out);
 
-    void putLsmFlushResult(TableFile* cur_file,
-                           const std::list<Record*>& local_records,
-                           std::list<TableMgr::LsmFlushResult>& res_out);
-
     void putLsmFlushResultWithKey(TableFile* cur_file,
                                   const SizedBuf& key,
                                   std::list<TableMgr::LsmFlushResult>& res_out);

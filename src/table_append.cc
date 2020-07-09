@@ -22,20 +22,6 @@ limitations under the License.
 
 namespace jungle {
 
-void TableMgr::putLsmFlushResult( TableFile* cur_file,
-                                  const std::list<Record*>& local_records,
-                                  std::list<TableMgr::LsmFlushResult>& res_out )
-{
-    LsmFlushResult res;
-    if (local_records.size()) {
-        Record* min_rec = *(local_records.begin());
-        res = LsmFlushResult(cur_file, min_rec->kv.key);
-    } else {
-        res = LsmFlushResult(cur_file);
-    }
-    res_out.push_back(res);
-}
-
 void TableMgr::putLsmFlushResultWithKey( TableFile* cur_file,
                                          const SizedBuf& key,
                                          std::list<TableMgr::LsmFlushResult>& res_out )
