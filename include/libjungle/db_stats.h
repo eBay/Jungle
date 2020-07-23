@@ -30,6 +30,8 @@ public:
         , cacheUsedByte(0)
         , numOpenMemtables(0)
         , numBgTasks(0)
+        , minTableIndex(0)
+        , maxTableIndex(0)
         {}
 
     /**
@@ -72,6 +74,18 @@ public:
      * Number of background tasks currently running.
      */
     uint32_t numBgTasks;
+
+    /**
+     * [Local]
+     * Smallest (i.e., oldest) table file index number.
+     */
+    uint64_t minTableIndex;
+
+    /**
+     * [Local]
+     * Greatest (i.e., youngest) table file index number.
+     */
+    uint64_t maxTableIndex;
 };
 
 } // namespace jungle

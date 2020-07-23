@@ -717,6 +717,8 @@ Status DB::getStats(DBStats& stats_out) {
     stats_out.numKvs = t_stats.numKvs + num_kvs_log;
     stats_out.workingSetSizeByte = t_stats.workingSetSizeByte;
     stats_out.cacheUsedByte = t_stats.cacheUsedByte;
+    stats_out.minTableIndex = t_stats.minTableIdx;
+    stats_out.maxTableIndex = t_stats.maxTableIdx;
 
     return Status();
 }

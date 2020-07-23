@@ -81,6 +81,8 @@ public:
         , lastSeqnum(0)
         , approxDocCount(0)
         , approxDelCount(0)
+        , minTableIdx(0)
+        , maxTableIdx(0)
         {}
     uint64_t numKvs;
     uint64_t workingSetSizeByte;
@@ -90,6 +92,8 @@ public:
     uint64_t lastSeqnum;
     uint64_t approxDocCount;
     uint64_t approxDelCount;
+    uint64_t minTableIdx;
+    uint64_t maxTableIdx;
 };
 
 namespace checker { class Checker; }

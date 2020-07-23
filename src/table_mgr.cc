@@ -679,14 +679,22 @@ Status TableMgr::getStats(TableStats& aggr_stats_out) {
         if (!s) continue;
     }
 
+    uint64_t min_table_idx = std::numeric_limits<uint64_t>::max();
+    uint64_t max_table_idx = 0;
     for (TableInfo*& cur_table: tables) {
         TableStats local_stat;
         cur_table->file->getStats(local_stat);
         aggr_stats_out.numKvs += local_stat.numKvs;
         aggr_stats_out.workingSetSizeByte += local_stat.workingSetSizeByte;
+
+        min_table_idx = std::min(cur_table->number, min_table_idx);
+        max_table_idx = std::max(cur_table->number, max_table_idx);
+
         cur_table->done();
     }
 
+    aggr_stats_out.minTableIdx = min_table_idx;
+    aggr_stats_out.maxTableIdx = max_table_idx;
     aggr_stats_out.cacheUsedByte = fdb_get_buffer_cache_used();
     return Status();
 }
