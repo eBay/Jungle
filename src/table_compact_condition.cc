@@ -120,11 +120,20 @@ Status TableMgr::pickVictimTable(size_t level,
             double factor = (policy == WORKING_SET_SIZE_SPLIT)
                             ? 1.5 : 1.0;
             // Find any table whose WSS exceeds the limit.
-            if ( honor_limit &&
-                 w_size <= MAX_TABLE_SIZE * factor ) {
+            if (honor_limit) {
                 // If we honor limit, skip if
-                //   1) Table size is smaller than the limit.
-                continue;
+                //   1) Urgent compaction is on, and table index number
+                //      is greater than the given number.
+                //   2) Table size is smaller than the limit, OR
+                if ( policy == WORKING_SET_SIZE &&
+                     d_params_effective &&
+                     d_params.urgentCompactionMaxTableIdx ) {
+                    if (t_info->number > d_params.urgentCompactionMaxTableIdx) {
+                        continue;
+                    }
+                } else if (w_size <= MAX_TABLE_SIZE * factor) {
+                    continue;
+                }
             }
             // Push to list for random picking.
             candidates.push_back( VictimCandidate(t_info, w_size, t_size) );
@@ -408,6 +417,17 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
     }
 
     // Urgent compaction:
+    //   => If table file index number is smaller than
+    //      the debugging parameter.
+    if ( d_params_effective &&
+         d_params.urgentCompactionMaxTableIdx &&
+         target_table->number <= d_params.urgentCompactionMaxTableIdx ) {
+        _log_info(myLog, "[URGENT COMPACTION] by table idx: %zu <= %zu",
+                  target_table->number, d_params.urgentCompactionMaxTableIdx);
+        decision = true;
+    }
+
+    // Urgent compaction:
     //   => If stale ratio is bigger than debugging parameter.
     //   => Effective only when L0 is the last level.
     int urgent_or_itc = 0;
@@ -578,7 +598,25 @@ Status TableMgr::chkLPCompactCond(size_t level,
         }
     }
 
-    // Find table to split first (when WSS > 1.5x table limit).
+    // If urgent compaction parameter is set, process that one first.
+    DBMgr* db_mgr = DBMgr::getWithoutInit();
+    DebugParams d_params = db_mgr->getDebugParams();
+    bool d_params_effective = db_mgr->isDebugParamsEffective();
+    if ( d_params_effective &&
+         d_params.urgentCompactionMaxTableIdx ) {
+        TableMgr::VictimPolicy v_policy = TableMgr::WORKING_SET_SIZE;
+        TableInfo* victim_table = nullptr;
+        wss = total = 0;
+        s = pickVictimTable( level, v_policy, true,
+                             victim_table, wss, total );
+        if (s && victim_table) {
+            s_out = TableMgr::INPLACE;
+            victim_table_out = victim_table;
+            return s;
+        }
+    }
+
+    // Find table to split (when WSS > 1.5x table limit).
     TableMgr::VictimPolicy v_policy = TableMgr::WORKING_SET_SIZE_SPLIT;
     TableInfo* victim_table = nullptr;
     wss = total = 0;

@@ -185,9 +185,14 @@ int JungleAdapter::open(const std::string& db_file,
     myDb->sync(false);
     myDb->flushLogs( jungle::FlushOptions() );
 
+    jungle::DBStats stats_out;
+    myDb->getStats(stats_out);
+    (void)stats_out;
+
     jungle::DebugParams jungle_d_params;
-    jungle_d_params.urgentCompactionRatio = 120;
+    jungle_d_params.urgentCompactionRatio = 500;
     jungle_d_params.urgentCompactionNumWrites = 10000;
+    jungle_d_params.urgentCompactionMaxTableIdx = stats_out.maxTableIndex;
     //jungle::setDebugParams(jungle_d_params);
 
     return 0;

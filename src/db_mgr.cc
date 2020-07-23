@@ -368,6 +368,7 @@ void DBMgr::setDebugParams(const DebugParams& to,
               "urgent compaction size %zu, "
               "urgent compaction ratio %zu, "
               "urgent compaction writes %zu, "
+              "urgent compaction max table idx %zu, "
               "rollback delay %zu",
               effective_time_sec,
               debugParams.compactionDelayUs,
@@ -375,6 +376,7 @@ void DBMgr::setDebugParams(const DebugParams& to,
               debugParams.urgentCompactionFilesize,
               debugParams.urgentCompactionRatio,
               debugParams.urgentCompactionNumWrites,
+              debugParams.urgentCompactionMaxTableIdx,
               debugParams.rollbackDelayUs);
 }
 
