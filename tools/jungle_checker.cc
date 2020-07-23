@@ -144,13 +144,16 @@ static int db_overview(const std::vector<std::string>& args) {
         printf("number of levels: %zu (bottommost level %zu)\n",
                num_levels, num_levels - 1);
 
+        const size_t NODE_SIZE = 4096;
         size_t total_num_tables = 0;
         size_t total_num_records = 0;
+        size_t total_num_idx_nodes = 0;
         size_t total_size = 0;
         size_t total_active_size = 0;
         for (size_t ii=0; ii<num_levels; ++ii) {
             size_t num_tables = 0;
             size_t num_records = 0;
+            size_t num_idx_nodes = 0;
             size_t level_size_total = 0;
             size_t level_size_active = 0;
             std::list<TableInfo*> tables;
@@ -165,27 +168,35 @@ static int db_overview(const std::vector<std::string>& args) {
                 level_size_total += t_stats.totalSizeByte;
                 level_size_active += t_stats.workingSetSizeByte;
                 num_records += t_stats.numKvs;
+                num_idx_nodes += t_stats.numIndexNodes;
                 t_info->done();
             }
-            printf("  level %2zu: %4zu tables, %zu records, "
-                   "%zu / %zu, %s / %s\n",
-                   ii, num_tables, num_records,
+            printf("  level %2zu: %4zu tables, %zu recs, %zu nodes, "
+                   "%zu / %zu, %s / %s, %.1f%% idx\n",
+                   ii, num_tables, num_records, num_idx_nodes,
                    level_size_active, level_size_total,
                    Formatter::sizeToString(level_size_active).c_str(),
-                   Formatter::sizeToString(level_size_total).c_str());
+                   Formatter::sizeToString(level_size_total).c_str(),
+                   ( level_size_active
+                     ? num_idx_nodes * 100.0 * NODE_SIZE / level_size_active
+                     : 0 ) );
 
             total_num_records += num_records;
+            total_num_idx_nodes += num_idx_nodes;
             total_num_tables += num_tables;
             total_size += level_size_total;
             total_active_size += level_size_active;
         }
         printf("  ---\n");
-        printf("  total   : %4zu tables, %zu records, "
-               "%zu / %zu, %s / %s\n",
-               total_num_tables, total_num_records,
+        printf("  total   : %4zu tables, %zu recs, %zu nodes, "
+               "%zu / %zu, %s / %s, %.1f%% idx\n",
+               total_num_tables, total_num_records, total_num_idx_nodes,
                total_active_size, total_size,
                Formatter::sizeToString(total_active_size).c_str(),
-               Formatter::sizeToString(total_size).c_str());
+               Formatter::sizeToString(total_size).c_str(),
+               ( total_active_size
+                 ? total_num_idx_nodes * 100.0 * NODE_SIZE / total_active_size
+                 : 0 ));
     }
 
     s = DB::close(db);
@@ -328,6 +339,14 @@ static int table_info(const std::vector<std::string>& args) {
                    (size_t)t_stats.totalSizeByte,
                    Formatter::sizeToString(t_stats.workingSetSizeByte).c_str(),
                    Formatter::sizeToString(t_stats.totalSizeByte).c_str());
+            printf("      space by index: %zu nodes, %zu / %zu, %.1f%%\n",
+                   (size_t)t_stats.numIndexNodes,
+                   (size_t)t_stats.numIndexNodes * 4096,
+                   (size_t)t_stats.workingSetSizeByte,
+                   t_stats.workingSetSizeByte
+                   ? ( (double)t_stats.numIndexNodes * 4096 * 100 /
+                       t_stats.workingSetSizeByte )
+                   : 0 );
             printf("      block reuse cycle: %zu\n", (size_t)t_stats.blockReuseCycle);
             printf("      status: %d\n", t_info->status.load());
 

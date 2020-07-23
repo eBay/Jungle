@@ -166,6 +166,10 @@ std::string CmdHandler::hGetStats(DBWrap* target_dbw,
        << " " << stats_out.numKvs << std::endl;
     ss << "working_set_size"
        << " " << stats_out.workingSetSizeByte << std::endl;
+    ss << "num_index_nodes"
+       << " " << stats_out.numIndexNodes
+       << " " << stats_out.numIndexNodes * 4096
+       << std::endl;
     ss << "cache"
        << " " << stats_out.cacheUsedByte
        << " " << stats_out.cacheSizeByte << std::endl;
@@ -173,6 +177,10 @@ std::string CmdHandler::hGetStats(DBWrap* target_dbw,
        << " " << stats_out.numOpenMemtables << std::endl;
     ss << "num_bg_tasks"
        << " " << stats_out.numBgTasks << std::endl;
+    ss << "min_table_index"
+       << " " << stats_out.minTableIndex << std::endl;
+    ss << "max_table_index"
+       << " " << stats_out.maxTableIndex << std::endl;
 
     return ss.str();
 }

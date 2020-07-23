@@ -83,6 +83,7 @@ public:
         , approxDelCount(0)
         , minTableIdx(0)
         , maxTableIdx(0)
+        , numIndexNodes(0)
         {}
     uint64_t numKvs;
     uint64_t workingSetSizeByte;
@@ -94,6 +95,7 @@ public:
     uint64_t approxDelCount;
     uint64_t minTableIdx;
     uint64_t maxTableIdx;
+    uint64_t numIndexNodes;
 };
 
 namespace checker { class Checker; }

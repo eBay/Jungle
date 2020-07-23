@@ -1351,6 +1351,7 @@ Status TableFile::getStats(TableStats& stats_out) {
     }
 
     stats_out.blockReuseCycle = info.sb_bmp_revnum;
+    stats_out.numIndexNodes = info.num_live_nodes;
 
     stats_out.lastSeqnum = kvs_info.last_seqnum;
     stats_out.approxDocCount = kvs_info.doc_count;

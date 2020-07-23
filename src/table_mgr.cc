@@ -686,6 +686,7 @@ Status TableMgr::getStats(TableStats& aggr_stats_out) {
         cur_table->file->getStats(local_stat);
         aggr_stats_out.numKvs += local_stat.numKvs;
         aggr_stats_out.workingSetSizeByte += local_stat.workingSetSizeByte;
+        aggr_stats_out.numIndexNodes += local_stat.numIndexNodes;
 
         min_table_idx = std::min(cur_table->number, min_table_idx);
         max_table_idx = std::max(cur_table->number, max_table_idx);

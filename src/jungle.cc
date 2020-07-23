@@ -716,6 +716,7 @@ Status DB::getStats(DBStats& stats_out) {
     if (p && p->tableMgr) p->tableMgr->getStats(t_stats);
     stats_out.numKvs = t_stats.numKvs + num_kvs_log;
     stats_out.workingSetSizeByte = t_stats.workingSetSizeByte;
+    stats_out.numIndexNodes = t_stats.numIndexNodes;
     stats_out.cacheUsedByte = t_stats.cacheUsedByte;
     stats_out.minTableIndex = t_stats.minTableIdx;
     stats_out.maxTableIndex = t_stats.maxTableIdx;
