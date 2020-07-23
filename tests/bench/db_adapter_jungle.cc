@@ -108,7 +108,9 @@ int JungleAdapter::open(const std::string& db_file,
     uint64_t wal_size_mb = 256;
     _jint(wal_size_mb, configObj, "wal_size_mb");
     g_config.flusherMinRecordsToTrigger =
-        wal_size_mb * 1024 * 1024 / bench_config.valueLen.median;
+        bench_config.valueLen.median
+        ? wal_size_mb * 1024 * 1024 / bench_config.valueLen.median
+        : 65536;
 
     uint64_t cache_size_mb = 4096;
     _jint(cache_size_mb, configObj, "cache_size_mb");

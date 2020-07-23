@@ -26,6 +26,7 @@ public:
     DBStats()
         : numKvs(0)
         , workingSetSizeByte(0)
+        , numIndexNodes(0)
         , cacheSizeByte(0)
         , cacheUsedByte(0)
         , numOpenMemtables(0)
@@ -50,6 +51,12 @@ public:
      * Total working set (i.e., valid KV pairs) size.
      */
     uint64_t workingSetSizeByte;
+
+    /**
+     * [Local]
+     * Total number of index nodes, where each index node is 4KB.
+     */
+    uint64_t numIndexNodes;
 
     /**
      * [Global]
