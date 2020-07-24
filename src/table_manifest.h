@@ -204,6 +204,8 @@ public:
 
     Status getNumTables(size_t level, size_t& num_tables_out) const;
 
+    Status getSmallestTableIdx(uint64_t& idx_out);
+
     std::mutex& getLock() { return tableUpdateLock; }
 
     void setLogger(SimpleLogger* logger) { myLog = logger; }

@@ -6,9 +6,12 @@ set -ex
 RECOMPILE_FDB=true
 
 if [ -d third_party/forestdb ]; then
+    set +e
+    LAST_COMPILED_COMMIT=$(cat ./third_party/forestdb/build/last_compiled_commit)
+    set -e
     git submodule update
     pushd third_party/forestdb
-    if [ $(git rev-parse HEAD) == ${FORESTDB_COMMIT} ]; then
+    if [ ${LAST_COMPILED_COMMIT} == ${FORESTDB_COMMIT} ]; then
         RECOMPILE_FDB=false
     fi
     if [ ${FORCE_COMPILE_DEPENDENCIES} == true ]; then
@@ -29,7 +32,8 @@ if [ ${RECOMPILE_FDB} == true ]; then
     mkdir build
     cd build
     cmake -DSNAPPY_OPTION=Disable ../
-    make static_lib $1
+    make static_lib $1    
     cd ..
+    echo $(git rev-parse HEAD) > ./build/last_compiled_commit
 fi
 popd

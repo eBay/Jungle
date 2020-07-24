@@ -40,6 +40,7 @@ TableMgr::TableMgr(DB* parent_db)
     , numL0Partitions(1)
     , numL1Compactions(0)
     , numWrittenRecords(0)
+    , urgentCompactionMaxTableIdx(0)
     , myLog(nullptr)
     {}
 
@@ -778,6 +779,30 @@ void TableMgr::doCompactionThrottling
             Timer::sleepMs(to_sleep_ms);
         }
         throttling_timer.reset();
+    }
+}
+
+void TableMgr::setUrgentCompactionTableIdx(uint64_t to) {
+    uint64_t prev = urgentCompactionMaxTableIdx;
+    urgentCompactionMaxTableIdx = to;
+    _log_info(myLog, "set urgent compaction table index number "
+              "to %zu (prev %zu)", to, prev);
+}
+
+void TableMgr::autoClearUrgentCompactionTableIdx() {
+    if (!urgentCompactionMaxTableIdx) return;
+
+    uint64_t min_table_idx = 0;
+    Status s = mani->getSmallestTableIdx(min_table_idx);
+    if (!s || !min_table_idx) return;
+
+    if ( min_table_idx &&
+         min_table_idx > urgentCompactionMaxTableIdx ) {
+        _log_info(myLog, "current smallest table index %zu is "
+                  "smaller than urgent compaction number %zu",
+                  min_table_idx,
+                  urgentCompactionMaxTableIdx.load());
+        setUrgentCompactionTableIdx(0);
     }
 }
 

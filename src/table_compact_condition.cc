@@ -126,9 +126,8 @@ Status TableMgr::pickVictimTable(size_t level,
                 //      is greater than the given number.
                 //   2) Table size is smaller than the limit, OR
                 if ( policy == WORKING_SET_SIZE &&
-                     d_params_effective &&
-                     d_params.urgentCompactionMaxTableIdx ) {
-                    if (t_info->number > d_params.urgentCompactionMaxTableIdx) {
+                     urgentCompactionMaxTableIdx ) {
+                    if (t_info->number > urgentCompactionMaxTableIdx) {
                         continue;
                     }
                 } else if (w_size <= MAX_TABLE_SIZE * factor) {
@@ -419,11 +418,10 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
     // Urgent compaction:
     //   => If table file index number is smaller than
     //      the debugging parameter.
-    if ( d_params_effective &&
-         d_params.urgentCompactionMaxTableIdx &&
-         target_table->number <= d_params.urgentCompactionMaxTableIdx ) {
+    if ( urgentCompactionMaxTableIdx &&
+         target_table->number <= urgentCompactionMaxTableIdx ) {
         _log_info(myLog, "[URGENT COMPACTION] by table idx: %zu <= %zu",
-                  target_table->number, d_params.urgentCompactionMaxTableIdx);
+                  target_table->number, urgentCompactionMaxTableIdx.load());
         decision = true;
     }
 
@@ -599,11 +597,7 @@ Status TableMgr::chkLPCompactCond(size_t level,
     }
 
     // If urgent compaction parameter is set, process that one first.
-    DBMgr* db_mgr = DBMgr::getWithoutInit();
-    DebugParams d_params = db_mgr->getDebugParams();
-    bool d_params_effective = db_mgr->isDebugParamsEffective();
-    if ( d_params_effective &&
-         d_params.urgentCompactionMaxTableIdx ) {
+    if (urgentCompactionMaxTableIdx) {
         TableMgr::VictimPolicy v_policy = TableMgr::WORKING_SET_SIZE;
         TableInfo* victim_table = nullptr;
         wss = total = 0;

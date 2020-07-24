@@ -50,6 +50,9 @@ private:
     std::string hDumpKv(DBWrap* target_dbw,
                         const std::vector<std::string>& tokens);
 
+    std::string hCompactUpto(DBWrap* target_dbw,
+                             const std::vector<std::string>& tokens);
+
 };
 
 

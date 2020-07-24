@@ -655,6 +655,25 @@ Status TableManifest::getNumTables(size_t level, size_t& num_tables_out) const {
     return Status();
 }
 
+Status TableManifest::getSmallestTableIdx(uint64_t& idx_out) {
+    uint64_t cur_min = std::numeric_limits<uint64_t>::max();
+
+    for (auto& entry: levels) {
+        LevelInfo*& l_info = entry;
+        skiplist_node* cursor = skiplist_begin(l_info->tables);
+        while (cursor) {
+            TableInfo* t_info = _get_entry(cursor, TableInfo, snode);
+            cur_min = std::min(t_info->number, cur_min);
+
+            cursor = skiplist_next(l_info->tables, cursor);
+            skiplist_release_node(&t_info->snode);
+        }
+        if (cursor) skiplist_release_node(cursor);
+    }
+
+    idx_out = cur_min;
+    return Status();
+}
 
 } // namespace jungle
 
