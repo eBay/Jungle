@@ -136,7 +136,8 @@ void CmdHandler::handleCmd(DBWrap* target_dbw) {
           { "logcachestats", HANDLER_BINDER( &CmdHandler::hLogCacheStats ) },
           { "getrecord", HANDLER_BINDER( &CmdHandler::hDumpKv ) },
           { "getmeta", HANDLER_BINDER( &CmdHandler::hDumpKv ) },
-          { "dumpvalue2file", HANDLER_BINDER( &CmdHandler::hDumpKv ) }
+          { "dumpvalue2file", HANDLER_BINDER( &CmdHandler::hDumpKv ) },
+          { "compactupto", HANDLER_BINDER( &CmdHandler::hCompactUpto ) }
         } );
 
     auto entry = handlers.find(tokens[0]);
@@ -345,6 +346,22 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
         print_rec(rec_out, count);
     }
 
+    return ss.str();
+}
+
+std::string CmdHandler::hCompactUpto(DBWrap* target_dbw,
+                                     const std::vector<std::string>& tokens)
+{
+    std::stringstream ss;
+    if (tokens.size() < 2) {
+        ss << "too few arguments: compactupto <TABLE INDEX>\n";
+        return ss.str();
+    }
+
+    uint64_t table_idx_upto = std::stoul(tokens[1]);
+    target_dbw->db->compactIdxUpto(CompactOptions(), table_idx_upto);
+
+    ss << "set urgent compaction table index upto " << table_idx_upto << std::endl;
     return ss.str();
 }
 

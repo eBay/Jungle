@@ -428,6 +428,18 @@ public:
                           size_t level);
 
     /**
+     * Do in-place compaction on tables whose index number is
+     * equal to or smaller than the given parameter.
+     * If zero, no more compaction will be triggered.
+     *
+     * @param options Compaction options.
+     * @param idx_upto Upper bound of table index number to compact.
+     * @return OK on success.
+     */
+    Status compactIdxUpto(const CompactOptions& options,
+                          size_t idx_upto);
+
+    /**
      * Do split on a table in the given level, except for level-0.
      * This API will internally find the most suitable table to compact.
      *

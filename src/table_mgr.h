@@ -282,6 +282,17 @@ public:
 
     void resetNumWrittenRecords() { numWrittenRecords = 0; }
 
+    /**
+     * Set urgent compaction table index number to `to`.
+     */
+    void setUrgentCompactionTableIdx(uint64_t to);
+
+    /**
+     * If the smallest table index number is greater than
+     * the urgent compaction index number, clear it.
+     */
+    void autoClearUrgentCompactionTableIdx();
+
     static void doCompactionThrottling
                 (const GlobalConfig::CompactionThrottlingOptions& t_opt,
                  Timer& throttling_timer);
@@ -475,7 +486,9 @@ protected:
 // === VARIABLES
     const size_t APPROX_META_SIZE;
 
-    // Backward pointer to parent DB instance.
+    /**
+     * Backward pointer to parent DB instance.
+     */
     DB* parentDb;
 
     std::atomic<bool> allowCompaction;
@@ -490,23 +503,40 @@ protected:
 
     uint32_t numL0Partitions;
 
-    // Compaction status of L0 hash partitions.
+    /**
+     * Compaction status of L0 hash partitions.
+     */
     std::vector< std::atomic<bool>* > compactStatus;
 
-    // Number of on-going compactions in L1,
-    // only used for level extension mode.
+    /**
+     * Number of on-going compactions in L1,
+     * only used for level extension mode.
+     */
     std::atomic<size_t> numL1Compactions;
 
-    // Set of tables being compacted/merged/split.
+    /**
+     * Set of tables being compacted/merged/split.
+     */
     std::set<uint64_t> lockedTables;
     std::mutex lockedTablesLock;
 
-    // Set of (source) levels that interlevel compaction is in progress.
+    /**
+     * Set of (source) levels that interlevel compaction is in progress.
+     */
     std::unordered_set<size_t> lockedLevels;
     std::mutex lockedLevelsLock;
 
-    // Total accumulated number of records written to table.
+    /**
+     * Total accumulated number of records written to table.
+     */
     std::atomic<uint64_t> numWrittenRecords;
+
+    /**
+     * If non-zero, in-place compaction will be triggered sequentially,
+     * for tables whose index number is equal to or smaller than
+     * this number.
+     */
+    std::atomic<uint64_t> urgentCompactionMaxTableIdx;
 
     SimpleLogger* myLog;
 };

@@ -192,10 +192,11 @@ int JungleAdapter::open(const std::string& db_file,
     (void)stats_out;
 
     jungle::DebugParams jungle_d_params;
-    jungle_d_params.urgentCompactionRatio = 500;
+    jungle_d_params.urgentCompactionRatio = 120;
     jungle_d_params.urgentCompactionNumWrites = 10000;
-    jungle_d_params.urgentCompactionMaxTableIdx = stats_out.maxTableIndex;
     //jungle::setDebugParams(jungle_d_params);
+
+    //myDb->compactIdxUpto(jungle::CompactOptions(), stats_out.maxTableIndex);
 
     return 0;
 }

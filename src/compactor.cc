@@ -150,6 +150,9 @@ void Compactor::work(WorkerOptions* opt_base) {
                 continue;
             }
 
+            // Clear urgent copmaction by index if necessary.
+            dbwrap->db->p->tableMgr->autoClearUrgentCompactionTableIdx();
+
             // Currently all levels have even probability.
             // TODO: Give higher priority to upper levels?
             size_t num_levels = dbwrap->db->p->tableMgr->getNumLevels();

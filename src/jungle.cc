@@ -524,6 +524,12 @@ Status DB::compactInplace(const CompactOptions& options,
     s = p->tableMgr->compactInPlace(options, nullptr, level, false);
     return s;
 }
+Status DB::compactIdxUpto(const CompactOptions& options,
+                          size_t idx_upto)
+{
+    p->tableMgr->setUrgentCompactionTableIdx(idx_upto);
+    return Status();
+}
 
 Status DB::splitLevel(const CompactOptions& options,
                       size_t level)

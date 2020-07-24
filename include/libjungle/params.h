@@ -93,7 +93,6 @@ struct DebugParams {
         , urgentCompactionFilesize(0)
         , urgentCompactionRatio(0)
         , urgentCompactionNumWrites(0)
-        , urgentCompactionMaxTableIdx(0)
         , rollbackDelayUs(0)
         , logDetailsOfKeyNotFound(false)
         , disruptSplit(false)
@@ -140,13 +139,6 @@ struct DebugParams {
      * will take effect.
      */
     uint64_t urgentCompactionNumWrites;
-
-    /**
-     * If non-zero, compaction will be triggered sequentially,
-     * for tables whose index number is equal to or smaller than
-     * this number.
-     */
-    uint64_t urgentCompactionMaxTableIdx;
 
     /**
      * If non-zero, every file removal or truncation during rollback
