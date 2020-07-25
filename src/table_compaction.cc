@@ -313,7 +313,7 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     std::list<uint64_t> dummy_chk;
     std::list<LsmFlushResult> results;
 
-    if (num_new_tables && num_records_read) {
+    if (num_new_tables) {
         // Extend new level if needed.
         if (is_last_level) mani->extendLevel();
     }
