@@ -76,6 +76,7 @@ Status TableMgr::pickVictimTable(size_t level,
     size_t max_ratio = 0;
     uint64_t min_wss = std::numeric_limits<uint64_t>::max();
     uint64_t wss_avg = 0;
+    uint64_t wss_avg_num = 0;
     size_t cur_idx = 0;
     for (auto& entry: tables) {
         cur_idx++;
@@ -109,7 +110,12 @@ Status TableMgr::pickVictimTable(size_t level,
                 stack_size++;
             }
         }
-        wss_avg += w_size;
+
+        // Exclude small tables from calculating average.
+        if (t_size > db_config->minFileSizeToCompact) {
+            wss_avg += w_size;
+            wss_avg_num++;
+        }
 
         _log_trace( myLog, "table %zu wss %zu total %zu policy %d",
                     t_info->number, w_size, t_size, policy );
@@ -186,8 +192,8 @@ Status TableMgr::pickVictimTable(size_t level,
             assert(0);
         }
     }
-    if (tables.size()) {
-        wss_avg /= tables.size();
+    if (wss_avg_num) {
+        wss_avg /= wss_avg_num;
     }
 
     if (policy == SMALL_WORKING_SET) {
@@ -198,6 +204,48 @@ Status TableMgr::pickVictimTable(size_t level,
                     // If we honor the limit, merge the table if the smallest
                     // table's WSS is smaller than 20% of average.
                     do_merge = true;
+                }
+                if (wss_avg < MAX_TABLE_SIZE * 0.4) {
+                    // If average WSS is smaller than 40% of max table size,
+                    // there are more tables than expected.
+                    // Merge tables whose size is lower than average, ONLY WHEN
+                    // target (destination) table WSS is smaller than 1.6x of
+                    // the level average.
+                    TableInfo* dst_table = nullptr;
+                    size_t ii = 0;
+                    for (TableInfo* tt: tables) {
+                        ii++;
+                        // NOTE: `tables` is sorted by `minKey`, so if we break here,
+                        //       `target_table` is the one right before `local_victim`.
+                        if ( !tt->minKey.empty() &&
+                             ii < tables.size() &&
+                             dst_table ) { // skip the first and last one.
+                            TableStats src_stats, dst_stats;
+                            tt->file->getStats(src_stats);
+                            dst_table->file->getStats(dst_stats);
+                            if ( src_stats.workingSetSizeByte &&
+                                 dst_stats.workingSetSizeByte &&
+                                 src_stats.workingSetSizeByte < wss_avg &&
+                                 dst_stats.workingSetSizeByte < wss_avg * 1.6 ) {
+                                _log_info(
+                                    myLog, "merge by small level average, "
+                                    "victim table %zu, wss %zu (%s), "
+                                    "destination table %zu, wss %zu (%s)",
+                                    tt->number,
+                                    src_stats.workingSetSizeByte,
+                                    Formatter::sizeToString
+                                    ( src_stats.workingSetSizeByte, 2 ).c_str(),
+                                    dst_table->number,
+                                    dst_stats.workingSetSizeByte,
+                                    Formatter::sizeToString
+                                    ( dst_stats.workingSetSizeByte, 2 ).c_str() );
+                                victim_table = tt;
+                                do_merge = true;
+                                break;
+                            }
+                        }
+                        dst_table = tt;
+                    }
                 }
             } else {
                 // If we don't honor the limit, just merge the smallest table.
