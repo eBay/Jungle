@@ -385,6 +385,8 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
 
     TableInfo* target_table = nullptr;
     for (TableInfo* tt: tables) {
+        // NOTE: `tables` is sorted by `minKey`, so if we break here,
+        //       `target_table` is the one right before `local_victim`.
         if (tt == local_victim) break;
         target_table = tt;
     }
