@@ -554,10 +554,7 @@ Status LogMgr::setSN(const Record& rec) {
 
 Status LogMgr::setMulti(const std::list<Record>& batch) {
     Timer tt;
-
     Status s;
-    uint64_t log_file_num = 0;
-    uint64_t max_log_file_num = 0;
 
     if (parentDb) parentDb->p->updateOpHistory();
 
@@ -567,11 +564,6 @@ Status LogMgr::setMulti(const std::list<Record>& batch) {
     // `batch` should contain at least one record.
     if (!batch.size()) return Status::EMPTY_BATCH;
 
-    DBMgr* dbm = DBMgr::getWithoutInit();
-    DebugParams dp = dbm->getDebugParams();
-
-    const Record& first_rec = *batch.begin();
-
     // All writes will be serialized, except for throttling part.
     std::unique_lock<std::recursive_mutex> wm(writeMutex); // -----------------
 
@@ -580,22 +572,30 @@ Status LogMgr::setMulti(const std::list<Record>& batch) {
     visibleSeqBarrier = max_seq;
     GcFunc gc_vs( [this]{ this->visibleSeqBarrier = 0; } );
 
-    // Get latest log file.
-    LogFileInfo* lf_info = nullptr;
-    do {
-        EP(mani->getMaxLogFileNum(max_log_file_num));
-        log_file_num = max_log_file_num;
+    EP( checkBatchValidity(batch) );
+    EP( setMultiInternal(batch) );
 
-        if ( valid_number(first_rec.seqNum) &&
-             getDbConfig()->allowOverwriteSeqNum ) {
-            // Batch set doesn't allow overwriting existing seq numbers.
-            s = mani->getLogFileNumBySeq(first_rec.seqNum, log_file_num);
-            if (s) return Status::INVALID_SEQNUM;
-        }
-        lf_info = mani->getLogFileInfoP(log_file_num);
+    gc_vs.gcNow();
+    wm.unlock(); // -----------------------------------------------------------
 
-    } while (!lf_info || lf_info->isRemoved());
-    LogFileInfoGuard g_li(lf_info);
+    execBackPressure(tt.getUs());
+    numSetRecords.fetch_add(batch.size());
+
+    return Status();
+}
+
+Status LogMgr::checkBatchValidity(const std::list<Record>& batch)
+{
+    Status s;
+    const Record& first_rec = *batch.begin();
+
+    if ( valid_number(first_rec.seqNum) &&
+         getDbConfig()->allowOverwriteSeqNum ) {
+        // Batch set doesn't allow overwriting existing seq numbers.
+        uint64_t dummy_u64 = 0;
+        s = mani->getLogFileNumBySeq(first_rec.seqNum, dummy_u64);
+        if (s) return Status::INVALID_SEQNUM;
+    }
 
     // Check given sequence numbers.
     // It should be
@@ -608,16 +608,33 @@ Status LogMgr::setMulti(const std::list<Record>& batch) {
         }
     } else {
         uint64_t prev_seq = 0;
+        getMaxSeqNum(prev_seq); // At least bigger than max seq.
         for (auto& entry: batch) {
             const Record& rr = entry;
             if ( !valid_number(rr.seqNum) ||
-                 rr.seqNum <= max_seq ||
                  rr.seqNum <= prev_seq ) {
                 return Status::INVALID_SEQNUM;
             }
             prev_seq = rr.seqNum;
         }
     }
+    return Status();
+}
+
+Status LogMgr::setMultiInternal(const std::list<Record>& batch)
+{
+    Status s;
+    DBMgr* dbm = DBMgr::getWithoutInit();
+    DebugParams dp = dbm->getDebugParams();
+
+    // Get latest log file.
+    uint64_t max_log_file_num = 0;
+    LogFileInfo* lf_info = nullptr;
+    do {
+        EP(mani->getMaxLogFileNum(max_log_file_num));
+        lf_info = mani->getLogFileInfoP(max_log_file_num);
+    } while (!lf_info || lf_info->isRemoved());
+    LogFileInfoGuard g_li(lf_info);
 
     for (auto& entry: batch) {
         const Record& rr = entry;
@@ -632,16 +649,10 @@ Status LogMgr::setMulti(const std::list<Record>& batch) {
         }
         EP( g_li->file->setSN(rr) );
     }
+
     if (dp.newLogBatchCb) {
         dp.newLogBatchCb(DebugParams::GenericCbParams());
     }
-
-    gc_vs.gcNow();
-    wm.unlock(); // -----------------------------------------------------------
-
-    execBackPressure(tt.getUs());
-    numSetRecords.fetch_add(batch.size());
-
     return Status();
 }
 
