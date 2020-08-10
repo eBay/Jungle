@@ -81,7 +81,7 @@ public:
                bool allow_flushed_log,
                bool allow_tombstone);
 
-    Status flushMemTable();
+    Status flushMemTable(uint64_t upto = NOT_INITIALIZED);
 
     Status purgeMemTable();
 

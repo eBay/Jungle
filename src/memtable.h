@@ -84,7 +84,7 @@ public:
                                   uint64_t& offset_out,
                                   uint64_t* padding_start_pos_out = nullptr);
 
-    Status flush(RwSerializer& rws);
+    Status flush(RwSerializer& rws, uint64_t upto = NOT_INITIALIZED);
     Status checkpoint(uint64_t& seq_num_out);
     Status getLogsToFlush(const uint64_t seq_num,
                           std::list<Record*>& list_out,

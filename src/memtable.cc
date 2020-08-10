@@ -1014,7 +1014,7 @@ Status MemTable::findOffsetOfSeq(SimpleLogger* logger,
 }
 
 // MemTable flush: skiplist (memory) -> log file. (disk)
-Status MemTable::flush(RwSerializer& rws)
+Status MemTable::flush(RwSerializer& rws, uint64_t upto)
 {
     if (minSeqNum == NOT_INITIALIZED) {
         // No log in this file. Just do nothing and return OK.
@@ -1024,6 +1024,11 @@ Status MemTable::flush(RwSerializer& rws)
     // Write logs in a mutation order.
     // From `synced seq num` to `max seq num`
     uint64_t seqnum_upto = maxSeqNum;
+
+    // Manually given sequence number limit.
+    if (valid_number(upto) && upto < seqnum_upto) {
+        seqnum_upto = upto;
+    }
 
     // Flush never happened: start from min seq num
     // Otherwise: start from last sync seq num + 1
