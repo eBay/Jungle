@@ -111,6 +111,10 @@ public:
 
     Status setMulti(const std::list<Record>& batch);
 
+    Status checkBatchValidity(const std::list<Record>& batch);
+
+    Status setMultiInternal(const std::list<Record>& batch);
+
     Status setSN(const Record& rec);
 
     // Returns pointer only.
