@@ -638,16 +638,10 @@ Status LogMgr::setMultiInternal(const std::list<Record>& batch)
 
     for (auto& entry: batch) {
         const Record& rr = entry;
-
-        // Don't need to consider overwriting.
-        if ( !g_li->file->isValidToWrite() ) {
-            addNewLogFile(g_li, g_li);
-
-            if (dp.addNewLogFileCb) {
-                dp.addNewLogFileCb(DebugParams::GenericCbParams());
-            }
-        }
         EP( g_li->file->setSN(rr) );
+        // WARNING:
+        //   During an atomic batch, we will not move to next
+        //   log file to make rollback easier.
     }
 
     if (dp.newLogBatchCb) {
