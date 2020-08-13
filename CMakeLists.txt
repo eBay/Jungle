@@ -28,7 +28,7 @@ endif()
 
 # Find snappy
 include(cmake/FindSnappy.cmake)
-if ( (SNAPPY_OPTION STREQUAL "Enable") OR 
+if ( (SNAPPY_OPTION STREQUAL "Enable") OR
      (SNAPPY_OPTION STREQUAL "enable") )
     message(STATUS "Snappy option is enabled.")
     if (SNAPPY_FOUND)
@@ -37,7 +37,7 @@ if ( (SNAPPY_OPTION STREQUAL "Enable") OR
     else()
         MESSAGE(FATAL_ERROR "Can't find snappy, "
                 "if you want to build without snappy set"
-                " \"-DSNAPPY_OPTION=Disable\"")    
+                " \"-DSNAPPY_OPTION=Disable\"")
     endif(SNAPPY_FOUND)
 endif()
 
@@ -146,6 +146,7 @@ set(JUNGLE_CORE
     ${ROOT_SRC}/fileops_posix.cc
     ${ROOT_SRC}/fileops_directio.cc
     ${ROOT_SRC}/flusher.cc
+    ${ROOT_SRC}/global_batch.cc
     ${ROOT_SRC}/internal_helper.cc
     ${ROOT_SRC}/iterator.cc
     ${ROOT_SRC}/jungle.cc

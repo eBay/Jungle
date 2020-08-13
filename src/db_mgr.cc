@@ -23,6 +23,8 @@ limitations under the License.
 #include "internal_helper.h"
 #include "log_reclaimer.h"
 
+#include <set>
+
 #include _MACRO_TO_STR(LOGGER_H)
 
 namespace jungle {
@@ -155,6 +157,7 @@ DBMgr::DBMgr()
     : wMgr(new WorkerMgr())
     , fQueue(new FlusherQueue())
     , twMgr(new TableWriterMgr())
+    , gbExecutor(new GlobalBatchExecutor())
     , idleTraffic(false)
     , myLog(nullptr)
 {
@@ -180,9 +183,10 @@ DBMgr::~DBMgr() {
     }
 
     // Should close all workers before closing DBMgr.
-    if (wMgr) delete wMgr;
-    if (fQueue) delete fQueue;
-    if (twMgr) delete twMgr;
+    if (wMgr) DELETE(wMgr);
+    if (fQueue) DELETE(fQueue);
+    if (twMgr) DELETE(twMgr);
+    if (gbExecutor) DELETE(gbExecutor);
 
     skiplist_node* cursor = skiplist_begin(&dbMap);
     while (cursor) {

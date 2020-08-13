@@ -86,8 +86,10 @@ struct OpSemaWrapper {
 
 namespace checker { class Checker; }
 
+struct GlobalBatchStatus;
 class LogMgr {
     friend class checker::Checker;
+    friend class GlobalBatchExecutor;
 
 public:
     LogMgr(DB* parent_db, const LogMgrOptions& _options = LogMgrOptions());
@@ -109,11 +111,23 @@ public:
                         std::list<LogFileInfo*>*& log_file_list_out);
     Status closeSnapshot(DB* snap_handle);
 
+    void lockWriteMutex();
+
+    void unlockWriteMutex();
+
     Status setMulti(const std::list<Record>& batch);
+
+    void setVisibleSeqBarrier(uint64_t to);
+
+    void setGlobalBatch(uint64_t fwd_barrier,
+                        std::shared_ptr<GlobalBatchStatus> status);
+
+    uint64_t getVisibleSeqBarrier();
 
     Status checkBatchValidity(const std::list<Record>& batch);
 
-    Status setMultiInternal(const std::list<Record>& batch);
+    Status setMultiInternal(const std::list<Record>& batch,
+                            uint64_t& max_seq_out);
 
     Status setSN(const Record& rec);
 
@@ -322,34 +336,69 @@ protected:
     std::mutex sMapLock;
     SnapMap sMap;
 
-    // IOPS.
-    // If non-zero, throttling is enabled based on this number.
+    /**
+     * IOPS.
+     * If non-zero, throttling is enabled based on this number.
+     */
     std::atomic<double> throttlingRate;
 
-    // Timer that remembers the last time `throttlingRate`
-    // was updated.
+    /**
+     * Timer that remembers the last time `throttlingRate`
+     * was updated.
+     */
     Timer throttlingRateTimer;
 
-    // Keep the last flushed time.
+    /**
+     * Keep the last flushed time.
+     */
     Timer lastFlushTimer;
 
-    // Interval of last two flushes in ms.
+    /**
+     * Interval of last two flushes in ms.
+     */
     std::atomic<int64_t> lastFlushIntervalMs;
 
-    // Number of set calls since the last flush.
+    /**
+     * Number of set calls since the last flush.
+     */
     std::atomic<int64_t> numSetRecords;
 
-    // If non-zero, records up to this number (inclusive) will be
-    // visible to user.
+    /**
+     * If non-zero, records up to this number (inclusive) will be
+     * visible to user.
+     */
     std::atomic<uint64_t> visibleSeqBarrier;
 
-    // Number of memory loaded log files.
+    /**
+     * Global batch.
+     */
+    std::atomic<uint64_t> fwdVisibleSeqBarrier;
+
+    /**
+     * If `globalBatchFlag == true`, this status contains the current
+     * status of the global batch.
+     */
+    std::shared_ptr<GlobalBatchStatus> globalBatchStatus;
+
+    /**
+     * Protect `globalBatchStatus` in a case when reader tries to read
+     * the status while global batch executer attempts to clear it.
+     */
+    std::mutex globalBatchStatusLock;
+
+    /**
+     * Number of memory loaded log files.
+     */
     std::atomic<uint32_t> numMemtables;
 
-    // Logger.
+    /**
+     * Logger.
+     */
     SimpleLogger* myLog;
 
-    // Verbose logging control for sync.
+    /**
+     * Verbose logging control for sync.
+     */
     VerboseLog vlSync;
 };
 

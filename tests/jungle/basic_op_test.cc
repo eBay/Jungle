@@ -2005,6 +2005,137 @@ int set_batch_invalid_test() {
     return 0;
 }
 
+int global_batch_test() {
+    const size_t NUM_DBS = 3;
+
+    std::string filename_base;
+    TEST_SUITE_PREPARE_PATH(filename_base);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    std::vector< jungle::DB* > db_vector(NUM_DBS);
+
+    config.maxEntriesInLogFile = 10;
+    for (size_t ii=0; ii<NUM_DBS; ++ii) {
+        std::string filename = filename_base + "_" + std::to_string(ii);
+        CHK_Z( jungle::DB::open(&db_vector[ii], filename, config) );
+    }
+
+    // Put initial 5 records.
+    for (auto& entry: db_vector) {
+        jungle::DB* db = entry;
+        for (size_t ii=0; ii<5; ++ii) {
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        }
+    }
+
+    // Set debug callback.
+    jungle::DebugParams dp;
+    size_t cb_call_count = 0;
+    dp.newLogBatchCb =
+        [&](const jungle::DebugParams::GenericCbParams& pp) -> int {
+        // All DB instances should not have items.
+        for (auto& entry: db_vector) {
+            jungle::DB* db = entry;
+            TestSuite::setInfo("cb_call_count %zu, path %s",
+                               cb_call_count++,
+                               db->getPath().c_str());
+            for (size_t ii=0; ii<15; ++ii) {
+                std::string key_str = "k" + std::to_string(ii);
+                std::string val_str = "v" + std::to_string(ii);
+                jungle::SizedBuf value_out;
+                jungle::SizedBuf::Holder h(value_out);
+                jungle::Status s = db->get( jungle::SizedBuf(key_str), value_out );
+                if (ii < 5) {
+                    CHK_Z(s);
+                    CHK_EQ( val_str, value_out.toString() );
+                } else {
+                    // Otherwise they should not be visible yet.
+                    CHK_FALSE(s);
+                }
+            }
+
+            // Same to iterator.
+            jungle::Iterator itr;
+            itr.init(db);
+            size_t count = 0;
+            do {
+                jungle::Record rec;
+                jungle::Record::Holder h(rec);
+                CHK_Z( itr.get(rec) );
+                count++;
+            } while (itr.next().ok());
+            itr.close();
+            CHK_EQ(5, count);
+        }
+        return 0;
+    };
+    jungle::DB::setDebugParams(dp);
+
+    // Put 10 records for each DB atomically.
+    std::list<jungle::Record> recs_to_free;
+    jungle::GlobalBatch g_batch;
+    for (auto& entry: db_vector) {
+        jungle::DB* db = entry;
+        std::list<jungle::Record> recs;
+        for (size_t ii=5; ii<15; ++ii) {
+            jungle::Record rr;
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            rr.kv.alloc(key_str, val_str);
+            recs.push_back(rr);
+            recs_to_free.push_back(rr);
+        }
+        g_batch.addBatch(db, recs);
+    }
+    CHK_Z( g_batch.execute() );
+    for (jungle::Record& rr: recs_to_free) {
+        rr.free();
+    }
+
+    // After batch update succeeds, we should see all records
+    // from all DBs.
+    for (auto& entry: db_vector) {
+        jungle::DB* db = entry;
+        for (size_t ii=0; ii<15; ++ii) {
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            jungle::SizedBuf value_out;
+            jungle::SizedBuf::Holder h(value_out);
+            CHK_Z( db->get( jungle::SizedBuf(key_str), value_out ) );
+            CHK_EQ( val_str, value_out.toString() );
+        }
+    }
+
+    // Same to iterator.
+    for (auto& entry: db_vector) {
+        jungle::DB* db = entry;
+        jungle::Iterator itr;
+        itr.init(db);
+        size_t count = 0;
+        do {
+            jungle::Record rec;
+            jungle::Record::Holder h(rec);
+            CHK_Z( itr.get(rec) );
+            count++;
+        } while (itr.next().ok());
+        itr.close();
+        CHK_EQ(15, count);
+    }
+
+    for (auto& entry: db_vector) {
+        jungle::DB* db = entry;
+        CHK_Z(jungle::DB::close(db));
+    }
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int empty_log_file_Test(size_t num_reopen) {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -2089,6 +2220,7 @@ int main(int argc, char** argv) {
     ts.doTest("async remove file test", async_remove_file_test);
     ts.doTest("set batch test", set_batch_test);
     ts.doTest("set batch invalid test", set_batch_invalid_test);
+    ts.doTest("global batch test", global_batch_test);
     ts.doTest("empty log file test", empty_log_file_Test,
               TestRange<size_t>( {1, 10} ) );
 

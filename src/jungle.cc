@@ -205,6 +205,10 @@ bool DB::isLogSectionMode(const std::string& path) {
     return false;
 }
 
+bool DB::isReadOnly() const {
+    return p->dbConfig.readOnly;
+}
+
 Status DB::init(const GlobalConfig& global_config) {
     DBMgr* mgr = DBMgr::init(global_config);
     if (!mgr) {

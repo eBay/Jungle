@@ -18,6 +18,7 @@ limitations under the License.
 
 #include "db_config.h"
 #include "db_stats.h"
+#include "global_batch.h"
 #include "iterator.h"
 #include "keyvalue.h"
 #include "params.h"
@@ -41,6 +42,7 @@ class DB {
     friend class Compactor;
     friend class DBMgr;
     friend class DBGroup;
+    friend class GlobalBatchExecutor;
     friend class Iterator;
     friend class Flusher;
     friend class FlusherQueue;
@@ -107,6 +109,14 @@ public:
      * @return `true` if the instance at the path is for log section mode.
      */
     static bool isLogSectionMode(const std::string& path);
+
+    /**
+     * Check if the Jungle instance is in read-only mode.
+     *
+     * @param path Path to an instance to check.
+     * @return `true` if it is in read-only mode..
+     */
+    bool isReadOnly() const;
 
     /**
      * Open a snapshot.
