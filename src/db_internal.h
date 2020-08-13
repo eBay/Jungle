@@ -289,5 +289,34 @@ public:
     Iterator* parent;
 };
 
+struct GlobalBatchStatus {
+    enum Status {
+        /**
+         * Global batch is in progress, dirty items shouldn't be visible.
+         */
+        INVISIBLE = 0,
+
+        /**
+         * Global batch is done, dirty items should be visible.
+         * It is an intermediate status that cleaning-up of
+         * global batch related stuff are in progress.
+         */
+        VISIBLE = 1,
+    };
+    GlobalBatchStatus() : batchId(0), curStatus(INVISIBLE) {}
+    uint64_t batchId;
+    std::atomic<Status> curStatus;
+};
+
+class GlobalBatchExecutor {
+public:
+    GlobalBatchExecutor() : gbIdCounter(1) {}
+
+    Status execute(const GlobalBatch& g_batch);
+
+private:
+    std::atomic<uint64_t> gbIdCounter;
+};
+
 } // namespace jungle
 

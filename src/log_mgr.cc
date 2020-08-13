@@ -40,6 +40,8 @@ LogMgr::LogMgr(DB* parent_db, const LogMgrOptions& _options)
     , lastFlushIntervalMs(0)
     , numSetRecords(0)
     , visibleSeqBarrier(0)
+    , fwdVisibleSeqBarrier(0)
+    , globalBatchStatus(nullptr)
     , numMemtables(0)
     , myLog(nullptr)
     , vlSync(VERBOSE_LOG_SUPPRESS_MS)
@@ -552,6 +554,14 @@ Status LogMgr::setSN(const Record& rec) {
     return Status();
 }
 
+void LogMgr::lockWriteMutex() {
+    writeMutex.lock();
+}
+
+void LogMgr::unlockWriteMutex() {
+    writeMutex.unlock();
+}
+
 Status LogMgr::setMulti(const std::list<Record>& batch) {
     Timer tt;
     Status s;
@@ -569,19 +579,57 @@ Status LogMgr::setMulti(const std::list<Record>& batch) {
 
     uint64_t max_seq = 0;
     getMaxSeqNum(max_seq); // empty log should be tolerated.
-    visibleSeqBarrier = max_seq;
-    GcFunc gc_vs( [this]{ this->visibleSeqBarrier = 0; } );
+    setVisibleSeqBarrier(max_seq);
+    GcFunc gc_vs( [&]{
+        setVisibleSeqBarrier(0);
+    } );
 
     EP( checkBatchValidity(batch) );
-    EP( setMultiInternal(batch) );
+    uint64_t dummy64 = 0;
+    EP( setMultiInternal(batch, dummy64) );
 
     gc_vs.gcNow();
     wm.unlock(); // -----------------------------------------------------------
 
     execBackPressure(tt.getUs());
-    numSetRecords.fetch_add(batch.size());
 
     return Status();
+}
+
+void LogMgr::setVisibleSeqBarrier(uint64_t to) {
+    visibleSeqBarrier.store(to, MOR);
+}
+
+void LogMgr::setGlobalBatch(uint64_t fwd_barrier,
+                            std::shared_ptr<GlobalBatchStatus> status)
+{
+    {   std::lock_guard<std::mutex> l(globalBatchStatusLock);
+        globalBatchStatus = status;
+    }
+    fwdVisibleSeqBarrier.store(fwd_barrier, MOR);
+}
+
+uint64_t LogMgr::getVisibleSeqBarrier() {
+    // WARNING: We should cache the barrier as it may change over time.
+    uint64_t fwd_barrier = fwdVisibleSeqBarrier.load(MOR);
+    if (fwd_barrier) {
+        std::shared_ptr<GlobalBatchStatus> status_ptr;
+        {   std::lock_guard<std::mutex> l(globalBatchStatusLock);
+            status_ptr = globalBatchStatus;
+        }
+
+        if ( status_ptr &&
+             status_ptr->curStatus.load(MOR) == GlobalBatchStatus::VISIBLE ) {
+            // Global batch is done, but the task is doing clean-up.
+            // Dirty items should be visible,
+            return fwd_barrier;
+        }
+        // Otherwise,
+        // 1) Global batch is in progres, OR
+        // 2) The entire process of global batch is done,
+        // then the same as the normal case.
+    }
+    return visibleSeqBarrier.load(MOR);
 }
 
 Status LogMgr::checkBatchValidity(const std::list<Record>& batch)
@@ -621,7 +669,8 @@ Status LogMgr::checkBatchValidity(const std::list<Record>& batch)
     return Status();
 }
 
-Status LogMgr::setMultiInternal(const std::list<Record>& batch)
+Status LogMgr::setMultiInternal(const std::list<Record>& batch,
+                                uint64_t& max_seq_out)
 {
     Status s;
     DBMgr* dbm = DBMgr::getWithoutInit();
@@ -643,10 +692,12 @@ Status LogMgr::setMultiInternal(const std::list<Record>& batch)
         //   During an atomic batch, we will not move to next
         //   log file to make rollback easier.
     }
+    max_seq_out = g_li->file->getMaxSeqNum();
 
     if (dp.newLogBatchCb) {
         dp.newLogBatchCb(DebugParams::GenericCbParams());
     }
+    numSetRecords.fetch_add(batch.size());
     return Status();
 }
 
@@ -663,7 +714,7 @@ Status LogMgr::getSN(const uint64_t seq_num, Record& rec_out) {
     }
 
     uint64_t max_seq = gg->file->getMaxSeqNum();
-    uint64_t visible_seq_barrier = visibleSeqBarrier;
+    uint64_t visible_seq_barrier = getVisibleSeqBarrier();
     if ( seq_num > max_seq ||
          ( visible_seq_barrier &&
            seq_num > visible_seq_barrier ) ) {
@@ -736,7 +787,7 @@ Status LogMgr::get(const uint64_t chk,
 
                 // WARNING: Fetching `visibleSeqBarrier` should be done AFTER
                 //          fetching max seq number.
-                uint64_t visible_seq_barrier = visibleSeqBarrier;
+                uint64_t visible_seq_barrier = getVisibleSeqBarrier();
                 if (visible_seq_barrier) {
                     chk_local = std::min(chk_local, visible_seq_barrier);
                 }
@@ -808,13 +859,14 @@ Status LogMgr::syncInternal(bool call_fsync) {
           num_suppressed);
 
     uint64_t last_synced_log = ln_from;
+    uint64_t seq_barrier = getVisibleSeqBarrier();
     for (uint64_t ii=ln_from; ii<=ln_to; ++ii) {
         // Write log file first
         LogFileInfoGuard li(mani->getLogFileInfoP(ii));
         if (li.empty() || li.ptr->isRemoved()) continue;
 
         uint64_t before_sync = li->file->getSyncedSeqNum();
-        EP( li->file->flushMemTable() );
+        EP( li->file->flushMemTable( seq_barrier ? seq_barrier : NOT_INITIALIZED ) );
         uint64_t after_sync = li->file->getSyncedSeqNum();
         _log_( log_level, myLog, "synced log file %zu, min seq %s, "
                "flush seq %s, sync seq %s -> %s, max seq %s",
@@ -891,6 +943,11 @@ Status LogMgr::flush(const FlushOptions& options,
     }
 
     uint64_t seq_num_local = seq_num;
+    uint64_t seq_barrier = getVisibleSeqBarrier();
+    if (seq_barrier && seq_barrier < seq_num_local) {
+        seq_num_local = seq_barrier;
+    }
+
     if (seq_num_local == NOT_INITIALIZED) {
         // Purge all synced (checkpointed) logs.
         LogFileInfoGuard ll(mani->getLogFileInfoP(ln_to, true));
@@ -1244,7 +1301,7 @@ Status LogMgr::getMaxSeqNum(uint64_t& seq_num_out) {
     uint64_t max_seq = NOT_INITIALIZED;
     const size_t MAX_TRY = 16;
 
-    uint64_t visible_seq_barrier = visibleSeqBarrier;
+    uint64_t visible_seq_barrier = getVisibleSeqBarrier();
     if (visible_seq_barrier) {
         seq_num_out = visible_seq_barrier;
         return Status();

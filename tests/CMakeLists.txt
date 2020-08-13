@@ -107,6 +107,11 @@ add_executable(large_test ${LARGE_TEST})
 target_link_libraries(large_test ${JUNGLE_TEST_DEPS})
 add_dependencies(large_test static_lib)
 
+set(ATOMIC_BATCH_TEST ${TEST_DIR}/jungle/atomic_batch_test.cc)
+add_executable(atomic_batch_test ${ATOMIC_BATCH_TEST})
+target_link_libraries(atomic_batch_test ${JUNGLE_TEST_DEPS})
+add_dependencies(atomic_batch_test static_lib)
+
 add_custom_target(func_test)
 add_dependencies(func_test
                  basic_op_test
@@ -115,7 +120,8 @@ add_dependencies(func_test
                  snapshot_test
                  custom_cmp_test
                  mt_test
-                 large_test)
+                 large_test
+                 atomic_batch_test)
 
 
 set(FLUSH_ST_TEST ${TEST_DIR}/stress/flush_stress_test.cc)

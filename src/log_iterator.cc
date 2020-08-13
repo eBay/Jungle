@@ -109,9 +109,10 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
     //   The same as the comment in `LogMgr::get()`,
     //   fetching `visibleSeqBarrier` should be done AFTER
     //   fetching max seq number (`getAvailSeqRange` above).
-    if ( log_mgr->visibleSeqBarrier &&
-         maxSeqSnap > log_mgr->visibleSeqBarrier ) {
-        maxSeqSnap = log_mgr->visibleSeqBarrier;
+    uint64_t visible_seq_barrier = log_mgr->getVisibleSeqBarrier();
+    if ( visible_seq_barrier &&
+         maxSeqSnap > visible_seq_barrier ) {
+        maxSeqSnap = visible_seq_barrier;
     }
 
     // No available records in log section.

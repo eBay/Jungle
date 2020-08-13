@@ -67,6 +67,7 @@ struct DBWrap {
 static GlobalConfig _default_global_config_;
 
 class FlusherQueue;
+class GlobalBatchExecutor;
 
 // Singleton class
 class DBMgr {
@@ -112,6 +113,8 @@ public:
     FlusherQueue* flusherQueue() const { return fQueue; }
 
     TableWriterMgr* tableWriterMgr() const { return twMgr; }
+
+    GlobalBatchExecutor* getGlobalBatchExecutor() const { return gbExecutor; }
 
     GlobalConfig* getGlobalConfig() { return &gConfig; }
 
@@ -161,6 +164,8 @@ private:
 
     // Table writers pool manager.
     TableWriterMgr* twMgr;
+
+    GlobalBatchExecutor* gbExecutor;
 
     // Debugging parameters.
     DebugParams debugParams;
