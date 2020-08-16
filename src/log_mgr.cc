@@ -150,8 +150,12 @@ void LogMgr::logMgrSettings() {
 
     GlobalConfig* g_conf = mgr->getGlobalConfig();
 
-    _log_info(myLog, "initialized log manager, memtable flush buffer %zu",
-              g_conf->memTableFlushBufferSize);
+    _log_info(myLog,
+              "initialized log manager, memtable flush buffer %zu, "
+              "direct-IO %s",
+              g_conf->memTableFlushBufferSize,
+              ( opt.dbConfig->directIoOpt.enabled
+                ? "ON" : "OFF" ) );
 }
 
 Status LogMgr::rollback(uint64_t seq_upto) {

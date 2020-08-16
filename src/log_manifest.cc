@@ -357,7 +357,8 @@ Status LogManifest::load(const std::string& path,
                          min_seq, purged_seq, synced_seq);
         if (!s) {
             _s_warn(myLog) << "log file " << l_file_num << " read error: " << s;
-            if (s == Status::FILE_NOT_EXIST) {
+            if ( s == Status::FILE_NOT_EXIST ||
+                 s == Status::CHECKSUM_ERROR ) {
                 if ( !first_file_read &&
                      ii + 1 < num_log_files ) {
                     // If this is the first log file, and there are

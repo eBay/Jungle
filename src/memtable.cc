@@ -585,6 +585,7 @@ Status MemTable::loadRecord(RwSerializer& rws,
     char local_comp_buf[LOCAL_COMP_BUF_SIZE];
 
     const size_t LEN_META_SIZE = getLengthMetaSize(flags);
+    uint64_t rec_offset = rws.pos();
 
   try{
     uint32_t crc_len = 0;
@@ -680,7 +681,9 @@ Status MemTable::loadRecord(RwSerializer& rws,
     }
 
     if (crc_data != crc_data_chk) {
-        _log_err(myLog, "crc error %x != %x", crc_data, crc_data_chk);
+        _log_err(myLog, "crc error %x (expected) != %x (actual), "
+                 "in the record starting at offset 0x%lx",
+                 crc_data, crc_data_chk, rec_offset - 8);
         throw Status(Status::CHECKSUM_ERROR);
     }
 
