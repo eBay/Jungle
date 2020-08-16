@@ -152,6 +152,45 @@ int log_file_truncation_test(size_t amount) {
     return 0;
 }
 
+int log_file_corruption_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.logSectionOnly = true;
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Write multiple log files.
+    size_t NUM = 50;
+    std::vector<jungle::KV> kv(NUM);
+    CHK_Z(_init_kv_pairs(NUM, kv, "key", "value"));
+
+    for (size_t ii=0; ii<NUM; ++ii) {
+        CHK_Z(db->setSN(ii+1, kv[ii]));
+    }
+    CHK_Z(db->sync(false));
+    CHK_Z(jungle::DB::close(db));
+
+    // Corrupt the second log file.
+    CHK_Z(inject_crc_error(filename + "/log0000_00000001", 100));
+
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Close.
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+    CHK_Z(_free_kv_pairs(NUM, kv));
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int log_manifest_corruption_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -888,6 +927,9 @@ int main(int argc, char** argv) {
     ts.doTest("log file truncation test",
               log_file_truncation_test,
               TestRange<size_t>({100, 127, 60}));
+
+    ts.doTest("log file corruption test",
+              log_file_corruption_test);
 
     ts.doTest("log manifest corruption test",
               log_manifest_corruption_test);
