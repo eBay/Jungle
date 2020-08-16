@@ -219,5 +219,6 @@ if (CODE_COVERAGE GREATER 0)
                      level_extension_test
                      table_lookup_booster_test
                      compression_test
+                     atomic_batch_test
     )
 endif()
