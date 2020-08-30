@@ -93,6 +93,8 @@ public:
 
     bool isSynced();
 
+    Status discardDirty(uint64_t seq_begin);
+
     Status checkpoint(uint64_t& seq_num_out);
 
     Status getLogsToFlush(const uint64_t seq_num,

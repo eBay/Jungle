@@ -558,6 +558,12 @@ Status LogFile::sync() {
     return s;
 }
 
+Status LogFile::discardDirty(uint64_t seq_begin)
+{
+    if (!mTable) return Status::NOT_INITIALIZED;
+    return mTable->discardDirty(seq_begin);
+}
+
 Status LogFile::checkpoint(uint64_t& seq_num_out) {
     touch();
 

@@ -51,6 +51,9 @@ public:
     void addToByKeyIndex(Record* rec);
     Status addToBySeqIndex(Record* rec, Record*& prev_rec_out);
     Status putNewRecord(const Record& rec);
+    Status discardDirty(uint64_t seq_begin,
+                        bool rollback_seq_counter = false);
+
     // Returns pointer only.
     Status findRecordBySeq(const uint64_t seq_num,
                            Record& rec_out);
@@ -160,6 +163,7 @@ private:
 
         static int cmp(skiplist_node *a, skiplist_node *b, void *aux);
         Record* getLatestRecord(const uint64_t chk);
+        std::list<Record*> discardRecords(uint64_t seq_begin);
         uint64_t getMinSeq();
         bool validKeyExist(const uint64_t chk,
                            bool allow_tombstone = false);

@@ -29,7 +29,7 @@ int basic_operations_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     s = jungle::DB::open(&db, filename, config);
     CHK_Z(s);
 
@@ -120,7 +120,7 @@ int many_logs_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.maxEntriesInLogFile = 7;
     CHK_Z( jungle::DB::open(&db, filename, config) );
 
@@ -161,7 +161,7 @@ int overwrite_seq() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.allowOverwriteSeqNum = true;
     s = jungle::DB::open(&db, filename, config);
     CHK_OK(s);
@@ -239,7 +239,7 @@ int overwrite_seq_last_record() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.allowOverwriteSeqNum = true;
     s = jungle::DB::open(&db, filename, config);
     CHK_OK(s);
@@ -315,7 +315,7 @@ int load_db_sync() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     s = jungle::DB::open(&db, filename, config);
     CHK_OK(s);
 
@@ -388,7 +388,7 @@ int load_db_flush() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     s = jungle::DB::open(&db, filename, config);
     CHK_OK(s);
 
@@ -457,7 +457,7 @@ int log_dedup() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     s = jungle::DB::open(&db, filename, config);
     CHK_OK(s);
 
@@ -520,7 +520,7 @@ int deletion_op() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     s = jungle::DB::open(&db, filename, config);
     CHK_OK(s);
 
@@ -597,7 +597,7 @@ int multiple_log_files() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     s = jungle::DB::open(&db, filename, config);
     CHK_OK(s);
 
@@ -661,7 +661,7 @@ int multiple_kvs() {
 
     // Open DB group and default DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     s = jungle::DBGroup::open(&group, filename, config);
     CHK_OK(s);
     s = group->openDefaultDB(&db);
@@ -745,7 +745,7 @@ int set_by_key() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     s = jungle::DB::open(&db, filename, config);
     CHK_OK(s);
 
@@ -796,7 +796,7 @@ int command_marker() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     s = jungle::DB::open(&db, filename, config);
     CHK_OK(s);
 
@@ -888,7 +888,7 @@ int multiple_handles() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DBGroup* group;
     jungle::DB *db, *db_another;
     jungle::DB *kvs, *kvs_another;
@@ -977,7 +977,7 @@ int multiple_group_handles() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DBGroup *g1, *g2;
     jungle::DB *db1, *db2;
     jungle::DB *kvs1;
@@ -1023,7 +1023,7 @@ int group_handle_misuse() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DBGroup* group;
     jungle::DB* db;
 
@@ -1052,7 +1052,7 @@ int purge_only_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     config.maxEntriesInLogFile = 10;
@@ -1138,7 +1138,7 @@ int meta_test_log() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     CHK_Z(jungle::DB::open(&db, filename, config));
@@ -1203,7 +1203,7 @@ int meta_test_table() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     CHK_Z(jungle::DB::open(&db, filename, config));
@@ -1285,7 +1285,7 @@ int async_flush_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     jungle::GlobalConfig g_config;
@@ -1344,7 +1344,7 @@ int async_flush_verbose_test(bool debug_level) {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     jungle::GlobalConfig g_config;
@@ -1409,7 +1409,7 @@ int async_flush_verbose_with_delay_test(bool debug_level) {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     jungle::GlobalConfig g_config;
@@ -1474,7 +1474,7 @@ int flush_beyond_sync_test() {
 
     // Open DB.
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     config.maxEntriesInLogFile = 7;
     CHK_Z( jungle::DB::open(&db, filename, config) );
 
@@ -1555,7 +1555,7 @@ int get_stat_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     jungle::GlobalConfig g_config;
@@ -1595,7 +1595,7 @@ int double_shutdown_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     CHK_Z(jungle::DB::open(&db, filename, config));
@@ -1626,7 +1626,7 @@ int reopen_empty_db_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     CHK_Z(jungle::DB::open(&db, filename, config));
@@ -1661,7 +1661,7 @@ int different_l0_partitions() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     config.numL0Partitions = 1;
@@ -1714,7 +1714,7 @@ int add_new_log_file_race_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     config.maxEntriesInLogFile = 10;
@@ -1754,7 +1754,7 @@ int async_remove_file_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     config.maxEntriesInLogFile = 10;
@@ -1790,7 +1790,7 @@ int set_batch_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     config.maxEntriesInLogFile = 10;
@@ -1888,7 +1888,7 @@ int set_batch_invalid_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     config.maxEntriesInLogFile = 10;
@@ -2013,7 +2013,7 @@ int global_batch_test() {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     std::vector< jungle::DB* > db_vector(NUM_DBS);
 
     config.maxEntriesInLogFile = 10;
@@ -2142,7 +2142,7 @@ int empty_log_file_Test(size_t num_reopen) {
 
     jungle::Status s;
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
     jungle::DB* db;
 
     config.maxEntriesInLogFile = 10;
@@ -2175,6 +2175,121 @@ int empty_log_file_Test(size_t num_reopen) {
     // Min seq number should be the same.
     CHK_Z( db->getMinSeqNum(min_seq) );
     CHK_EQ(1, min_seq);
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+DEFINE_PARAMS_2( discard_test_args,
+                 bool, custom_seq, ({false /*, true (TODO)*/}),
+                 bool, reopen_in_the_middle, ({false, true}) );
+
+int discard_test(PARAM_BASE) {
+    GET_PARAMS(discard_test_args);
+
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    const size_t NUM1 = 5;
+    const size_t NUM2 = 50;
+    for (size_t ii=0; ii<NUM1; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        if (discard_test_args->custom_seq) {
+            CHK_Z( db->setSN( ii+1, jungle::KV(key_str, val_str) ) );
+        } else {
+            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        }
+    }
+    CHK_Z( db->sync(false) );
+
+    for (size_t ii=NUM1; ii<NUM2; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+    }
+
+    const size_t SEQ_DISCARD = 25;
+    CHK_Z( db->discardDirty(SEQ_DISCARD) );
+
+    auto point_check = [&](size_t upto, size_t not_visible_from = -1) -> int {
+        for (size_t ii=0; ii<upto; ++ii) {
+            std::string key_str = "k" + std::to_string(ii);
+            std::string val_str = "v" + std::to_string(ii);
+            jungle::SizedBuf val_out;
+            jungle::SizedBuf::Holder h(val_out);
+            s = db->get( jungle::SizedBuf(key_str), val_out );
+            if (ii + 1 >= not_visible_from) {
+                CHK_GT(0, (int)s);
+            } else {
+                CHK_Z(s);
+                CHK_EQ(val_str, val_out.toString());
+            }
+        }
+        return 0;
+    };
+
+    auto range_check = [&](size_t expected_number) -> int {
+        size_t itr_count = 0;
+        jungle::Iterator itr;
+        CHK_Z( itr.initSN(db) );
+        do {
+            std::string key_str = "k" + std::to_string(itr_count);
+            std::string val_str = "v" + std::to_string(itr_count);
+
+            jungle::Record rec_out;
+            jungle::Record::Holder h(rec_out);
+            if ( !itr.get(rec_out) ) break;
+
+            CHK_EQ(key_str, rec_out.kv.key.toString());
+            CHK_EQ(val_str, rec_out.kv.value.toString());
+
+            itr_count++;
+        } while(itr.next());
+        CHK_Z( itr.close() );
+        CHK_EQ(expected_number, itr_count);
+        return 0;
+    };
+
+    CHK_Z( point_check(NUM2, SEQ_DISCARD) );
+    CHK_Z( range_check(SEQ_DISCARD - 1) );
+
+    if (discard_test_args->reopen_in_the_middle) {
+        CHK_Z( jungle::DB::close(db) );
+        CHK_Z( jungle::DB::open(&db, filename, config) );
+    }
+
+    // Put more records.
+    const size_t NUM3 = 35;
+    for (size_t ii=SEQ_DISCARD-1; ii<NUM3; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        if (discard_test_args->custom_seq) {
+            CHK_Z( db->setSN( ii+1, jungle::KV(key_str, val_str) ) );
+        } else {
+            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        }
+    }
+
+    // Point query should succeed.
+    CHK_Z( point_check(NUM3) );
+    CHK_Z( range_check(NUM3) );
+
+    CHK_Z( db->flushLogs(jungle::FlushOptions()) );
+
+    CHK_Z( point_check(NUM3) );
+    CHK_Z( range_check(NUM3) );
 
     CHK_Z( jungle::DB::close(db) );
     CHK_Z( jungle::shutdown() );
@@ -2223,6 +2338,9 @@ int main(int argc, char** argv) {
     ts.doTest("global batch test", global_batch_test);
     ts.doTest("empty log file test", empty_log_file_Test,
               TestRange<size_t>( {1, 10} ) );
+
+    SET_PARAMS(discard_test_args);
+    ts.doTest("discard dirty test", discard_test, discard_test_args);
 
     return 0;
 }

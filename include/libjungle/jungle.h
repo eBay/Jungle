@@ -390,6 +390,15 @@ public:
                           const uint64_t seq_num = -1);
 
     /**
+     * [Experimental]
+     * Discard dirty key-value items that are not synced yet.
+     *
+     * @param seq_num_begin Starting sequence number to discard (inclusive).
+     * @return OK on success.
+     */
+    Status discardDirty(uint64_t seq_num_begin);
+
+    /**
      * Add a checkpoint marker.
      * This API will internally call `sync` operation.
      *

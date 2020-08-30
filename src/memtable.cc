@@ -81,6 +81,23 @@ Record* MemTable::RecNode::getLatestRecord(const uint64_t chk) {
     return rec;
 }
 
+std::list<Record*> MemTable::RecNode::discardRecords(uint64_t seq_begin) {
+    mGuard l(recListLock);
+    std::list<Record*> ret;
+
+    auto entry = recList->begin();
+    while (entry != recList->end()) {
+        Record* cur = *entry;
+        if (cur->seqNum >= seq_begin) {
+            ret.push_back(cur);
+            entry = recList->erase(entry);
+        } else {
+            entry++;
+        }
+    }
+    return ret;
+}
+
 uint64_t MemTable::RecNode::getMinSeq() {
     mGuard l(recListLock);
     auto entry = recList->begin();
@@ -481,6 +498,55 @@ Status MemTable::putNewRecord(const Record& _rec) {
     updateMaxSeqNum(rec_local.seqNum);
 
     bytesSize += rec->size();
+    return Status();
+}
+
+Status MemTable::discardDirty(uint64_t seq_begin,
+                              bool rollback_seq_counter)
+{
+    // WARNING:
+    //   * Not MT-safe if there are multiple writers.
+    //   * MT-safe against other readers.
+    if (!idxBySeq || !idxByKey) {
+        // skiplists are must.
+        return Status::NOT_INITIALIZED;
+    }
+
+    Record query_rec;
+    RecNodeSeq query(&query_rec);
+    query.rec->seqNum = seq_begin;
+    skiplist_node* cursor = skiplist_find_greater_or_equal(idxBySeq, &query.snode);
+    while (cursor) {
+        RecNodeSeq* rec_seq = _get_entry(cursor, RecNodeSeq, snode);
+
+        // Find by key (there can be multiple items).
+        RecNode key_query(&rec_seq->rec->kv.key);
+        skiplist_node* key_cursor = skiplist_find(idxByKey, &key_query.snode);
+        if (key_cursor) {
+            RecNode* rec_key = _get_entry(key_cursor, RecNode, snode);
+            std::list<Record*> discarded = rec_key->discardRecords(seq_begin);
+            skiplist_release_node(key_cursor);
+
+            // NOTE:
+            //   Due to the race with reader, we cannot delete the discarded
+            //   records now, hence push them to `staleLogs`.
+            {   mGuard l(staleLogsLock);
+                for (auto& entry: discarded) {
+                    staleLogs.push_back(entry);
+                }
+            }
+        }
+
+        cursor = skiplist_next(idxBySeq, &rec_seq->snode);
+        skiplist_erase_node(idxBySeq, &rec_seq->snode);
+        skiplist_release_node(&rec_seq->snode);
+        skiplist_wait_for_free(&rec_seq->snode);
+        delete rec_seq;
+    }
+    if (cursor) {
+        skiplist_release_node(cursor);
+    }
+
     return Status();
 }
 

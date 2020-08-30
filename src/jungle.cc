@@ -407,6 +407,13 @@ Status DB::syncNoWait(bool call_fsync) {
     return s;
 }
 
+Status DB::discardDirty(uint64_t seq_num_begin) {
+    Status s;
+    EP( p->checkHandleValidity(DBInternal::OPTYPE_FLUSH) );
+    s = p->logMgr->discardDirty(seq_num_begin);
+    return s;
+}
+
 Status DB::flushLogs(const FlushOptions& options, const uint64_t seq_num) {
     Status s;
     EP( p->checkHandleValidity(DBInternal::OPTYPE_FLUSH) );

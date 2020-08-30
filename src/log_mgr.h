@@ -144,6 +144,8 @@ public:
 
     Status syncNoWait(bool call_fsync = true);
 
+    Status discardDirty(uint64_t seq_begin);
+
 protected:
     Status syncInternal(bool call_fsync);
 

@@ -900,6 +900,54 @@ Status LogMgr::syncInternal(bool call_fsync) {
     return Status();
 }
 
+Status LogMgr::discardDirty(uint64_t seq_begin) {
+    // Return error in read-only mode.
+    if (getDbConfig()->readOnly) return Status::WRITE_VIOLATION;
+
+    // Should not race with sync.
+    OpSemaWrapper ow(&syncSema);
+    if (!ow.acquire()) {
+        _log_debug(myLog, "discard failed. Other thread is working on it.");
+        return Status::OPERATION_IN_PROGRESS;
+    }
+    assert(ow.op_sema->enabled);
+
+    Status s;
+    uint64_t ln_from, ln_to;
+    s = mani->getMaxLogFileNum(ln_to);
+    if (!s) {
+        // No log, do nothing.
+        return Status();
+    }
+
+    uint64_t last_synced_seq = 0;
+    getLastSyncedSeqNum(last_synced_seq);
+    if (!valid_number(last_synced_seq)) {
+        // Nothing has been synced yet.
+        last_synced_seq = 0;
+    }
+
+    EP( mani->getLogFileNumBySeq(seq_begin, ln_from) );
+    _log_info(myLog, "discard logs from %zu, file from %zu to %zu",
+              seq_begin, ln_from, ln_to);
+
+    for (uint64_t ii=ln_from; ii<=ln_to; ++ii) {
+        // Write log file first
+        LogFileInfoGuard li(mani->getLogFileInfoP(ii));
+        if (li.empty() || li.ptr->isRemoved()) continue;
+
+        li->file->discardDirty(seq_begin);
+        _log_info( myLog, "discarded logs from log file %zu, min seq %s, "
+                   "flush seq %s, sync seq %s, max seq %s",
+                   ii,
+                   _seq_str( li->file->getMinSeqNum() ).c_str(),
+                   _seq_str( li->file->getFlushedSeqNum() ).c_str(),
+                   _seq_str( li->file->getSyncedSeqNum() ).c_str(),
+                   _seq_str( li->file->getMaxSeqNum() ).c_str() );
+    }
+    return Status();
+}
+
 Status LogMgr::flush(const FlushOptions& options,
                      const uint64_t seq_num,
                      TableMgr* table_mgr)
