@@ -509,7 +509,13 @@ Status LogMgr::setSN(const Record& rec) {
         if ( valid_number(rec.seqNum) &&
              getDbConfig()->allowOverwriteSeqNum ) {
             // May overwrite existing seqnum, get corresponding log file.
-            s = mani->getLogFileNumBySeq(rec.seqNum, log_file_num);
+            // NOTE:
+            //   We should ignore max seqnum checking here,
+            //   as seq numbers may not be consecutive.
+            s = mani->getLogFileNumBySeq( rec.seqNum,
+                                          log_file_num,
+                                          false,
+                                          true );
             if (s) overwrite = true;
             // If not exist, use the latest file.
         }

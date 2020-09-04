@@ -306,6 +306,75 @@ int overwrite_seq_last_record() {
     return 0;
 }
 
+int overwrite_seq_reopen() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+    config.allowOverwriteSeqNum = true;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    const size_t NUM = 50;
+    for (size_t ii=0; ii<NUM; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        CHK_Z( db->setSN( ii+1, jungle::KV(key_str, val_str) ) );
+    }
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    for (size_t ii=NUM/2; ii<NUM; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "vv" + std::to_string(ii);
+        CHK_Z( db->setSN( ii+1, jungle::KV(key_str, val_str) ) );
+    }
+    CHK_Z( db->sync(false) );
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+    for (size_t ii=0; ii<NUM; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = ( (ii < NUM/2) ? "v" : "vv" ) +
+                              std::to_string(ii);
+        jungle::SizedBuf val_out;
+        jungle::SizedBuf::Holder h(val_out);
+        CHK_Z( db->get( jungle::SizedBuf(key_str), val_out ) );
+        CHK_EQ( val_str, val_out.toString() );
+    }
+
+    size_t itr_count = 0;
+    jungle::Iterator itr;
+    CHK_Z( itr.initSN(db) );
+    do {
+        std::string key_str = "k" + std::to_string(itr_count);
+        std::string val_str = ( (itr_count < NUM/2) ? "v" : "vv" ) +
+                              std::to_string(itr_count);
+
+        jungle::Record rec_out;
+        jungle::Record::Holder h(rec_out);
+        if ( !itr.get(rec_out) ) break;
+
+        CHK_EQ(key_str, rec_out.kv.key.toString());
+        CHK_EQ(val_str, rec_out.kv.value.toString());
+
+        itr_count++;
+    } while(itr.next());
+    CHK_Z( itr.close() );
+    CHK_EQ( NUM, itr_count );
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int load_db_sync() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -2184,8 +2253,8 @@ int empty_log_file_Test(size_t num_reopen) {
 }
 
 DEFINE_PARAMS_2( discard_test_args,
-                 bool, custom_seq, ({false /*, true (TODO)*/}),
-                 bool, reopen_in_the_middle, ({false, true}) );
+                 bool, custom_seq,           ({false, true}),
+                 int,  reopen_in_the_middle, ({0, 1, 2}) );
 
 int discard_test(PARAM_BASE) {
     GET_PARAMS(discard_test_args);
@@ -2199,6 +2268,9 @@ int discard_test(PARAM_BASE) {
     jungle::DB* db;
 
     config.maxEntriesInLogFile = 10;
+    if (discard_test_args->custom_seq) {
+        config.allowOverwriteSeqNum = true;
+    }
     CHK_Z( jungle::DB::open(&db, filename, config) );
 
     const size_t NUM1 = 5;
@@ -2256,6 +2328,9 @@ int discard_test(PARAM_BASE) {
             CHK_EQ(val_str, rec_out.kv.value.toString());
 
             itr_count++;
+            if (discard_test_args->custom_seq) {
+                CHK_EQ(itr_count, rec_out.seqNum);
+            }
         } while(itr.next());
         CHK_Z( itr.close() );
         CHK_EQ(expected_number, itr_count);
@@ -2265,10 +2340,18 @@ int discard_test(PARAM_BASE) {
     CHK_Z( point_check(NUM2, SEQ_DISCARD) );
     CHK_Z( range_check(SEQ_DISCARD - 1) );
 
-    if (discard_test_args->reopen_in_the_middle) {
+    switch (discard_test_args->reopen_in_the_middle) {
+    case 0:
+    default:
+        break;
+    case 1:
+        CHK_Z( db->sync(false) );
+        break;
+    case 2:
         CHK_Z( jungle::DB::close(db) );
         CHK_Z( jungle::DB::open(&db, filename, config) );
-    }
+        break;
+    };
 
     // Put more records.
     const size_t NUM3 = 35;
@@ -2283,6 +2366,11 @@ int discard_test(PARAM_BASE) {
     }
 
     // Point query should succeed.
+    CHK_Z( point_check(NUM3) );
+    CHK_Z( range_check(NUM3) );
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
     CHK_Z( point_check(NUM3) );
     CHK_Z( range_check(NUM3) );
 
@@ -2306,6 +2394,7 @@ int main(int argc, char** argv) {
     ts.doTest("many logs test", many_logs_test);
     ts.doTest("overwrite sequence number test", overwrite_seq);
     ts.doTest("overwrite last sequence number test", overwrite_seq_last_record);
+    ts.doTest("overwrite sequence number after reopen test", overwrite_seq_reopen);
     ts.doTest("load existing db test (sync)", load_db_sync);
     ts.doTest("load existing db test (flush)", load_db_flush);
     ts.doTest("log deduplication test", log_dedup);

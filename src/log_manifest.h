@@ -253,15 +253,20 @@ public:
                                const uint64_t e_log_inc,
                                std::vector<LogFileInfo*>& info_out,
                                bool force_not_load_memtable = false);
+
     Status getLogFileInfoBySeq(const uint64_t seq_num,
                                LogFileInfo*& info_out,
-                               bool force_not_load_memtable = false);
+                               bool force_not_load_memtable = false,
+                               bool ignore_max_seq_num = false);
+
     LogFileInfo* getLogFileInfoP(uint64_t log_num,
                                  bool force_not_load_memtable = false);
 
     Status getLogFileNumBySeq(const uint64_t seq_num,
                               uint64_t& log_file_num_out,
-                              bool force_not_load_memtable = false);
+                              bool force_not_load_memtable = false,
+                              bool ignore_max_seq_num = false);
+
     Status getMaxLogFileNum(uint64_t& log_file_num_out);
     Status setMaxLogFileNum(uint64_t cur_num, uint64_t new_num);
 

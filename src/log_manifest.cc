@@ -663,7 +663,8 @@ Status LogManifest::getLogFileInfoRange(const uint64_t s_log_inc,
 
 Status LogManifest::getLogFileInfoBySeq(const uint64_t seq_num,
                                         LogFileInfo*& info_out,
-                                        bool force_not_load_memtable)
+                                        bool force_not_load_memtable,
+                                        bool ignore_max_seq_num)
 {
     LogFileInfo query(0);
     query.startSeq = seq_num;
@@ -682,7 +683,8 @@ Status LogManifest::getLogFileInfoBySeq(const uint64_t seq_num,
         skiplist_release_node(cursor);
         return Status::LOG_FILE_NOT_FOUND;
     }
-    if (file->getMaxSeqNum() < seq_num) {
+    if ( !ignore_max_seq_num &&
+         file->getMaxSeqNum() < seq_num ) {
         skiplist_release_node(cursor);
         return Status::LOG_FILE_NOT_FOUND;
     }
@@ -745,11 +747,15 @@ Status LogManifest::removeLogFile(uint64_t log_num) {
 
 Status LogManifest::getLogFileNumBySeq(const uint64_t seqnum,
                                        uint64_t& log_file_num_out,
-                                       bool force_not_load_memtable)
+                                       bool force_not_load_memtable,
+                                       bool ignore_max_seq_num)
 {
     LogFileInfo* info;
     Status s;
-    EP( getLogFileInfoBySeq(seqnum, info, force_not_load_memtable) );
+    EP( getLogFileInfoBySeq( seqnum,
+                             info,
+                             force_not_load_memtable,
+                             ignore_max_seq_num ) );
     LogFileInfoGuard gg(info);
     if (!info->file) return Status::NOT_INITIALIZED;
     log_file_num_out = info->file->getLogFileNum();
