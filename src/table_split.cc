@@ -94,13 +94,20 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     uint64_t NUM_OUTPUT_TABLES =
         (victim_stats.workingSetSizeByte / TABLE_LIMIT) + 1;
     uint64_t EXP_DOCS = (victim_stats.numKvs / NUM_OUTPUT_TABLES) + 1;
+
+    const size_t INDEX_NODE_SIZE = 4096;
+    uint64_t index_size = victim_stats.numIndexNodes * INDEX_NODE_SIZE;
     uint64_t EXP_SIZE =
-        (victim_stats.workingSetSizeByte / NUM_OUTPUT_TABLES) * 1.1; // 10% headroom.
+        ( (victim_stats.workingSetSizeByte - index_size) /  // exclude index size
+          NUM_OUTPUT_TABLES ) * 1.1;                        // 10% headroom.
     bool moved_to_new_table = true;
-    _log_info(myLog, "split table WSS %zu limit %zu num docs %zu "
+    _log_info(myLog, "split table WSS %zu index %zu data %zu "
+              "limit %zu num docs %zu "
               "output tables %zu expected docs per table %zu "
               "expected size per table %zu",
               victim_stats.workingSetSizeByte,
+              index_size,
+              victim_stats.workingSetSizeByte - index_size,
               TABLE_LIMIT,
               victim_stats.numKvs,
               NUM_OUTPUT_TABLES,
