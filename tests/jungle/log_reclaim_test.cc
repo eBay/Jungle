@@ -1110,6 +1110,48 @@ int frequent_sync_test() {
     return 0;
 }
 
+int overwrite_seq_multi_log_files_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+
+    jungle::GlobalConfig g_config;
+    g_config.logFileReclaimerSleep_sec = 1;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.maxLogFileSize = 1024;
+    config.logSectionOnly = true;
+    config.allowOverwriteSeqNum = true;
+
+    jungle::DB* db;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    const size_t NUM = 1000;
+    for (size_t ii=0; ii<NUM; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii+1, jungle::KV(key_str, val_str) ) );
+    }
+    CHK_Z( db->sync(false) );
+
+    // Even with `allowOverwriteSeqNum` option,
+    // there should be no problem with creating new log files.
+    jungle::DBStats stats_out;
+    CHK_Z( db->getStats(stats_out) );
+    CHK_NEQ(-1, stats_out.minLogIndex);
+    CHK_NEQ(-1, stats_out.maxLogIndex);
+    CHK_GT(stats_out.maxLogIndex, stats_out.minLogIndex);
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
@@ -1158,6 +1200,9 @@ int main(int argc, char** argv) {
 
     ts.doTest("frequent sync test",
               frequent_sync_test);
+
+    ts.doTest("overwrite seq multi log files test",
+              overwrite_seq_multi_log_files_test);
 
 #if 0
     ts.doTest("reload empty files test",

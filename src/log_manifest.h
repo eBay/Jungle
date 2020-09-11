@@ -257,7 +257,7 @@ public:
     Status getLogFileInfoBySeq(const uint64_t seq_num,
                                LogFileInfo*& info_out,
                                bool force_not_load_memtable = false,
-                               bool ignore_max_seq_num = false);
+                               bool allow_non_exact_match = false);
 
     LogFileInfo* getLogFileInfoP(uint64_t log_num,
                                  bool force_not_load_memtable = false);

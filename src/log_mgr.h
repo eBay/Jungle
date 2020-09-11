@@ -200,6 +200,10 @@ public:
 
     size_t getNumLogFiles();
 
+    uint64_t getMinLogFileIndex();
+
+    uint64_t getMaxLogFileIndex();
+
     DB* getParentDb() const { return parentDb; }
 
     struct Iterator {

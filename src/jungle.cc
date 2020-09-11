@@ -725,6 +725,8 @@ Status DB::getStats(DBStats& stats_out) {
     if (p) {
         if (p->logMgr) {
             stats_out.numOpenMemtables = p->logMgr->getNumMemtables();
+            stats_out.minLogIndex = p->logMgr->getMinLogFileIndex();
+            stats_out.maxLogIndex = p->logMgr->getMaxLogFileIndex();
         }
         stats_out.numBgTasks = p->getNumBgTasks();
     }

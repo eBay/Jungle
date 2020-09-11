@@ -1657,4 +1657,19 @@ size_t LogMgr::getNumLogFiles() {
     return mani->getNumLogFiles();
 }
 
+uint64_t LogMgr::getMinLogFileIndex() {
+    if (!initialized || !mani) return NOT_INITIALIZED;
+    uint64_t log_file_num_out = NOT_INITIALIZED;
+    mani->getMinLogFileNum(log_file_num_out);
+    return log_file_num_out;
+}
+
+uint64_t LogMgr::getMaxLogFileIndex() {
+    if (!initialized || !mani) return NOT_INITIALIZED;
+    uint64_t log_file_num_out = NOT_INITIALIZED;
+    mani->getMaxLogFileNum(log_file_num_out);
+    return log_file_num_out;
+}
+
 } // namespace jungle
+
