@@ -664,7 +664,7 @@ Status LogManifest::getLogFileInfoRange(const uint64_t s_log_inc,
 Status LogManifest::getLogFileInfoBySeq(const uint64_t seq_num,
                                         LogFileInfo*& info_out,
                                         bool force_not_load_memtable,
-                                        bool ignore_max_seq_num)
+                                        bool allow_non_exact_match)
 {
     LogFileInfo query(0);
     query.startSeq = seq_num;
@@ -683,10 +683,19 @@ Status LogManifest::getLogFileInfoBySeq(const uint64_t seq_num,
         skiplist_release_node(cursor);
         return Status::LOG_FILE_NOT_FOUND;
     }
-    if ( !ignore_max_seq_num &&
-         file->getMaxSeqNum() < seq_num ) {
-        skiplist_release_node(cursor);
-        return Status::LOG_FILE_NOT_FOUND;
+
+    if ( file->getMaxSeqNum() < seq_num ) {
+        // Given seq number is bigger than this file's max seq number.
+        // * If this file is not the last file, follow
+        //   `allow_non_exact_match` flag.
+        // * If it is the last file, we should return LOG_FILE_NOT_FOUND,
+        //   as the given seq number is will be the biggest one (so that
+        //   not an overwrite).
+        bool is_last_file = (skiplist_next(&logFilesBySeq, cursor) == nullptr);
+        if (is_last_file || !allow_non_exact_match) {
+            skiplist_release_node(cursor);
+            return Status::LOG_FILE_NOT_FOUND;
+        }
     }
 
     info_out = info;

@@ -33,6 +33,8 @@ public:
         , numBgTasks(0)
         , minTableIndex(0)
         , maxTableIndex(0)
+        , minLogIndex(0)
+        , maxLogIndex(0)
         {}
 
     /**
@@ -93,6 +95,22 @@ public:
      * Greatest (i.e., youngest) table file index number.
      */
     uint64_t maxTableIndex;
+
+    /**
+     * [Local]
+     * Smallest (i.e., oldest) log file index number.
+     * This value can be `-1` if any error happens.
+     */
+    uint64_t minLogIndex;
+
+    /**
+     * [Local]
+     * Greatest (i.e., youngest) log file index number.
+     * This value can be `-1` if any error happens.
+     */
+    uint64_t maxLogIndex;
+
+
 };
 
 } // namespace jungle
