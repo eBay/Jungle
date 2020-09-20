@@ -226,7 +226,9 @@ public:
     Status load(const std::string& path,
                 const std::string& filename,
                 const uint64_t prefix_num);
+
     Status store(bool call_fsync);
+
     static Status copyFile(FileOps* f_ops,
                            const std::string& src_file,
                            const std::string& dst_file);
@@ -288,6 +290,8 @@ public:
     void setLogger(SimpleLogger* logger) { myLog = logger; }
 
 private:
+    Status storeInternal(bool call_fsync);
+
     FileOps* fOps;
     FileOps* fLogOps;
     FileHandle* mFile;
@@ -319,6 +323,11 @@ private:
      * reserves more memory.
      */
     size_t lenCachedManifest;
+
+    /**
+     * Only one thread is allowed to write the manifest file.
+     */
+    std::mutex mFileWriteLock;
 
     /**
      * If `true`, there is a mismatch between `cachedManifest`

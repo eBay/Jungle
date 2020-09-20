@@ -447,6 +447,22 @@ Status LogManifest::load(const std::string& path,
 Status LogManifest::store(bool call_fsync) {
     if (mFileName.empty() || !fOps) return Status::NOT_INITIALIZED;
 
+    if (call_fsync) {
+        // `fsync` is required: calls by multiple threads should be serialized.
+        std::unique_lock<std::mutex> l(mFileWriteLock);
+        return storeInternal(call_fsync);
+    } else {
+        // `fsync` is not a must: try lock and return without blocking.
+        // (currently invoked by `addNewLogFile()` only).
+        std::unique_lock<std::mutex> l(mFileWriteLock, std::try_to_lock);
+        if (!l.owns_lock()) {
+            return Status::OPERATION_IN_PROGRESS;
+        }
+        return storeInternal(call_fsync);
+    }
+}
+
+Status LogManifest::storeInternal(bool call_fsync) {
     Status s;
 
     SizedBuf mani_buf(4096);
