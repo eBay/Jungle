@@ -285,7 +285,7 @@ public:
     /**
      * Set urgent compaction table index number to `to`.
      */
-    void setUrgentCompactionTableIdx(uint64_t to);
+    void setUrgentCompactionTableIdx(uint64_t to, size_t expiry_sec);
 
     /**
      * If the smallest table index number is greater than
@@ -537,6 +537,12 @@ protected:
      * this number.
      */
     std::atomic<uint64_t> urgentCompactionMaxTableIdx;
+
+    /**
+     * If it has non-zero duration, urgent compaction will stop working
+     * after the timeout.
+     */
+    Timer urgentCompactionTimer;
 
     SimpleLogger* myLog;
 };

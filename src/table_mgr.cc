@@ -782,11 +782,16 @@ void TableMgr::doCompactionThrottling
     }
 }
 
-void TableMgr::setUrgentCompactionTableIdx(uint64_t to) {
+void TableMgr::setUrgentCompactionTableIdx(uint64_t to, size_t expiry_sec) {
     uint64_t prev = urgentCompactionMaxTableIdx;
     urgentCompactionMaxTableIdx = to;
+
+    urgentCompactionTimer.setDurationMs(expiry_sec * 1000);
+    urgentCompactionTimer.reset();
+
     _log_info(myLog, "set urgent compaction table index number "
-              "to %zu (prev %zu)", to, prev);
+              "to %zu (prev %zu), expiry %zu seconds",
+              to, prev, expiry_sec);
 }
 
 void TableMgr::autoClearUrgentCompactionTableIdx() {
@@ -796,13 +801,25 @@ void TableMgr::autoClearUrgentCompactionTableIdx() {
     Status s = mani->getSmallestTableIdx(min_table_idx);
     if (!s || !min_table_idx) return;
 
-    if ( min_table_idx &&
-         min_table_idx > urgentCompactionMaxTableIdx ) {
-        _log_info(myLog, "current smallest table index %zu is "
-                  "smaller than urgent compaction number %zu",
-                  min_table_idx,
-                  urgentCompactionMaxTableIdx.load());
-        setUrgentCompactionTableIdx(0);
+    if (min_table_idx) {
+        if (min_table_idx > urgentCompactionMaxTableIdx) {
+            _log_info(myLog, "current smallest table index %zu is "
+                      "smaller than urgent compaction number %zu",
+                      min_table_idx,
+                      urgentCompactionMaxTableIdx.load());
+            setUrgentCompactionTableIdx(0, 0);
+        }
+
+        uint64_t duration_sec = urgentCompactionTimer.durationUs / 1000 / 1000;
+        if (duration_sec && urgentCompactionTimer.timeout()) {
+            _log_info(myLog, "urgent compaction task (up to %zu) is "
+                      "expired (TTL %zu seconds), "
+                      "current smallest table index %zu",
+                      urgentCompactionMaxTableIdx.load(),
+                      duration_sec,
+                      min_table_idx);
+            setUrgentCompactionTableIdx(0, 0);
+        }
     }
 }
 
