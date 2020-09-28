@@ -354,14 +354,24 @@ std::string CmdHandler::hCompactUpto(DBWrap* target_dbw,
 {
     std::stringstream ss;
     if (tokens.size() < 2) {
-        ss << "too few arguments: compactupto <TABLE INDEX>\n";
+        ss << "too few arguments: compactupto <TABLE INDEX> "
+              "[<EXPIRY SECONDS>]\n";
         return ss.str();
     }
 
     uint64_t table_idx_upto = std::stoul(tokens[1]);
-    target_dbw->db->compactIdxUpto(CompactOptions(), table_idx_upto);
+    uint64_t expiry_sec = 0;
+    if (tokens.size() >= 3) {
+        expiry_sec = std::stoul(tokens[2]);
+    }
 
-    ss << "set urgent compaction table index upto " << table_idx_upto << std::endl;
+    target_dbw->db->compactIdxUpto(CompactOptions(),
+                                   table_idx_upto,
+                                   expiry_sec);
+
+    ss << "set urgent compaction table index upto " << table_idx_upto
+       << ", expiry " << expiry_sec << " seconds"
+       << std::endl;
     return ss.str();
 }
 

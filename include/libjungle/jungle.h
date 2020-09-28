@@ -453,10 +453,16 @@ public:
      *
      * @param options Compaction options.
      * @param idx_upto Upper bound of table index number to compact.
+     * @param expiry_sec
+     *     Effective duration in seconds. The compaction task will
+     *     stop working after the given time, even though there are
+     *     remaining tables to compact.
+     *     If `0`, there is no expiry.
      * @return OK on success.
      */
     Status compactIdxUpto(const CompactOptions& options,
-                          size_t idx_upto);
+                          size_t idx_upto,
+                          size_t expiry_sec = 0);
 
     /**
      * Do split on a table in the given level, except for level-0.

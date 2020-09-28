@@ -536,9 +536,10 @@ Status DB::compactInplace(const CompactOptions& options,
     return s;
 }
 Status DB::compactIdxUpto(const CompactOptions& options,
-                          size_t idx_upto)
+                          size_t idx_upto,
+                          size_t expiry_sec)
 {
-    p->tableMgr->setUrgentCompactionTableIdx(idx_upto);
+    p->tableMgr->setUrgentCompactionTableIdx(idx_upto, expiry_sec);
     return Status();
 }
 
