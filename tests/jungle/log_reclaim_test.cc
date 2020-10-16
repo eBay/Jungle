@@ -1152,6 +1152,145 @@ int overwrite_seq_multi_log_files_test() {
     return 0;
 }
 
+int void_log_file_at_the_end_test(bool emulate_crash) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+
+    jungle::GlobalConfig g_config;
+    g_config.logFileReclaimerSleep_sec = 1;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.maxKeepingMemtables = 8;
+    config.maxEntriesInLogFile = 10;
+    config.logSectionOnly = true;
+    config.allowOverwriteSeqNum = true;
+
+    jungle::DB* db;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    auto write_log = [&](size_t ii) -> int {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+        return 0;
+    };
+
+    const size_t NUM = 45;
+    for (size_t ii=1; ii<=NUM; ++ii) {
+        CHK_Z( write_log(ii) );
+    }
+    CHK_Z( db->sync(false) );
+
+    // Close and reopen, write once.
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    if (emulate_crash) {
+        // Keep the log file 5 to emulate crash before sync.
+        CHK_Z( write_log(NUM+1) );
+        TestSuite::copyfile(filename + "/log0000_00000005",
+                            filename + "/log0000_00000005_kept");
+        TestSuite::copyfile(filename + "/log0000_manifest",
+                            filename + "/log0000_manifest_kept");
+    }
+
+    // Close and restore.
+    CHK_Z( jungle::DB::close(db) );
+    if (emulate_crash) {
+        TestSuite::copyfile(filename + "/log0000_00000005_kept",
+                            filename + "/log0000_00000005");
+        TestSuite::copyfile(filename + "/log0000_manifest_kept",
+                            filename + "/log0000_manifest");
+    }
+
+    // Reopen and write more logs.
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+    const size_t NUM2 = 175;
+    uint64_t last_log_index = 0;
+    db->getMaxSeqNum(last_log_index);
+    for (size_t ii=last_log_index+1; ii<=NUM2; ++ii) {
+        CHK_Z( write_log(ii) );
+    }
+    CHK_Z( jungle::DB::close(db) );
+
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+    for (size_t ii=1; ii<=NUM2; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        jungle::KV kv_out;
+        jungle::KV::Holder h_kv_out(kv_out);
+        CHK_Z( db->getSN(ii, kv_out) );
+        CHK_EQ( key_str, kv_out.key.toString() );
+        CHK_EQ( val_str, kv_out.value.toString() );
+    }
+    CHK_Z( jungle::DB::close(db) );
+
+    CHK_Z( jungle::shutdown() );
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int empty_log_store_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+
+    jungle::GlobalConfig g_config;
+    g_config.logFileReclaimerSleep_sec = 1;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.maxKeepingMemtables = 8;
+    config.maxEntriesInLogFile = 10;
+    config.logSectionOnly = true;
+    config.allowOverwriteSeqNum = true;
+
+    jungle::DB* db;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    auto write_log = [&](size_t ii) -> int {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+        return 0;
+    };
+    // Empty sync.
+    CHK_Z( db->sync(false) );
+
+    // Close, reopen, and write more logs.
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+    const size_t NUM = 45;
+    for (size_t ii=1; ii<=NUM; ++ii) {
+        CHK_Z( write_log(ii) );
+    }
+    CHK_Z( jungle::DB::close(db) );
+
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+    for (size_t ii=1; ii<=NUM; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        jungle::KV kv_out;
+        jungle::KV::Holder h_kv_out(kv_out);
+        CHK_Z( db->getSN(ii, kv_out) );
+        CHK_EQ( key_str, kv_out.key.toString() );
+        CHK_EQ( val_str, kv_out.value.toString() );
+    }
+    CHK_Z( jungle::DB::close(db) );
+
+    CHK_Z( jungle::shutdown() );
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
@@ -1203,6 +1342,13 @@ int main(int argc, char** argv) {
 
     ts.doTest("overwrite seq multi log files test",
               overwrite_seq_multi_log_files_test);
+
+    ts.doTest("void log file at the end test",
+              void_log_file_at_the_end_test,
+              TestRange<bool>( {false, true} ));
+
+    ts.doTest("empty log store test",
+              empty_log_store_test);
 
 #if 0
     ts.doTest("reload empty files test",

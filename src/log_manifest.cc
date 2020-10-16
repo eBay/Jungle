@@ -303,11 +303,11 @@ Status LogManifest::load(const std::string& path,
         uint64_t purged_seq = ss.getU64(s);
         uint64_t synced_seq = ss.getU64(s);
 
+        bool invalid_log = false;
         if ( db_config->logSectionOnly &&
              db_config->truncateInconsecutiveLogs &&
              valid_number(min_seq) ) {
             // Log-only mode, validity check.
-            bool invalid_log = false;
             if ( valid_number(synced_seq) &&
                  min_seq > synced_seq ) {
                 // This cannot happen, probably caused by
@@ -328,19 +328,37 @@ Status LogManifest::load(const std::string& path,
                            _seq_str(last_synced_seq).c_str() );
                 invalid_log = true;
             }
+        }
 
-            if (invalid_log) {
-                delete l_file;
-                if (l_file_num) {
-                    maxLogFileNum.store(l_file_num-1, MOR);
-                    lastSyncedLog.store(l_file_num-1, MOR);
-                    _log_warn(myLog, "adjusted max log file num %zu, "
-                              "last synced log file num %zu",
-                              maxLogFileNum.load(),
-                              lastSyncedLog.load());
-                }
-                break;
+        // WARNING:
+        //   If the last log file is empty and manifest file is not properly
+        //   updated, we should remove the log file. If not, next DB open
+        //   will remove all log files after that empty log file, due to
+        //   incorrect manifest entry (min_seq = last_sync + 1) for that log file.
+        if ( db_config->logSectionOnly &&
+             db_config->truncateInconsecutiveLogs &&
+             ii + 1 == num_log_files &&
+             !valid_number(min_seq) ) {
+            _log_warn( myLog, "the last log file %zu is empty and manifest entry "
+                       "does not match: min seq %s, "
+                       "synced seq %s. will remove it.",
+                       ii,
+                       _seq_str(min_seq).c_str(),
+                       _seq_str(synced_seq).c_str() );
+            invalid_log = true;
+        }
+
+        if (invalid_log) {
+            delete l_file;
+            if (l_file_num) {
+                maxLogFileNum.store(l_file_num-1, MOR);
+                lastSyncedLog.store(l_file_num-1, MOR);
+                _log_warn(myLog, "adjusted max log file num %zu, "
+                          "last synced log file num %zu",
+                          maxLogFileNum.load(),
+                          lastSyncedLog.load());
             }
+            break;
         }
 
         if (valid_number(synced_seq)) {
