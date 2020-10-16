@@ -134,6 +134,29 @@ Status LogMgr::init(const LogMgrOptions& _options) {
 
     removeStaleFiles();
 
+    if (mani->getNumLogFiles() == 0) {
+        // No valid log file exists. Start from zero.
+        _log_warn(myLog, "no valid log file exists, start from 0");
+        std::string l_filename =
+                LogFile::getLogFileName(opt.path, opt.prefixNum, 0);
+        LogFile* l_file = new LogFile(this);
+        l_file->setLogger(myLog);
+
+       try {
+        TC(l_file->create(l_filename,
+                          opt.dbConfig->directIoOpt.enabled
+                              && FileOps::supportDirectIO()
+                          ? opt.fDirectOps : opt.fOps,
+                          0,
+                          0));
+        TC(mani->addNewLogFile(0, l_file, 1));
+
+       } catch (Status s) {
+        delete l_file;
+        throw s;
+       }
+    }
+
     initialized = true;
     return Status();
 
