@@ -256,6 +256,29 @@ public:
                           bool meta_only = false);
 
     /**
+     * The same as `getRecordByKey`, but if the exact match
+     * does not exist, find greater or smaller key according
+     * to the given flag.
+     *
+     * Note that removed record will be searched unless
+     * they are already compacted and purged.
+     *
+     * @param key Key to find.
+     * @param[out] rec_out Reference to the record
+     *                     where the result will be stored.
+     * @param option Search option. See the explanation of `SearchOptions`.
+     * @param meta_only
+     *     If `true`, value part will not be retrieved.
+     *     NOTE: CURRENTLY NOT WORKING. WILL BE SUPPORTED SOON.
+     *
+     * @return OK on success.
+     */
+    Status getNearestRecordByKey(const SizedBuf& key,
+                                 Record& rec_out,
+                                 SearchOptions opt = SearchOptions::GREATER_OR_EQUAL,
+                                 bool meta_only = false);
+
+    /**
      * Delete the key-value pair corresponding to the given key.
      *
      * @param key Key to delete.

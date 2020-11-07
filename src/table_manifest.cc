@@ -619,6 +619,47 @@ Status TableManifest::getTablesRange(const size_t level,
     return Status();
 }
 
+Status TableManifest::getTablesNearest(const size_t level,
+                                       const SizedBuf& key,
+                                       std::list<TableInfo*>& tables_out)
+{
+    if (level >= levels.size()) return Status::INVALID_LEVEL;
+
+    LevelInfo* l_info = levels[level];
+
+    if ( level == 0 ) {
+        // Level-0: hash partition, return all.
+        size_t num_partitions = tableMgr->getNumL0Partitions();
+        return getTablesByHash(l_info, num_partitions, tables_out);
+
+    } else {
+        // Other levels: return 3 tables (prev, target, next).
+        TableInfo query(level, 0, 0, true);
+        query.minKey.referTo(key);
+        skiplist_node* cursor = skiplist_find_smaller_or_equal
+                                ( l_info->tables, &query.snode );
+        if (!cursor) cursor = skiplist_begin(l_info->tables);
+
+        if (cursor) {
+            skiplist_node* cur_prev = skiplist_prev(l_info->tables, cursor);
+            skiplist_node* cur_next = skiplist_next(l_info->tables, cursor);
+
+            for (skiplist_node* cc: {cur_prev, cursor, cur_next}) {
+                if (!cc) continue;
+
+                TableInfo* t_info = _get_entry(cc, TableInfo, snode);
+                t_info->grab();
+                pushTablesInStack(t_info, tables_out);
+                tables_out.push_back(t_info);
+
+                skiplist_release_node(cc);
+            }
+        }
+    }
+
+    return Status();
+}
+
 void TableManifest::getTableNumbers(std::set<uint64_t>& numbers_out) {
     for (auto& entry: levels) {
         LevelInfo*& l_info = entry;

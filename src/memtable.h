@@ -64,6 +64,12 @@ public:
                           Record& rec_out,
                           bool allow_flushed_log,
                           bool allow_tombstone);
+    Status getNearestRecordByKey(const uint64_t chk,
+                                 const SizedBuf& key,
+                                 Record& rec_out,
+                                 bool allow_flushed_log,
+                                 bool allow_tombstone,
+                                 SearchOptions s_opt);
     Status sync(FileOps* f_ops,
                 FileHandle* fh);
     Status appendFlushMarker(RwSerializer& rws);
@@ -190,6 +196,13 @@ private:
     static size_t getLengthMetaSize(uint64_t flags);
 
     Status getReady();
+
+    Status getRecordByKeyInternal(const uint64_t chk,
+                                  const SizedBuf& key,
+                                  Record& rec_out,
+                                  bool allow_flushed_log,
+                                  bool allow_tombstone,
+                                  SearchOptions s_opt);
 
 // === VARIABLES
     uint64_t startSeqNum;

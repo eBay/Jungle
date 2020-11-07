@@ -133,6 +133,12 @@ public:
                Record& rec_inout,
                bool meta_only = false);
 
+    Status getNearest(DB* snap_handle,
+                      const SizedBuf& key,
+                      Record& rec_out,
+                      SearchOptions s_opt,
+                      bool meta_only = false);
+
     Status getByOffset(DB* snap_handle,
                        uint64_t offset,
                        Record& rec_out);

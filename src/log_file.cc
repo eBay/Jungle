@@ -374,6 +374,21 @@ Status LogFile::get(const uint64_t chk,
     return Status();
 }
 
+Status LogFile::getNearest(const uint64_t chk,
+                           const SizedBuf& key,
+                           Record& rec_out,
+                           bool allow_flushed_log,
+                           bool allow_tombstone,
+                           SearchOptions s_opt)
+{
+    touch();
+    Status s;
+    EP( mTable->getNearestRecordByKey(chk, key, rec_out,
+                                      allow_flushed_log, allow_tombstone,
+                                      s_opt) );
+    return Status();
+}
+
 Status LogFile::flushMemTable(uint64_t upto) {
    touch();
    // Skip unnecessary flushing

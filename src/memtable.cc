@@ -586,11 +586,70 @@ Status MemTable::getRecordByKey(const uint64_t chk,
         if (!bfByKey->check(key.data, key.size)) return Status::KEY_NOT_FOUND;
     }
 
+    return getRecordByKeyInternal( chk, key, rec_out,
+                                   allow_flushed_log, allow_tombstone,
+                                   SearchOptions::EQUAL );
+}
+
+Status MemTable::getNearestRecordByKey(const uint64_t chk,
+                                       const SizedBuf& key,
+                                       Record& rec_out,
+                                       bool allow_flushed_log,
+                                       bool allow_tombstone,
+                                       SearchOptions s_opt)
+{
+    // NOTE: We can't use bloom filter
+    //       as we should allow non-exact match.
+    return getRecordByKeyInternal( chk, key, rec_out,
+                                   allow_flushed_log, allow_tombstone,
+                                   s_opt );
+}
+
+Status MemTable::getRecordByKeyInternal(const uint64_t chk,
+                                        const SizedBuf& key,
+                                        Record& rec_out,
+                                        bool allow_flushed_log,
+                                        bool allow_tombstone,
+                                        SearchOptions s_opt)
+{
     RecNode query(&key);
-    skiplist_node* cursor = skiplist_find(idxByKey, &query.snode);
+    skiplist_node* cursor = nullptr;
+    switch (s_opt) {
+    default:
+    case SearchOptions::EQUAL:
+        cursor = skiplist_find(idxByKey, &query.snode);
+        break;
+
+    case SearchOptions::GREATER:
+    case SearchOptions::GREATER_OR_EQUAL:
+        cursor = skiplist_find_greater_or_equal(idxByKey, &query.snode);
+        break;
+
+    case SearchOptions::SMALLER:
+    case SearchOptions::SMALLER_OR_EQUAL:
+        cursor = skiplist_find_smaller_or_equal(idxByKey, &query.snode);
+        break;
+    }
     if (!cursor) return Status::KEY_NOT_FOUND;
 
     RecNode* node = _get_entry(cursor, RecNode, snode);
+    if (!s_opt.isExactMatchAllowed()) {
+        // Exact match is not allowed. Move the cursor if the current
+        // cursor is pointing to the same key.
+        while (SizedBuf::cmp(key, node->key) == 0) {
+            skiplist_node* prev_cursor = cursor;
+            if (s_opt == SearchOptions::GREATER) {
+                cursor = skiplist_next(idxByKey, prev_cursor);
+            } else {
+                cursor = skiplist_prev(idxByKey, prev_cursor);
+            }
+            skiplist_release_node(prev_cursor);
+            if (!cursor) return Status::KEY_NOT_FOUND;
+
+            node = _get_entry(cursor, RecNode, snode);
+        }
+    }
+
     Record* rec_ret = node->getLatestRecord(chk);
     if (!rec_ret) {
         skiplist_release_node(&node->snode);

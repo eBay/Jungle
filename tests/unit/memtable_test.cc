@@ -171,12 +171,106 @@ int memtable_key_itr_chk_test() {
     return 0;
 }
 
+int memtable_nearest_search_test() {
+    Status s;
+    DBConfig config;
+    LogMgrOptions l_opt;
+    l_opt.dbConfig = &config;
+    LogMgr l_mgr(nullptr, l_opt);
+    LogFile l_file(&l_mgr);
+    MemTable mt(&l_file);
+    mt.init();
+
+    const size_t NUM = 1000;
+    std::vector<Record> rec{NUM};
+    char keybuf[64];
+    char valbuf[64];
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        size_t idx = ii * 10;
+        rec[ii].seqNum = ii;
+        sprintf(keybuf, "key%05zu", idx);
+        sprintf(valbuf, "value%05zu", idx);
+        rec[ii].kv.key.alloc(keybuf);
+        rec[ii].kv.value.alloc(valbuf);
+        CHK_Z(mt.putNewRecord(rec[ii]));
+    }
+
+    auto verify_func = [&](size_t ii, SearchOptions s_opt, bool exact_query) -> int {
+        int64_t idx = exact_query ? ii * 10 : ii * 10 + (s_opt.isGreater() ? 1 : -1);
+        int64_t exp_idx = 0;
+
+        if (exact_query) {
+            if (s_opt.isExactMatchAllowed()) {
+                exp_idx = idx;
+            } else {
+                exp_idx = (ii + (s_opt.isGreater() ? 1 : -1)) * 10;
+            }
+        } else {
+            exp_idx = (ii + (s_opt.isGreater() ? 1 : -1)) * 10;
+        }
+
+        if (idx >= 0) {
+            sprintf(keybuf, "key%05zd", idx);
+        } else {
+            sprintf(keybuf, "000");
+        }
+        sprintf(valbuf, "value%05zd", exp_idx);
+        Record rec_out;
+        s = mt.getNearestRecordByKey( NOT_INITIALIZED,
+                                      SizedBuf(strlen(keybuf), keybuf),
+                                      rec_out,
+                                      false,
+                                      false,
+                                      s_opt );
+        bool exp_succ = false;
+        if (exact_query) {
+            if ( s_opt.isExactMatchAllowed() ||
+                 (s_opt.isGreater() && ii < NUM - 1) ||
+                 (s_opt.isSmaller() && ii > 0) ) {
+                exp_succ = true;
+            }
+        } else {
+            if ( (s_opt.isGreater() && ii < NUM - 1) ||
+                 (s_opt.isSmaller() && ii > 0) ) {
+                exp_succ = true;
+            }
+        }
+
+        if (exp_succ) {
+            CHK_Z(s);
+            CHK_EQ( SizedBuf(strlen(valbuf), valbuf), rec_out.kv.value );
+        } else  {
+            CHK_NOT(s);
+        }
+        return 0;
+    };
+
+    // Greater or equal
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        for (bool exact_query: {true, false}) {
+            for (SearchOptions s_opt: { SearchOptions::GREATER_OR_EQUAL,
+                                        SearchOptions::GREATER,
+                                        SearchOptions::SMALLER_OR_EQUAL,
+                                        SearchOptions::SMALLER }) {
+                CHK_Z( verify_func(ii, s_opt, exact_query) );
+            }
+        }
+    }
+
+    for (size_t ii=0; ii<NUM; ++ii) {
+        rec[ii].free();
+    }
+
+    return 0;
+}
+
 
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
     ts.doTest("memtable key itr test", memtable_key_itr_test);
     ts.doTest("memtable key itr chk test", memtable_key_itr_chk_test);
+    ts.doTest("memtable nearest search test", memtable_nearest_search_test);
 
     return 0;
 }
