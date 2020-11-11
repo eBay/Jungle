@@ -86,6 +86,81 @@ public:
     bool preserveTombstone;
 };
 
+/**
+ * Search options for get API.
+ */
+class SearchOptions {
+public:
+    enum Options : int {
+        /**
+         * Find the exact match first. If the exact match does not exist,
+         * Find the smallest key greater than the given one.
+         */
+        GREATER_OR_EQUAL = 0,
+
+        /**
+         * Find the smallest key greater than the given one.
+         */
+        GREATER = 1,
+
+        /**
+         * Find the exact match first. If the exact match does not exist,
+         * Find the greatest key smaller than the given one.
+         */
+        SMALLER_OR_EQUAL = 2,
+
+        /**
+         * Find the greatest key smaller than the given one.
+         */
+        SMALLER = 3,
+
+        /**
+         * Find the exact match only.
+         */
+        EQUAL = 4,
+    };
+
+    SearchOptions(const SearchOptions::Options& src) {
+        value = src;
+    }
+
+    SearchOptions& operator=(const SearchOptions::Options& src) {
+        value = src;
+        return *this;
+    }
+
+    operator int() const { return (int)value; }
+
+    /**
+     * Return `true` if the option is for searching greater key.
+     */
+    bool isGreater() const {
+        return (value == GREATER_OR_EQUAL || value == GREATER);
+    }
+
+    /**
+     * Return `true` if the option is for searching smaller key.
+     */
+    bool isSmaller() const {
+        return (value == SMALLER_OR_EQUAL || value == SMALLER);
+    }
+
+    /**
+     * Return `true` if the option allows the exact match.
+     */
+    bool isExactMatchAllowed() const {
+        return (value == GREATER_OR_EQUAL ||
+                value == SMALLER_OR_EQUAL ||
+                value == EQUAL);
+    }
+
+private:
+    /**
+     * Value.
+     */
+    Options value;
+};
+
 struct DebugParams {
     DebugParams()
         : compactionDelayUs(0)

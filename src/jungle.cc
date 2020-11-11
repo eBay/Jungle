@@ -667,6 +667,89 @@ Status DB::getRecordByKey(const SizedBuf& key,
     return s;
 }
 
+Status DB::getNearestRecordByKey(const SizedBuf& key,
+                                 Record& rec_out,
+                                 SearchOptions opt,
+                                 bool meta_only)
+{
+    Status s;
+    EP( p->checkHandleValidity() );
+
+    if ( opt != SearchOptions::GREATER_OR_EQUAL &&
+         opt != SearchOptions::GREATER &&
+         opt != SearchOptions::SMALLER_OR_EQUAL &&
+         opt != SearchOptions::SMALLER ) {
+        return Status::INVALID_PARAMETERS;
+    }
+
+    Record rec_from_log;
+    uint64_t chknum = (sn)?(sn->chkNum):(NOT_INITIALIZED);
+    std::list<LogFileInfo*>* l_list = (sn)?(sn->logList):(nullptr);
+    p->logMgr->getNearest(chknum, l_list, key, rec_from_log, opt);
+
+    Record rec_from_table;
+    DB* snap_handle = (this->sn)?(this):(nullptr);
+    p->tableMgr->getNearest(snap_handle, key, rec_from_table, opt, meta_only);
+
+    if (rec_from_log.empty() && rec_from_table.empty()) {
+        // Not found from both.
+        return Status::KEY_NOT_FOUND;
+    }
+
+    // Return the closer one. If the same, return the newer
+    // (higher seq number) one.
+    int cmp = 0;
+    bool choose_log = true;
+    if (!rec_from_log.empty() && !rec_from_table.empty()) {
+        // WARNING:
+        //   Comparison is valid only when both are not empty.
+        if (p->dbConfig.cmpFunc) {
+            cmp = p->dbConfig.cmpFunc( rec_from_log.kv.key.data,
+                                       rec_from_log.kv.key.size,
+                                       rec_from_table.kv.key.data,
+                                       rec_from_table.kv.key.size,
+                                       p->dbConfig.cmpFuncParam );
+        } else {
+            cmp = SizedBuf::cmp(rec_from_log.kv.key, rec_from_table.kv.key);
+        }
+        if (cmp == 0) {
+            // Keys from log and table are the same. Compare the sequence numbers.
+            choose_log = (rec_from_log.seqNum >= rec_from_table.seqNum);
+        } else {
+            if (opt.isGreater()) {
+                // Greater: choose smaller one.
+                // e.g.)
+                //   find greater than `key01`.
+                //   * log:   `key01` exists.
+                //   * table: `key02` is the smallest key greater than `key01`.
+                //   then we should choose log (smaller one).
+                choose_log = (cmp < 0);
+            } else if (opt.isSmaller()) {
+                // Smaller: choose greater one.
+                // e.g.)
+                //   find smaller than `key01`.
+                //   * log:   `key01` exists.
+                //   * table: `key00` is the greatest key smaller than `key01`.
+                //   then we should choose log (greater one).
+                choose_log = (cmp > 0);
+            }
+        }
+    } else {
+        if (rec_from_log.empty()) choose_log = false;
+        if (rec_from_table.empty()) choose_log = true;
+    }
+
+    if (choose_log) {
+        // Choose the one from log.
+        rec_from_log.copyTo(rec_out);
+        rec_from_table.free();
+    } else {
+        // Choose the one from table.
+        rec_from_table.moveTo(rec_out);
+    }
+    return s;
+}
+
 Status DB::del(const SizedBuf& key) {
     Status s;
     EP( p->checkHandleValidity(DBInternal::OPTYPE_WRITE) );

@@ -178,6 +178,12 @@ public:
                Record& rec_inout,
                bool meta_only = false);
 
+    Status getNearest(DB* snap_handle,
+                      const SizedBuf& key,
+                      Record& rec_inout,
+                      SearchOptions s_opt = SearchOptions::GREATER_OR_EQUAL,
+                      bool meta_only = false);
+
     size_t getNumLevels() const;
 
     Status getLevelSize(size_t level,

@@ -81,6 +81,13 @@ public:
                bool allow_flushed_log,
                bool allow_tombstone);
 
+    Status getNearest(const uint64_t chk,
+                      const SizedBuf& key,
+                      Record& rec_out,
+                      bool allow_flushed_log,
+                      bool allow_tombstone,
+                      SearchOptions s_opt);
+
     Status flushMemTable(uint64_t upto = NOT_INITIALIZED);
 
     Status purgeMemTable();

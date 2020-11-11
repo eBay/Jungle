@@ -840,6 +840,142 @@ Status LogMgr::get(const uint64_t chk,
     return Status::KEY_NOT_FOUND;
 }
 
+Status LogMgr::getNearest(const uint64_t chk,
+                          std::list<LogFileInfo*>* l_list,
+                          const SizedBuf& key,
+                          Record& rec_out,
+                          SearchOptions s_opt)
+{
+    Status s;
+    uint64_t min_log_num, max_log_num;
+
+    if (parentDb) parentDb->p->updateOpHistory();
+
+    Record cur_nearest;
+    CustomCmpFunc custom_cmp = getDbConfig()->cmpFunc;
+    auto cmp_func = [&](const SizedBuf& a, const SizedBuf& b) -> int {
+        if (custom_cmp) {
+            return custom_cmp( a.data, a.size, b.data, b.size,
+                               getDbConfig()->cmpFuncParam );
+        } else {
+            return SizedBuf::cmp(a, b);
+        }
+    };
+
+    auto update_cur_nearest = [&](const Record& rec_out) {
+        bool update_cur_nearest = false;
+        if (cur_nearest.kv.key.empty()) {
+            update_cur_nearest = true;
+        } else {
+            if (s_opt.isGreater()) {
+                update_cur_nearest = (cmp_func(rec_out.kv.key, cur_nearest.kv.key) < 0);
+            } else if (s_opt.isSmaller()) {
+                update_cur_nearest = (cmp_func(cur_nearest.kv.key, rec_out.kv.key) < 0);
+            }
+        }
+        if (update_cur_nearest) {
+            cur_nearest = rec_out;
+        }
+    };
+
+    // NOTE:
+    //   Since it is log and we scan file backward,
+    //   we should return once we see the first exact match.
+
+    uint64_t chk_local = chk;
+    if (valid_number(chk)) {
+        // Snapshot: beyond the last flushed log.
+        assert(l_list);
+        auto entry = l_list->rbegin();
+        while (entry != l_list->rend()) {
+            LogFileInfo* l_info = *entry;
+            s = l_info->file->getNearest(chk_local, key, rec_out,
+                                         true, true, s_opt);
+            if (s) {
+                update_cur_nearest(rec_out);
+                if (cmp_func(key, cur_nearest.kv.key)) {
+                    return s;
+                }
+            }
+            entry++;
+        }
+    } else {
+        // Normal: from the last flushed log.
+        EP( mani->getLastFlushedLog(min_log_num) );
+        EP( mani->getMaxLogFileNum(max_log_num) );
+
+        if (getDbConfig()->logSectionOnly) {
+            // Log only mode: searching skiplist one-by-one.
+            for (int64_t ii = max_log_num; ii >= (int64_t)min_log_num; --ii) {
+                LogFileInfoGuard li(mani->getLogFileInfoP(ii));
+                if (li.empty() || li.ptr->isRemoved()) continue;
+                s = li->file->getNearest(chk_local, key, rec_out,
+                                         false, true, s_opt);
+                if (s) {
+                    update_cur_nearest(rec_out);
+                    if (cmp_func(key, cur_nearest.kv.key)) {
+                        return s;
+                    }
+                }
+            }
+
+        } else {
+            // Get whole list and then find,
+            // to reduce skiplist overhead.
+            std::vector<LogFileInfo*> l_files;
+            EP( mani->getLogFileInfoRange(min_log_num, max_log_num, l_files) );
+            size_t num = l_files.size();
+            if (!num) return Status::KEY_NOT_FOUND;
+
+            bool found = false;
+            for (int ii = num-1; ii>=0; --ii) {
+                LogFileInfo* l_info = l_files[ii];
+                if (l_info->isRemoved()) continue;
+
+                // Reserve max seq number as a temporary snapshot.
+                chk_local = l_info->file->getMaxSeqNum();
+
+                // WARNING: Fetching `visibleSeqBarrier` should be done AFTER
+                //          fetching max seq number.
+                uint64_t visible_seq_barrier = getVisibleSeqBarrier();
+                if (visible_seq_barrier) {
+                    chk_local = std::min(chk_local, visible_seq_barrier);
+                }
+
+                s = l_info->file->getNearest(chk_local, key, rec_out,
+                                             false, true, s_opt);
+                if (s) {
+                    update_cur_nearest(rec_out);
+                    if ( s_opt.isExactMatchAllowed() &&
+                         cmp_func(key, cur_nearest.kv.key) == 0 ) {
+                        // If `equal` is allowed, then return the
+                        // first found exact match.
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            for (LogFileInfo* ll: l_files) ll->done();
+            if (found) return Status();
+        }
+    }
+
+    if (cur_nearest.kv.key.empty()) {
+        return Status::KEY_NOT_FOUND;
+    }
+
+    // Just in case.
+    if (s_opt.isGreater()) {
+        if (cmp_func(cur_nearest.kv.key, key) < 0) return Status::KEY_NOT_FOUND;
+    } else if (s_opt.isSmaller()) {
+        if (cmp_func(key, cur_nearest.kv.key) < 0) return Status::KEY_NOT_FOUND;
+    }
+
+    rec_out = cur_nearest;
+    return Status();
+}
+
 Status LogMgr::sync(bool call_fsync) {
     std::lock_guard<std::mutex> l(syncMutex);
     return syncNoWait(call_fsync);

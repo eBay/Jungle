@@ -21,6 +21,8 @@ limitations under the License.
 #include "internal_helper.h"
 #include "table_mgr.h"
 
+#include <third_party/forestdb/include/libforestdb/fdb_types.h>
+
 #include _MACRO_TO_STR(LOGGER_H)
 
 namespace jungle {
@@ -1103,6 +1105,136 @@ Status TableFile::get(DB* snap_handle,
    } catch (Status s) {
     rec_io.kv.value.free();
     rec_io.meta.free();
+    return s;
+   }
+}
+
+Status TableFile::getNearest(DB* snap_handle,
+                             const SizedBuf& key,
+                             Record& rec_out,
+                             SearchOptions s_opt,
+                             bool meta_only)
+{
+    DB* parent_db = tableMgr->getParentDb();
+    const DBConfig* db_config = tableMgr->getDbConfig();
+
+    fdb_status fs;
+    fdb_doc doc_base;
+    fdb_doc doc_by_offset;
+    memset(&doc_base, 0x0, sizeof(doc_base));
+
+    fdb_doc* doc = &doc_base;
+    fdb_get_nearest_opt_t nearest_opt;
+    switch (s_opt) {
+    default:
+    case SearchOptions::GREATER_OR_EQUAL:
+        nearest_opt = FDB_GET_GREATER_OR_EQUAL;
+        break;
+    case SearchOptions::GREATER:
+        nearest_opt = FDB_GET_GREATER;
+        break;
+    case SearchOptions::SMALLER_OR_EQUAL:
+        nearest_opt = FDB_GET_SMALLER_OR_EQUAL;
+        break;
+    case SearchOptions::SMALLER:
+        nearest_opt = FDB_GET_SMALLER;
+        break;
+    };
+
+    if (snap_handle) {
+        // Snapshot (does not use booster).
+        fdb_kvs_handle* kvs_db = nullptr;
+        {   mGuard l(snapHandlesLock);
+            auto entry = snapHandles.find(snap_handle);
+            if (entry == snapHandles.end()) return Status::SNAPSHOT_NOT_FOUND;
+            kvs_db = entry->second;
+        }
+
+        if (meta_only) {
+            // FIXME.
+            fs = fdb_get_nearest(kvs_db, key.data, key.size, doc, nearest_opt);
+        } else {
+            fs = fdb_get_nearest(kvs_db, key.data, key.size, doc, nearest_opt);
+        }
+
+    } else {
+        // Normal.
+        FdbHandleGuard g(this, getIdleHandle());
+        fdb_kvs_handle* kvs_db = g.handle->db;
+
+        // NOTE:
+        //   Unlike Bloom filter, we can still use table lookup booster
+        //   as it returns true if exact match exists.
+        bool skip_normal_search = false;
+        uint32_t key_hash = getMurmurHash32(key);
+        IF ( s_opt.isExactMatchAllowed() && !meta_only && tlbByKey ) {
+            // Search booster if exists.
+            memset(&doc_by_offset, 0x0, sizeof(doc_by_offset));
+            Status s = tlbByKey->get( key_hash, doc_by_offset.offset );
+            if (!s) break;
+
+            fs = fdb_get_byoffset_raw(kvs_db, &doc_by_offset);
+            if (fs != FDB_RESULT_SUCCESS) {
+                break;
+            }
+
+            if ( key == SizedBuf( doc_by_offset.keylen,
+                                  doc_by_offset.key ) ) {
+                skip_normal_search = true;
+                doc = &doc_by_offset;
+            } else {
+                free(doc_by_offset.key);
+                free(doc_by_offset.meta);
+                free(doc_by_offset.body);
+            }
+        };
+
+        if (!skip_normal_search) {
+            if (meta_only) {
+                // FIXME.
+                fs = fdb_get_nearest(kvs_db, key.data, key.size, doc, nearest_opt);
+            } else {
+                fs = fdb_get_nearest(kvs_db, key.data, key.size, doc, nearest_opt);
+            }
+        }
+    }
+    if (fs != FDB_RESULT_SUCCESS) {
+        return Status::KEY_NOT_FOUND;
+    }
+
+   try {
+    Status s;
+    rec_out.kv.key.set(doc->keylen, doc->key);
+    rec_out.kv.key.setNeedToFree();
+    if (!meta_only) {
+        rec_out.kv.value.set(doc->bodylen, doc->body);
+        rec_out.kv.value.setNeedToFree();
+    }
+
+    // Decode meta.
+    SizedBuf user_meta_out;
+    SizedBuf raw_meta(doc->metalen, doc->meta);;
+    SizedBuf::Holder h_raw_meta(raw_meta); // auto free raw meta.
+    raw_meta.setNeedToFree();
+
+    InternalMeta i_meta_out;
+    rawMetaToUserMeta(raw_meta, i_meta_out, user_meta_out);
+
+    user_meta_out.moveTo( rec_out.meta );
+
+    // Decompress if needed.
+    TC( decompressValue(parent_db, db_config, rec_out, i_meta_out) );
+
+    rec_out.seqNum = doc->seqnum;
+    rec_out.type = (i_meta_out.isTombstone || doc->deleted)
+                   ? Record::DELETION
+                   : Record::INSERTION;
+
+    return Status();
+
+   } catch (Status s) {
+    rec_out.kv.value.free();
+    rec_out.meta.free();
     return s;
    }
 }
