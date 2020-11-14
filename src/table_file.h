@@ -405,5 +405,6 @@ private:
 };
 
 
-} // namespace jungle
+
+} // namespace jungle
 
