@@ -246,13 +246,13 @@ struct VerboseLog {
     if (!s) { m = msg; break; } \
 
 // Delete / free and clear the pointer.
-#define DELETE(ptr) \
-    delete ptr;     \
-    ptr = nullptr   \
+#define DELETE(ptr)         \
+    {   delete ptr;         \
+        ptr = nullptr;  }   \
 
-#define FREE(ptr)   \
-    free(ptr);      \
-    ptr = nullptr   \
+#define FREE(ptr)           \
+    {   free(ptr);          \
+        ptr = nullptr;  }   \
 
 // If-clause that can use `break` in the middle.
 #define IF(cond)                        \

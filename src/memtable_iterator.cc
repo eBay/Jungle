@@ -296,6 +296,18 @@ Status MemTable::Iterator::seek
         assert(0);
     }
 
+    seek_node = findFirstValidNode(seek_node, fwd_search);
+    if (!seek_node) return Status::OUT_OF_RANGE;
+
+    cursor = seek_node;
+    skiplist_release_node(node_to_release);
+
+    return Status();
+}
+
+skiplist_node* MemTable::Iterator::findFirstValidNode(skiplist_node* seek_node,
+                                                      bool fwd_search)
+{
     if (fwd_search) {
         // Go forward if no record belongs to the snapshot.
         for (; seek_node ;) {
@@ -303,7 +315,7 @@ Status MemTable::Iterator::seek
             if (!endKey.empty() && SizedBuf::cmp(rn->key, endKey) > 0) {
                 // Greater than end key.
                 skiplist_release_node(seek_node);
-                return Status::OUT_OF_RANGE;
+                return nullptr;
             }
 
             if ( !rn->validKeyExist(seqUpto, true) ) {
@@ -323,7 +335,7 @@ Status MemTable::Iterator::seek
             if (!startKey.empty() && SizedBuf::cmp(rn->key, startKey) < 0) {
                 // Smaller than start key.
                 skiplist_release_node(seek_node);
-                return Status::OUT_OF_RANGE;
+                return nullptr;
             }
 
             if ( !rn->validKeyExist(seqUpto, true) ) {
@@ -336,13 +348,7 @@ Status MemTable::Iterator::seek
             break;
         }
     }
-
-    if (!seek_node) return Status::OUT_OF_RANGE;
-
-    cursor = seek_node;
-    skiplist_release_node(node_to_release);
-
-    return Status();
+    return seek_node;
 }
 
 Status MemTable::Iterator::seekSN
@@ -403,6 +409,8 @@ Status MemTable::Iterator::gotoBegin() {
             min_node = skiplist_find_greater_or_equal
                 ( mTable->idxByKey, &query.snode );
         }
+
+        min_node = findFirstValidNode(min_node, true);
         if (!min_node) return Status::OUT_OF_RANGE;
 
         cursor = min_node;
@@ -426,6 +434,8 @@ Status MemTable::Iterator::gotoEnd() {
             max_node = skiplist_find_smaller_or_equal
                 ( mTable->idxByKey, &query.snode );
         }
+
+        max_node = findFirstValidNode(max_node, false);
         if (!max_node) return Status::OUT_OF_RANGE;
 
         cursor = max_node;
