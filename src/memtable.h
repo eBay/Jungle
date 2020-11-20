@@ -146,6 +146,10 @@ public:
             BY_KEY = 0,
             BY_SEQ = 1
         } type;
+
+        skiplist_node* findFirstValidNode(skiplist_node* seek_node,
+                                          bool fwd_search);
+
         const MemTable* mTable;
         skiplist_node* cursor;
         uint64_t minSeq;

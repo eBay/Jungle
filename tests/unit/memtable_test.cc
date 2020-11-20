@@ -264,6 +264,58 @@ int memtable_nearest_search_test() {
     return 0;
 }
 
+int memtable_itr_seek_beyond_seq_test() {
+    Status s;
+    DBConfig config;
+    LogMgrOptions l_opt;
+    l_opt.dbConfig = &config;
+    LogMgr l_mgr(nullptr, l_opt);
+    LogFile l_file(&l_mgr);
+    MemTable mt(&l_file);
+    mt.init();
+
+    const size_t NUM = 1000;
+    std::vector<Record> rec{NUM};
+    char keybuf[64];
+    char valbuf[64];
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        size_t idx = ii;
+        rec[ii].seqNum = ii;
+        sprintf(keybuf, "key%05zu", idx);
+        sprintf(valbuf, "value%05zu", idx);
+        rec[ii].kv.key.alloc(keybuf);
+        rec[ii].kv.value.alloc(valbuf);
+        CHK_Z(mt.putNewRecord(rec[ii]));
+    }
+
+    MemTable::Iterator m_itr;
+    // Iterator on snapshot upto 500.
+    CHK_Z(m_itr.init(&mt, SizedBuf(), SizedBuf(), 500));
+
+    // Goto end.
+    m_itr.gotoEnd();
+
+    // Backward
+    size_t idx = 500;
+    do {
+        Record rec_out;
+        s = m_itr.get(rec_out);
+        if (!s) break;
+
+        sprintf(keybuf, "key%05zu", idx);
+        sprintf(valbuf, "value%05zu", idx);
+        CHK_EQ(SizedBuf(keybuf), rec_out.kv.key);
+        CHK_EQ(SizedBuf(valbuf), rec_out.kv.value);
+        idx--;
+    } while (m_itr.prev());
+
+    for (size_t ii=0; ii<NUM; ++ii) {
+        rec[ii].free();
+    }
+
+    return 0;
+}
+
 
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
@@ -271,6 +323,7 @@ int main(int argc, char** argv) {
     ts.doTest("memtable key itr test", memtable_key_itr_test);
     ts.doTest("memtable key itr chk test", memtable_key_itr_chk_test);
     ts.doTest("memtable nearest search test", memtable_nearest_search_test);
+    ts.doTest("memtable itr seek beyond seq test", memtable_itr_seek_beyond_seq_test);
 
     return 0;
 }

@@ -121,9 +121,13 @@ bool MemTable::RecNode::validKeyExist( const uint64_t chk,
 
     if (valid_key_exist) {
         Record* rec = getLatestRecord(chk);
-        assert(rec);
-        if ( !allow_tombstone &&
-             !rec->isIns() ) {
+        if (!rec) {
+            // All records in the list may have
+            // higher sequence number than given `chk`.
+            // In such a case, `rec` can be `nullptr`.
+            valid_key_exist = false;
+        } else if ( !allow_tombstone &&
+                    !rec->isIns() ) {
             // Record exists, but latest one is not an insert,
             // and doesn't allow tombstone.
             valid_key_exist = false;
