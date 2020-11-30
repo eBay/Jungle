@@ -495,7 +495,7 @@ Status TableMgr::getNearest(DB* snap_handle,
     //   as closer key may exist in lower levels.
     for (size_t ii=0; ii<num_levels; ++ii) {
         std::list<TableInfo*> tables;
-        s = mani->getTablesNearest(ii, key, tables);
+        s = mani->getTablesNearest(ii, key, tables, s_opt);
         if (!s) continue;
 
         for (TableInfo* table: tables) {

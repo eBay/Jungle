@@ -621,7 +621,8 @@ Status TableManifest::getTablesRange(const size_t level,
 
 Status TableManifest::getTablesNearest(const size_t level,
                                        const SizedBuf& key,
-                                       std::list<TableInfo*>& tables_out)
+                                       std::list<TableInfo*>& tables_out,
+                                       SearchOptions s_opt)
 {
     if (level >= levels.size()) return Status::INVALID_LEVEL;
 
@@ -633,7 +634,9 @@ Status TableManifest::getTablesNearest(const size_t level,
         return getTablesByHash(l_info, num_partitions, tables_out);
 
     } else {
-        // Other levels: return 3 tables (prev, target, next).
+        // Other levels: return 2 tables
+        //   greater: target, next
+        //   smaller: prev, target
         TableInfo query(level, 0, 0, true);
         query.minKey.referTo(key);
         skiplist_node* cursor = skiplist_find_smaller_or_equal
@@ -641,8 +644,12 @@ Status TableManifest::getTablesNearest(const size_t level,
         if (!cursor) cursor = skiplist_begin(l_info->tables);
 
         if (cursor) {
-            skiplist_node* cur_prev = skiplist_prev(l_info->tables, cursor);
-            skiplist_node* cur_next = skiplist_next(l_info->tables, cursor);
+            skiplist_node* cur_prev = s_opt.isSmaller()
+                                      ? skiplist_prev(l_info->tables, cursor)
+                                      : nullptr;
+            skiplist_node* cur_next = s_opt.isGreater()
+                                      ? skiplist_next(l_info->tables, cursor)
+                                      : nullptr;
 
             for (skiplist_node* cc: {cur_prev, cursor, cur_next}) {
                 if (!cc) continue;

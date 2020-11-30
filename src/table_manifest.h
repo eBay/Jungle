@@ -200,7 +200,8 @@ public:
 
     Status getTablesNearest(const size_t level,
                             const SizedBuf& key,
-                            std::list<TableInfo*>& tables_out);
+                            std::list<TableInfo*>& tables_out,
+                            SearchOptions s_opt);
 
     void getTableNumbers(std::set<uint64_t>& numbers_out);
 
