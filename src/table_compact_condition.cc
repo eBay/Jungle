@@ -58,7 +58,7 @@ Status TableMgr::pickVictimTable(size_t level,
     // No table to compact, return.
     if (!tables.size()) return Status::TABLE_NOT_FOUND;
     if ( policy == SMALL_WORKING_SET &&
-         tables.size() <= db_config->numL0Partitions * 2 ) {
+         tables.size() <= db_config->minNumTablesPerLevel ) {
         // Too small number of tables in the level,
         // don't need to merge.
         if ( d_params_effective && d_params.forceMerge ) {

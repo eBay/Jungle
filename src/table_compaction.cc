@@ -159,7 +159,7 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     uint64_t TABLE_LIMIT = db_config->getMaxTableSize(level + 1);
     uint64_t TABLE_LIMIT_NUM = 0;
     size_t min_num_tables_for_new_level =
-        std::max( (size_t)db_config->numL0Partitions * 2,
+        std::max( (size_t)db_config->minNumTablesPerLevel,
                   db_config->getMaxParallelWriters() );
     if ( max_key_table.empty() &&
          db_config->nextLevelExtension &&

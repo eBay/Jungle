@@ -78,6 +78,7 @@ public:
         , throttlingThreshold(10000)
         , bulkLoading(false)
         , numL0Partitions(4)
+        , minNumTablesPerLevel(8)
         , minFileSizeToCompact(16777216)    // 16 MiB
         , minBlockReuseCycleToCompact(0)
         , maxBlockReuseCycle(1)
@@ -209,6 +210,11 @@ public:
      * Number of partitions in level-0.
      */
     uint32_t numL0Partitions;
+
+    /**
+     * Minimum number of tables in each level, except for level-0.
+     */
+    uint32_t minNumTablesPerLevel;
 
     /**
      * Minimum file size that can be compacted.
