@@ -175,10 +175,11 @@ void LogMgr::logMgrSettings() {
 
     _log_info(myLog,
               "initialized log manager, memtable flush buffer %zu, "
-              "direct-IO %s",
+              "direct-IO %s, key length limit for hash %zu",
               g_conf->memTableFlushBufferSize,
               ( opt.dbConfig->directIoOpt.enabled
-                ? "ON" : "OFF" ) );
+                ? "ON" : "OFF" ),
+              opt.dbConfig->keyLenLimitForHash );
 }
 
 Status LogMgr::rollback(uint64_t seq_upto) {
@@ -769,7 +770,12 @@ Status LogMgr::get(const uint64_t chk,
     // NOTE: Calculate hash value in advance,
     //       to avoid duplicate overhead.
     uint64_t hash_values[2];
-    MurmurHash3_x64_128(key.data, key.size, 0, hash_values);
+    size_t size_to_hash = key.size;
+    if ( getDbConfig()->keyLenLimitForHash &&
+         getDbConfig()->keyLenLimitForHash < key.size ) {
+        size_to_hash = getDbConfig()->keyLenLimitForHash;
+    }
+    MurmurHash3_x64_128(key.data, size_to_hash, 0, hash_values);
 
     if (parentDb) parentDb->p->updateOpHistory();
 
@@ -974,6 +980,95 @@ Status LogMgr::getNearest(const uint64_t chk,
 
     rec_out = cur_nearest;
     return Status();
+}
+
+Status LogMgr::getPrefix(const uint64_t chk,
+                         std::list<LogFileInfo*>* l_list,
+                         const SizedBuf& prefix,
+                         SearchCbFunc cb_func)
+{
+    Status s;
+    uint64_t min_log_num, max_log_num;
+
+    // NOTE: Calculate hash value in advance,
+    //       to avoid duplicate overhead.
+    // WARNING: Unlike point get, if prefix len is shorter than limit,
+    //          we can't use bloom filter.
+    uint64_t hash_values_arr[2];
+    uint64_t* hash_values = nullptr;
+    if ( getDbConfig()->keyLenLimitForHash &&
+         getDbConfig()->keyLenLimitForHash <= prefix.size ) {
+        size_t size_to_hash = getDbConfig()->keyLenLimitForHash;
+        MurmurHash3_x64_128(prefix.data, size_to_hash, 0, hash_values_arr);
+        hash_values = hash_values_arr;
+    }
+
+    if (parentDb) parentDb->p->updateOpHistory();
+
+    uint64_t chk_local = chk;
+    if (valid_number(chk)) {
+        // Snapshot: beyond the last flushed log.
+        assert(l_list);
+        auto entry = l_list->rbegin();
+        while (entry != l_list->rend()) {
+            LogFileInfo* l_info = *entry;
+            s = l_info->file->getPrefix( chk_local, prefix, hash_values, cb_func,
+                                         true, true );
+            if (s == Status::OPERATION_STOPPED) return s;
+            entry++;
+        }
+    } else {
+        // Normal: from the last flushed log.
+        EP( mani->getLastFlushedLog(min_log_num) );
+        EP( mani->getMaxLogFileNum(max_log_num) );
+
+        if (getDbConfig()->logSectionOnly) {
+            // Log only mode: searching skiplist one-by-one.
+            for (int64_t ii = max_log_num; ii >= (int64_t)min_log_num; --ii) {
+                LogFileInfoGuard li(mani->getLogFileInfoP(ii));
+                if (li.empty() || li.ptr->isRemoved()) continue;
+                s = li->file->getPrefix( chk_local, prefix, hash_values, cb_func,
+                                         false, true );
+                if (s == Status::OPERATION_STOPPED) return s;
+            }
+
+        } else {
+            // Get whole list and then find,
+            // to reduce skiplist overhead.
+            std::vector<LogFileInfo*> l_files;
+            EP( mani->getLogFileInfoRange(min_log_num, max_log_num, l_files) );
+            size_t num = l_files.size();
+            if (!num) return Status::KEY_NOT_FOUND;
+
+            bool stopped = false;
+            for (int ii = num-1; ii>=0; --ii) {
+                LogFileInfo* l_info = l_files[ii];
+                if (l_info->isRemoved()) continue;
+
+                // Reserve max seq number as a temporary snapshot.
+                chk_local = l_info->file->getMaxSeqNum();
+
+                // WARNING: Fetching `visibleSeqBarrier` should be done AFTER
+                //          fetching max seq number.
+                uint64_t visible_seq_barrier = getVisibleSeqBarrier();
+                if (visible_seq_barrier) {
+                    chk_local = std::min(chk_local, visible_seq_barrier);
+                }
+
+                s = l_info->file->getPrefix( chk_local, prefix, hash_values, cb_func,
+                                             false, true );
+                if (s == Status::OPERATION_STOPPED) {
+                    stopped = true;
+                    break;
+                }
+            }
+
+            for (LogFileInfo* ll: l_files) ll->done();
+            if (stopped) return Status::OPERATION_STOPPED;
+        }
+    }
+
+    return Status::OK;
 }
 
 Status LogMgr::sync(bool call_fsync) {

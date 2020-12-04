@@ -2526,6 +2526,120 @@ int get_nearest_test(int flush_options) {
     return 0;
 }
 
+int get_by_prefix_test(size_t hash_len) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 20;
+    config.keyLenLimitForHash = hash_len;
+    config.bloomFilterBitsPerUnit = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    const size_t NUM = 100;
+
+    // Shuffle (0 -- 99).
+    std::vector<size_t> idx_arr(NUM);
+    std::iota(idx_arr.begin(), idx_arr.end(), 0);
+#if 0
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(idx_arr.begin(), idx_arr.end(), g);
+#else
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        size_t jj = std::rand() % NUM;
+        std::swap(idx_arr[ii], idx_arr[jj]);
+    }
+#endif
+
+    const size_t ROUND_MAX = 10;
+    for (size_t round = 0; round < ROUND_MAX; ++round) {
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            size_t idx = idx_arr[ii];
+            std::string key_str = "key" + TestSuite::lzStr(5, idx) + "_" +
+                                  TestSuite::lzStr(2, ROUND_MAX - round);
+            std::string val_str = "val" + TestSuite::lzStr(5, idx) + "_" +
+                                  TestSuite::lzStr(2, ROUND_MAX - round);
+            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        }
+        CHK_Z( db->sync(false) );
+        if (round == 0) {
+            CHK_Z( db->flushLogs() );
+        } else if (round >= 1 && round % 2 == 0 && round < ROUND_MAX - 2) {
+            for (size_t hh = 0; hh < config.numL0Partitions; ++hh) {
+                CHK_Z( db->compactL0(jungle::CompactOptions(), hh) );
+            }
+            CHK_Z( db->flushLogs() );
+        }
+    }
+
+    // Get all records with the given prefix.
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        TestSuite::setInfo("ii = %zu", ii);
+        size_t idx = ii;
+        std::string prefix_str = "key" + TestSuite::lzStr(5, idx);
+        std::list<jungle::Record> recs_out;
+        auto cb_func = [&](const jungle::SearchCbParams& params) ->
+                       jungle::SearchCbDecision {
+            jungle::Record dst;
+            params.rec.copyTo(dst);
+            recs_out.push_back(dst);
+            return jungle::SearchCbDecision::NEXT;
+        };
+        db->getRecordsByPrefix(jungle::SizedBuf(prefix_str), cb_func);
+
+        CHK_EQ(ROUND_MAX, recs_out.size());
+        for (jungle::Record& rec: recs_out) rec.free();
+    }
+
+    // Same but stop in the middle.
+    const size_t STOP_AT = 5;
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        TestSuite::setInfo("ii = %zu", ii);
+        size_t idx = ii;
+        std::string prefix_str = "key" + TestSuite::lzStr(5, idx);
+        std::list<jungle::Record> recs_out;
+        auto cb_func = [&](const jungle::SearchCbParams& params) ->
+                       jungle::SearchCbDecision {
+            jungle::Record dst;
+            params.rec.copyTo(dst);
+            recs_out.push_back(dst);
+            if (recs_out.size() >= STOP_AT) return jungle::SearchCbDecision::STOP;
+            return jungle::SearchCbDecision::NEXT;
+        };
+        db->getRecordsByPrefix(jungle::SizedBuf(prefix_str), cb_func);
+
+        CHK_EQ(STOP_AT, recs_out.size());
+        for (jungle::Record& rec: recs_out) rec.free();
+    }
+
+    // Exact match should work.
+    for (size_t round = 0; round < ROUND_MAX; ++round) {
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            TestSuite::setInfo("round = %zu, ii = %zu", round, ii);
+            size_t idx = idx_arr[ii];
+            std::string key_str = "key" + TestSuite::lzStr(5, idx) + "_" +
+                                  TestSuite::lzStr(2, ROUND_MAX - round);
+            std::string val_str = "val" + TestSuite::lzStr(5, idx) + "_" +
+                                  TestSuite::lzStr(2, ROUND_MAX - round);
+            jungle::SizedBuf value_out;
+            jungle::SizedBuf::Holder h(value_out);
+            CHK_Z( db->get( jungle::SizedBuf(key_str), value_out ) );
+            CHK_EQ( val_str, value_out.toString() );
+        }
+    }
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -2574,6 +2688,8 @@ int main(int argc, char** argv) {
     ts.doTest("get nearest test",
               get_nearest_test,
               TestRange<int>(0, 4, 1, StepType::LINEAR));
+    ts.doTest("get by prefix test",
+              get_by_prefix_test, TestRange<size_t>( {0, 8, 16} ));
 
     return 0;
 }

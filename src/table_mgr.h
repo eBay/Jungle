@@ -184,6 +184,10 @@ public:
                       SearchOptions s_opt = SearchOptions::GREATER_OR_EQUAL,
                       bool meta_only = false);
 
+    Status getPrefix(DB* snap_handle,
+                     const SizedBuf& prefix,
+                     SearchCbFunc cb_func);
+
     size_t getNumLevels() const;
 
     Status getLevelSize(size_t level,

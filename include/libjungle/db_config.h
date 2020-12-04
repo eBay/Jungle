@@ -54,10 +54,26 @@ struct CompactionCbParams {
 using CompactionCbFunc =
     std::function< CompactionCbDecision(const CompactionCbParams&) >;
 
-#if 0
-typedef CompactionCbDecision (*CompactionCbFunc)
-                             (const CompactionCbParams& params);
-#endif
+
+enum SearchCbDecision : int {
+    /**
+     * Continue searching.
+     */
+    NEXT = 0,
+
+    /**
+     * Stop searching.
+     */
+    STOP = 1,
+};
+
+struct SearchCbParams {
+    Record rec;
+};
+
+using SearchCbFunc =
+    std::function< SearchCbDecision(const SearchCbParams&) >;
+
 
 class DB;
 class DBConfig {
@@ -87,6 +103,7 @@ public:
         , numWritesToCompact(0)
         , useBloomFilterForGet(true)
         , bloomFilterBitsPerUnit(0.0)
+        , keyLenLimitForHash(0)
         , nextLevelExtension(true)
         , maxL0TableSize(1073741824)                // 1 GiB
         , maxL1TableSize(2684354560)                // 2.5 GiB
@@ -263,6 +280,16 @@ public:
      * Jungle mode: Bloom filter's bits per 1KB portion of table.
      */
     double bloomFilterBitsPerUnit;
+
+    /**
+     * If
+     *   - zero: the entire key is used for hash calculation.
+     *   - non-zero: the first given number of bytes are used for hash
+     *               calculation if the key is longer than that.
+     *               It will provide better performance for prefix search,
+     *               but may cause skew if the length is too small.
+     */
+    uint32_t keyLenLimitForHash;
 
     /**
      * Use range-partitioned L1+ for non-LSM mode.

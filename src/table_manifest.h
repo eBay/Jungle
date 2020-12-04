@@ -203,6 +203,10 @@ public:
                             std::list<TableInfo*>& tables_out,
                             SearchOptions s_opt);
 
+    Status getTablesPrefix(const size_t level,
+                           const SizedBuf& prefix,
+                           std::list<TableInfo*>& tables_out);
+
     void getTableNumbers(std::set<uint64_t>& numbers_out);
 
     size_t getNumLevels();

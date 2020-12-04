@@ -389,6 +389,20 @@ Status LogFile::getNearest(const uint64_t chk,
     return Status();
 }
 
+Status LogFile::getPrefix(const uint64_t chk,
+                          const SizedBuf& prefix,
+                          uint64_t* prefix_hash,
+                          SearchCbFunc cb_func,
+                          bool allow_flushed_log,
+                          bool allow_tombstone)
+{
+    touch();
+    Status s;
+    EP( mTable->getRecordsByPrefix(chk, prefix, prefix_hash, cb_func,
+                                   allow_flushed_log, allow_tombstone) );
+    return Status();
+}
+
 Status LogFile::flushMemTable(uint64_t upto) {
    touch();
    // Skip unnecessary flushing

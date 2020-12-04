@@ -519,6 +519,34 @@ Status TableMgr::getNearest(DB* snap_handle,
     return Status();
 }
 
+Status TableMgr::getPrefix(DB* snap_handle,
+                           const SizedBuf& prefix,
+                           SearchCbFunc cb_func)
+{
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->logSectionOnly) return Status::KEY_NOT_FOUND;
+
+    Status s;
+    size_t num_levels = mani->getNumLevels();
+
+    for (size_t ii=0; ii<num_levels; ++ii) {
+        std::list<TableInfo*> tables;
+        s = mani->getTablesPrefix(ii, prefix, tables);
+        if (!s) continue;
+
+        bool stopped = false;
+        for (TableInfo* table: tables) {
+            if (!stopped) {
+                s = table->file->getPrefix(snap_handle, prefix, cb_func);
+            }
+            table->done();
+            if (s == Status::OPERATION_STOPPED) stopped = true;
+        }
+        if (stopped) break;
+    }
+    return s;
+}
+
 TableInfo* TableMgr::getSmallestSrcTable(const std::list<TableInfo*>& tables,
                                          uint32_t target_hash_num)
 {

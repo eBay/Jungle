@@ -146,6 +146,11 @@ public:
                       Record& rec_out,
                       SearchOptions s_opt);
 
+    Status getPrefix(const uint64_t chk,
+                     std::list<LogFileInfo*>* l_list,
+                     const SizedBuf& prefix,
+                     SearchCbFunc cb_func);
+
     Status sync(bool call_fsync = true);
 
     Status syncNoWait(bool call_fsync = true);
