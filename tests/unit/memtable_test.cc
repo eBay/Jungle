@@ -264,6 +264,88 @@ int memtable_nearest_search_test() {
     return 0;
 }
 
+int memtable_prefix_search_test() {
+    Status s;
+    DBConfig config;
+    config.keyLenLimitForHash = 8;
+    LogMgrOptions l_opt;
+    l_opt.dbConfig = &config;
+    LogMgr l_mgr(nullptr, l_opt);
+    LogFile l_file(&l_mgr);
+    MemTable mt(&l_file);
+    mt.init();
+
+    const size_t NUM = 1000;
+    std::vector<Record> rec{NUM};
+    char keybuf[64];
+    char valbuf[64];
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        size_t idx = ii;
+        rec[ii].seqNum = ii;
+        sprintf(keybuf, "key%05zu_xxxxx", idx);
+        sprintf(valbuf, "value%05zu", idx);
+        rec[ii].kv.key.alloc(keybuf);
+        rec[ii].kv.value.alloc(valbuf);
+        CHK_Z(mt.putNewRecord(rec[ii]));
+    }
+
+    // 8-byte prefix: one key per each prefix.
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        size_t idx = ii;
+        rec[ii].seqNum = ii;
+        sprintf(keybuf, "key%05zu", idx);
+        sprintf(valbuf, "value%05zu", idx);
+
+        std::list<Record> recs;
+        auto search_cb = [&](const jungle::SearchCbParams& params) ->
+                         jungle::SearchCbDecision {
+            recs.push_back(params.rec);
+            return SearchCbDecision::NEXT;
+        };
+        CHK_Z( mt.getRecordsByPrefix( NOT_INITIALIZED,
+                                      SizedBuf(strlen(keybuf), keybuf),
+                                      nullptr,
+                                      search_cb,
+                                      false,
+                                      false ) );
+        CHK_EQ(1, recs.size());
+        CHK_EQ( SizedBuf(strlen(valbuf), valbuf),
+                recs.begin()->kv.value );
+    }
+
+    // 7-byte prefix: 10 keys per each prefix.
+    for (size_t ii = 0; ii < NUM / 10; ++ii) {
+        size_t idx = ii;
+        rec[ii].seqNum = ii;
+        sprintf(keybuf, "key%04zu", idx);
+        sprintf(valbuf, "value%05zu", idx);
+
+        std::list<Record> recs;
+        auto search_cb = [&](const jungle::SearchCbParams& params) ->
+                         jungle::SearchCbDecision {
+            recs.push_back(params.rec);
+            return SearchCbDecision::NEXT;
+        };
+        CHK_Z( mt.getRecordsByPrefix( NOT_INITIALIZED,
+                                      SizedBuf(strlen(keybuf), keybuf),
+                                      nullptr,
+                                      search_cb,
+                                      false,
+                                      false ) );
+        CHK_EQ(10, recs.size());
+        for (Record& rr: recs) {
+            CHK_EQ( SizedBuf(strlen(keybuf), keybuf),
+                    SizedBuf(strlen(keybuf), rr.kv.key.data) );
+        }
+    }
+
+    for (size_t ii=0; ii<NUM; ++ii) {
+        rec[ii].free();
+    }
+
+    return 0;
+}
+
 int memtable_itr_seek_beyond_seq_test() {
     Status s;
     DBConfig config;
@@ -323,6 +405,7 @@ int main(int argc, char** argv) {
     ts.doTest("memtable key itr test", memtable_key_itr_test);
     ts.doTest("memtable key itr chk test", memtable_key_itr_chk_test);
     ts.doTest("memtable nearest search test", memtable_nearest_search_test);
+    ts.doTest("memtable prefix search test", memtable_prefix_search_test);
     ts.doTest("memtable itr seek beyond seq test", memtable_itr_seek_beyond_seq_test);
 
     return 0;

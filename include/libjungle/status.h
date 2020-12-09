@@ -89,6 +89,7 @@ public:
         EMPTY_BATCH                     = -62,
         INVALID_CONFIG                  = -63,
         DECOMPRESSION_FAILED            = -64,
+        OPERATION_STOPPED               = -65,
 
         ERROR                           = -32768
     };
@@ -171,6 +172,7 @@ public:
                 "EMPTY_BATCH",
                 "INVALID_CONFIG",
                 "DECOMPRESSION_FAILED"
+                "OPERATION_STOPPED"
                 } );
         uint32_t index = -val;
         if (index < names.size()) {

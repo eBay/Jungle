@@ -248,6 +248,7 @@ MemTable::MemTable(const LogFile* log_file)
     // 1M bits (128KB) for 16384 entries.
     uint64_t bf_bitmap_size =
         logFile->logMgr->getDbConfig()->maxEntriesInLogFile * 64;
+    bfKeyLenLimit = logFile->logMgr->getDbConfig()->keyLenLimitForHash;
     bfByKey = new BloomFilter(bf_bitmap_size, 3);
 }
 
@@ -298,6 +299,12 @@ MemTable::~MemTable() {
         delete bfByKey;
         bfByKey = nullptr;
     }
+}
+
+size_t MemTable::getHashLen(size_t len) {
+    if (!bfKeyLenLimit) return len;
+    if (len < bfKeyLenLimit) return len;
+    return bfKeyLenLimit;
 }
 
 int MemTable::cmpKey(skiplist_node *a, skiplist_node *b, void *aux) {
@@ -419,7 +426,7 @@ void MemTable::addToByKeyIndex(Record* rec) {
 
     int ret = skiplist_insert_nodup(idxByKey, &rec_node->snode);
     if (ret == 0) {
-        bfByKey->set(rec->kv.key.data, rec->kv.key.size);
+        bfByKey->set(rec->kv.key.data, getHashLen(rec->kv.key.size));
         return;
     } else {
         // Already exist, re-find.
@@ -587,7 +594,9 @@ Status MemTable::getRecordByKey(const uint64_t chk,
     if (key_hash) {
         if (!bfByKey->check(key_hash)) return Status::KEY_NOT_FOUND;
     } else {
-        if (!bfByKey->check(key.data, key.size)) return Status::KEY_NOT_FOUND;
+        if (!bfByKey->check(key.data, getHashLen(key.size))) {
+            return Status::KEY_NOT_FOUND;
+        }
     }
 
     return getRecordByKeyInternal( chk, key, rec_out,
@@ -675,6 +684,83 @@ Status MemTable::getRecordByKeyInternal(const uint64_t chk,
     }
     rec_out = *rec_ret;
     skiplist_release_node(&node->snode);
+    return Status();
+}
+
+Status MemTable::getRecordsByPrefix(const uint64_t chk,
+                                    const SizedBuf& prefix,
+                                    uint64_t* prefix_hash,
+                                    SearchCbFunc cb_func,
+                                    bool allow_flushed_log,
+                                    bool allow_tombstone)
+{
+    // Check bloom filter first for fast screening.
+    if (prefix_hash) {
+        if (!bfByKey->check(prefix_hash)) return Status::KEY_NOT_FOUND;
+    } else {
+        // Unlike point get, if prefix size is smaller than hash limit
+        // (including the case hash limit is not given),
+        // we can't use bloom filter.
+        if ( bfKeyLenLimit &&
+             prefix.size >= bfKeyLenLimit &&
+             !bfByKey->check(prefix.data, getHashLen(prefix.size)) ) {
+            return Status::KEY_NOT_FOUND;
+        }
+    }
+
+    RecNode query(&prefix);
+    skiplist_node* cursor = nullptr;
+    cursor = skiplist_find_greater_or_equal(idxByKey, &query.snode);
+    if (!cursor) return Status::KEY_NOT_FOUND;
+
+    RecNode* node = _get_entry(cursor, RecNode, snode);
+    if (!node->recList) {
+        skiplist_release_node(&node->snode);
+        return Status::KEY_NOT_FOUND;
+    }
+
+    auto is_prefix_match = [&](const SizedBuf& key) -> bool {
+        if (key.size < prefix.size) return false;
+        return (SizedBuf::cmp( SizedBuf(prefix.size, key.data),
+                               prefix ) == 0);
+    };
+
+    while ( is_prefix_match(node->key) ) {
+        Record* rec_ret = node->getLatestRecord(chk);
+        if (!rec_ret) {
+            skiplist_release_node(&node->snode);
+            return Status::KEY_NOT_FOUND;
+        }
+        if ( valid_number(flushedSeqNum) &&
+             rec_ret->seqNum <= flushedSeqNum ) {
+            // Already purged KV pair, go to table.
+            if (!allow_flushed_log) {
+                skiplist_release_node(&node->snode);
+                return Status::KEY_NOT_FOUND;
+            } // Tolerate if this is snapshot.
+        }
+
+        if ( !allow_tombstone && rec_ret->isDel() ) {
+            // Last operation is deletion.
+            skiplist_release_node(&node->snode);
+            return Status::KEY_NOT_FOUND;
+        }
+        SearchCbDecision dec = cb_func({*rec_ret});
+        if (dec == SearchCbDecision::STOP) {
+            skiplist_release_node(&node->snode);
+            return Status::OPERATION_STOPPED;
+        }
+
+        cursor = skiplist_next(idxByKey, &node->snode);
+        skiplist_release_node(&node->snode);
+
+        if (!cursor) break;
+        node = _get_entry(cursor, RecNode, snode);
+    }
+
+    if (cursor) {
+        skiplist_release_node(cursor);
+    }
     return Status();
 }
 

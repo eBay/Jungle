@@ -854,7 +854,12 @@ Status TableFile::setSingle(uint32_t key_hash_val,
     if (rec.isIns()) {
         // Set bloom filter if exists.
         if (bfByKey) {
-            bfByKey->set(rec.kv.key.data, rec.kv.key.size);
+            size_t hash_size = rec.kv.key.size;
+            if ( db_config->keyLenLimitForHash &&
+                 hash_size > db_config->keyLenLimitForHash ) {
+                hash_size = db_config->keyLenLimitForHash;
+            }
+            bfByKey->set(rec.kv.key.data, hash_size);
         }
     }
     // Put into booster if exists.
@@ -874,6 +879,7 @@ Status TableFile::setBatch(std::list<Record*>& batch,
                            bool bulk_load_mode)
 {
     Timer tt;
+    const DBConfig* db_config = tableMgr->getDbConfig();
 
     uint64_t prev_seqnum = 0;
     size_t num_l0 = tableMgr->getNumL0Partitions();
@@ -884,7 +890,12 @@ Status TableFile::setBatch(std::list<Record*>& batch,
         Record* rec = entry;
 
         // If hash is given, check hash.
-        uint32_t hash_val = getMurmurHash32(rec->kv.key);
+        SizedBuf data_to_hash = rec->kv.key;
+        if ( db_config->keyLenLimitForHash &&
+             data_to_hash.size > db_config->keyLenLimitForHash ) {
+            data_to_hash.size = db_config->keyLenLimitForHash;
+        }
+        uint32_t hash_val = getMurmurHash32(data_to_hash);
         if (target_hash != _SCU32(-1)) {
             size_t key_hash = hash_val % num_l0;
             if (key_hash != target_hash) continue;
@@ -994,10 +1005,16 @@ Status TableFile::get(DB* snap_handle,
     DB* parent_db = tableMgr->getParentDb();
     const DBConfig* db_config = tableMgr->getDbConfig();
 
+    SizedBuf data_to_hash = rec_io.kv.key;
+    if ( db_config->keyLenLimitForHash &&
+         data_to_hash.size > db_config->keyLenLimitForHash ) {
+        data_to_hash.size = db_config->keyLenLimitForHash;
+    }
+
     // Search bloom filter first if exists.
     if ( bfByKey &&
          db_config->useBloomFilterForGet &&
-         !bfByKey->check(rec_io.kv.key.data, rec_io.kv.key.size) ) {
+         !bfByKey->check(data_to_hash.data, data_to_hash.size) ) {
         return Status::KEY_NOT_FOUND;
     }
 
@@ -1031,7 +1048,7 @@ Status TableFile::get(DB* snap_handle,
         fdb_kvs_handle* kvs_db = g.handle->db;
 
         bool skip_normal_search = false;
-        uint32_t key_hash = getMurmurHash32(rec_io.kv.key);
+        uint32_t key_hash = getMurmurHash32(data_to_hash);
         IF ( !meta_only && tlbByKey ) {
             // Search booster if exists.
             memset(&doc_by_offset, 0x0, sizeof(doc_by_offset));
@@ -1237,6 +1254,118 @@ Status TableFile::getNearest(DB* snap_handle,
     rec_out.meta.free();
     return s;
    }
+}
+
+Status TableFile::getPrefix(DB* snap_handle,
+                            const SizedBuf& prefix,
+                            SearchCbFunc cb_func)
+{
+    DB* parent_db = tableMgr->getParentDb();
+    const DBConfig* db_config = tableMgr->getDbConfig();
+
+    SizedBuf data_to_hash = prefix;
+    if ( db_config->keyLenLimitForHash &&
+         data_to_hash.size > db_config->keyLenLimitForHash ) {
+        data_to_hash.size = db_config->keyLenLimitForHash;
+    }
+
+    // Unlike point get, skip bloom filter if prefix size is
+    // shorter than hash limit.
+    if ( bfByKey &&
+         db_config->useBloomFilterForGet &&
+         db_config->keyLenLimitForHash &&
+         prefix.size >= db_config->keyLenLimitForHash &&
+         !bfByKey->check(data_to_hash.data, data_to_hash.size) ) {
+        return Status::KEY_NOT_FOUND;
+    }
+
+    fdb_status fs;
+    fdb_doc doc_base;
+    memset(&doc_base, 0x0, sizeof(doc_base));
+
+    fdb_doc* doc = &doc_base;
+    fdb_get_nearest_opt_t nearest_opt = FDB_GET_GREATER_OR_EQUAL;
+
+    auto is_prefix_match = [&](const SizedBuf& key) -> bool {
+        if (key.size < prefix.size) return false;
+        return (SizedBuf::cmp( SizedBuf(prefix.size, key.data),
+                               prefix ) == 0);
+    };
+
+    FdbHandleGuard g(this, snap_handle ? nullptr: getIdleHandle());
+    fdb_kvs_handle* kvs_db = nullptr;
+    if (snap_handle) {
+        mGuard l(snapHandlesLock);
+        auto entry = snapHandles.find(snap_handle);
+        if (entry == snapHandles.end()) return Status::SNAPSHOT_NOT_FOUND;
+        kvs_db = entry->second;
+    } else {
+        kvs_db = g.handle->db;
+    }
+
+    SizedBuf last_returned_key;
+    SizedBuf::Holder h_last_returned_key(last_returned_key);
+    prefix.copyTo(last_returned_key);
+    do {
+        // TODO: Not sure we can use table lookup booster.
+        fs = fdb_get_nearest(kvs_db,
+                             last_returned_key.data,
+                             last_returned_key.size,
+                             doc,
+                             nearest_opt);
+        if (fs != FDB_RESULT_SUCCESS) {
+            return Status::KEY_NOT_FOUND;
+        }
+
+        // Find next greater key.
+        nearest_opt = FDB_GET_GREATER;
+
+        Status s;
+        Record rec_out;
+        Record::Holder h_rec_out(rec_out);
+        rec_out.kv.key.set(doc->keylen, doc->key);
+        rec_out.kv.key.setNeedToFree();
+        rec_out.kv.value.set(doc->bodylen, doc->body);
+        rec_out.kv.value.setNeedToFree();
+        // Decode meta.
+        SizedBuf user_meta_out;
+        SizedBuf raw_meta(doc->metalen, doc->meta);;
+        SizedBuf::Holder h_raw_meta(raw_meta); // auto free raw meta.
+        raw_meta.setNeedToFree();
+
+        InternalMeta i_meta_out;
+        rawMetaToUserMeta(raw_meta, i_meta_out, user_meta_out);
+
+        user_meta_out.moveTo( rec_out.meta );
+
+        // Decompress if needed.
+        s = decompressValue(parent_db, db_config, rec_out, i_meta_out);
+        if (!s) {
+            _log_err(myLog, "decompression failed: %d, key %s",
+                     s, rec_out.kv.key.toReadableString().c_str());
+            continue;
+        }
+
+        rec_out.seqNum = doc->seqnum;
+        rec_out.type = (i_meta_out.isTombstone || doc->deleted)
+                       ? Record::DELETION
+                       : Record::INSERTION;
+
+        if (!is_prefix_match(rec_out.kv.key)) {
+            // Prefix doesn't match, exit.
+            break;
+        }
+
+        SearchCbDecision dec = cb_func({rec_out});
+        if (dec == SearchCbDecision::STOP) {
+            return Status::OPERATION_STOPPED;
+        }
+        last_returned_key.free();
+        rec_out.kv.key.copyTo(last_returned_key);
+
+    } while (true);
+
+    return Status::OK;
 }
 
 Status TableFile::decompressValue(DB* parent_db,

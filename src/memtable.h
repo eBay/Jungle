@@ -70,6 +70,12 @@ public:
                                  bool allow_flushed_log,
                                  bool allow_tombstone,
                                  SearchOptions s_opt);
+    Status getRecordsByPrefix(const uint64_t chk,
+                              const SizedBuf& prefix,
+                              uint64_t* prefix_hash,
+                              SearchCbFunc cb_func,
+                              bool allow_flushed_log,
+                              bool allow_tombstone);
     Status sync(FileOps* f_ops,
                 FileHandle* fh);
     Status appendFlushMarker(RwSerializer& rws);
@@ -208,6 +214,8 @@ private:
                                   bool allow_tombstone,
                                   SearchOptions s_opt);
 
+    size_t getHashLen(size_t len);
+
 // === VARIABLES
     uint64_t startSeqNum;
 
@@ -234,6 +242,8 @@ private:
     skiplist_raw* idxByKey;
     // Bloom filter for key.
     BloomFilter* bfByKey;
+    // Cache of `keyLenLimitForHash`.
+    size_t bfKeyLenLimit;
 
     // Temporary store for stale (overwritten using the same seq num) logs.
     std::mutex staleLogsLock;

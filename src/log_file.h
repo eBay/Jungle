@@ -88,6 +88,13 @@ public:
                       bool allow_tombstone,
                       SearchOptions s_opt);
 
+    Status getPrefix(const uint64_t chk,
+                     const SizedBuf& prefix,
+                     uint64_t* prefix_hash,
+                     SearchCbFunc cb_func,
+                     bool allow_flushed_log,
+                     bool allow_tombstone);
+
     Status flushMemTable(uint64_t upto = NOT_INITIALIZED);
 
     Status purgeMemTable();

@@ -534,11 +534,16 @@ Status TableManifest::getTablesPoint(const size_t level,
     if (level >= levels.size()) return Status::INVALID_LEVEL;
 
     LevelInfo* l_info = levels[level];
+    size_t hash_len = tableMgr->getDbConfig()->keyLenLimitForHash;
 
     if ( level == 0 ) {
         // Level-0: hash partition
-        size_t num_partitions = tableMgr->getNumL0Partitions();
-        uint32_t target_hash = getMurmurHash(key, num_partitions);
+        uint32_t target_hash = tableMgr->getNumL0Partitions();
+        if (hash_len && key.size >= hash_len) {
+            // If `hash_len` is given, use prefix only.
+            SizedBuf data_to_hash(hash_len, key.data);
+            target_hash = getMurmurHash(data_to_hash, target_hash);
+        }
         return getTablesByHash(l_info, target_hash, tables_out);
 
     } else {
@@ -652,6 +657,65 @@ Status TableManifest::getTablesNearest(const size_t level,
                                       : nullptr;
 
             for (skiplist_node* cc: {cur_prev, cursor, cur_next}) {
+                if (!cc) continue;
+
+                TableInfo* t_info = _get_entry(cc, TableInfo, snode);
+                t_info->grab();
+                pushTablesInStack(t_info, tables_out);
+                tables_out.push_back(t_info);
+
+                skiplist_release_node(cc);
+            }
+        }
+    }
+
+    return Status();
+}
+
+Status TableManifest::getTablesPrefix(const size_t level,
+                                      const SizedBuf& prefix,
+                                      std::list<TableInfo*>& tables_out)
+{
+    if (level >= levels.size()) return Status::INVALID_LEVEL;
+
+    LevelInfo* l_info = levels[level];
+    size_t hash_len = tableMgr->getDbConfig()->keyLenLimitForHash;
+
+    if ( level == 0 ) {
+        // Level-0: hash partition.
+        //   If prefix len is greater than hash len, we can do point search.
+        //   If not, return all.
+        uint32_t target_hash = tableMgr->getNumL0Partitions();
+        if (hash_len && prefix.size >= hash_len) {
+            SizedBuf data_to_hash(hash_len, prefix.data);
+            target_hash = getMurmurHash(data_to_hash, target_hash);
+        }
+        return getTablesByHash(l_info, target_hash, tables_out);
+
+    } else {
+        // Other levels: return 1 or 2 tables
+        //   If next table's min key has matched prefix,
+        //   return the next table as well.
+        TableInfo query(level, 0, 0, true);
+        query.minKey.referTo(prefix);
+        skiplist_node* cursor = skiplist_find_smaller_or_equal
+                                ( l_info->tables, &query.snode );
+        if (!cursor) cursor = skiplist_begin(l_info->tables);
+
+        if (cursor) {
+            skiplist_node* cur_next = skiplist_next(l_info->tables, cursor);
+            if (cur_next) {
+                TableInfo* t_info = _get_entry(cur_next, TableInfo, snode);
+                // Check if prefix matches.
+                if ( t_info->minKey.size < prefix.size ||
+                     SizedBuf::cmp( SizedBuf(prefix.size, t_info->minKey.data),
+                                    prefix ) != 0 ) {
+                    // Prefix doesn't match, don't need to search next table.
+                    cur_next = nullptr;
+                }
+            }
+
+            for (skiplist_node* cc: {cursor, cur_next}) {
                 if (!cc) continue;
 
                 TableInfo* t_info = _get_entry(cc, TableInfo, snode);

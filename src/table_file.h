@@ -139,6 +139,10 @@ public:
                       SearchOptions s_opt,
                       bool meta_only = false);
 
+    Status getPrefix(DB* snap_handle,
+                     const SizedBuf& prefix,
+                     SearchCbFunc cb_func);
+
     Status getByOffset(DB* snap_handle,
                        uint64_t offset,
                        Record& rec_out);

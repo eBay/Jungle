@@ -750,6 +750,34 @@ Status DB::getNearestRecordByKey(const SizedBuf& key,
     return s;
 }
 
+Status DB::getRecordsByPrefix(const SizedBuf& prefix,
+                              SearchCbFunc cb_func)
+{
+    Status s;
+    EP( p->checkHandleValidity() );
+
+    Record rec_local;
+    uint64_t chknum = (sn)?(sn->chkNum):(NOT_INITIALIZED);
+    std::list<LogFileInfo*>* l_list = (sn)?(sn->logList):(nullptr);
+    s = p->logMgr->getPrefix(chknum, l_list, prefix, cb_func);
+    if (s == Status::OPERATION_STOPPED) {
+        // User wants to stop, return OK.
+        return Status::OK;
+    } else if (!s.ok()) {
+        // Stopped by other reason.
+        return s;
+    }
+
+    // Key not found or user wants to continue, search tables.
+    DB* snap_handle = (this->sn)?(this):(nullptr);
+    s = p->tableMgr->getPrefix(snap_handle, prefix, cb_func);
+    if (!s.ok() && s != Status::OPERATION_STOPPED) {
+        // Stopped by other reason.
+        return s;
+    }
+    return Status::OK;
+}
+
 Status DB::del(const SizedBuf& key) {
     Status s;
     EP( p->checkHandleValidity(DBInternal::OPTYPE_WRITE) );

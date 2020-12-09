@@ -23,6 +23,8 @@ limitations under the License.
 #include "snappy-c.h"
 #endif
 
+//#define USE_PREFIX_SEARCH
+
 namespace jungle_bench {
 
 jungle::SizedBuf conv_buf(const DbAdapter::Buffer& buf) {
@@ -135,7 +137,9 @@ int JungleAdapter::open(const std::string& db_file,
     jungle::init(g_config);
 
     jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config)
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.keyLenLimitForHash = 16;
+
     config.compactionFactor = 300;
     _jint(config.compactionFactor, configObj, "compaction_factor");
 
@@ -258,8 +262,18 @@ int JungleAdapter::get(const Buffer& key,
 {
     jungle::Status s;
     jungle::SizedBuf local_value_out;
+#ifdef USE_PREFIX_SEARCH
+    auto cb_func = [&](const jungle::SearchCbParams& params) ->
+                   jungle::SearchCbDecision {
+        params.rec.kv.value.copyTo(local_value_out);
+        return jungle::SearchCbDecision::STOP;
+    };
+    s = myDb->getRecordsByPrefix(conv_buf(key), cb_func);
+    if (!s) return (int)s;
+#else
     s = myDb->get( conv_buf(key), local_value_out );
     if (!s) return (int)s;
+#endif
 
     value_out = conv_buf(local_value_out);
     return 0;

@@ -279,6 +279,18 @@ public:
                                  bool meta_only = false);
 
     /**
+     * Get all records whose prefix match the given one.
+     * Since there can be multiple records, the given callback
+     * function will be invoked for each record matched.
+     *
+     * @param prefix Prefix to find records.
+     * @param cb_func Callback function to be invoked.
+     * @return OK on success.
+     */
+    Status getRecordsByPrefix(const SizedBuf& prefix,
+                              SearchCbFunc cb_func);
+
+    /**
      * Delete the key-value pair corresponding to the given key.
      *
      * @param key Key to delete.
