@@ -150,7 +150,6 @@ set(JUNGLE_CORE
     ${ROOT_SRC}/internal_helper.cc
     ${ROOT_SRC}/iterator.cc
     ${ROOT_SRC}/jungle.cc
-    ${ROOT_SRC}/list.cc
     ${ROOT_SRC}/log_file.cc
     ${ROOT_SRC}/log_iterator.cc
     ${ROOT_SRC}/log_manifest.cc
