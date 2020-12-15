@@ -17,7 +17,6 @@ limitations under the License.
 #pragma once
 
 #include "internal_helper.h"
-#include "list.h"
 
 #include <libjungle/jungle.h>
 
