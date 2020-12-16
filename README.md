@@ -3,7 +3,7 @@
 Jungle
 ======
 
-[![Build Status](https://travis-ci.com/eBay/Jungle.svg?branch=master)](https://travis-ci.com/eBay/Jungle)
+[![build](https://github.com/eBay/Jungle/workflows/build/badge.svg)](https://github.com/eBay/Jungle/actions)
 [![codecov](https://codecov.io/gh/eBay/Jungle/branch/master/graph/badge.svg)](https://codecov.io/gh/eBay/Jungle)
 
 
