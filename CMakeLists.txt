@@ -65,12 +65,12 @@ if (CODE_COVERAGE GREATER 0)
     #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-inline")
     #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_NO_EXCEPTION")
     set(COVERAGE_EXCLUDES
-        'third_party/*'
-        'usr/*'
-        'tests/*'
-        'tools/*'
-        'src/simple_thread_pool.h'
-        'src/logger.*'
+        '*third_party/*'
+        '*usr/*'
+        '*tests/*'
+        '*tools/*'
+        '*src/simple_thread_pool.h'
+        '*src/logger.*'
     )
 endif()
 
