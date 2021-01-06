@@ -2640,6 +2640,68 @@ int get_by_prefix_test(size_t hash_len) {
     return 0;
 }
 
+int kmv_get_memory_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::DB* db;
+    jungle::Status s;
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    jungle::Record rec;
+    std::string key_str = "key", meta_str = "meta", value_str = "value";
+    rec.kv.key = jungle::SizedBuf(key_str);
+    rec.kv.value = jungle::SizedBuf(value_str);
+    rec.meta = jungle::SizedBuf(meta_str);
+    CHK_Z( db->setRecordByKey(rec) );
+
+    jungle::SizedBuf value_out;
+    CHK_Z( db->get(jungle::SizedBuf(key_str), value_out) );
+    value_out.free();
+
+    jungle::KV kv_out;
+    CHK_Z( db->getSN(1, kv_out) );
+    kv_out.free();
+
+    jungle::Record rec_out;
+    CHK_Z( db->getRecord(1, rec_out) );
+    rec_out.free();
+
+    CHK_Z( db->getRecordByKey(jungle::SizedBuf(key_str), rec_out) );
+    rec_out.free();
+
+    CHK_Z( db->getRecordByKey(jungle::SizedBuf(key_str), rec_out, true) );
+    rec_out.free();
+
+    CHK_Z( db->getNearestRecordByKey(jungle::SizedBuf(key_str), rec_out) );
+    rec_out.free();
+
+    CHK_Z( db->sync(false) );
+    CHK_Z( db->flushLogs() );
+
+    CHK_Z( db->get(jungle::SizedBuf(key_str), value_out) );
+    value_out.free();
+
+    CHK_Z( db->getRecordByKey(jungle::SizedBuf(key_str), rec_out) );
+    rec_out.free();
+
+    CHK_Z( db->getRecordByKey(jungle::SizedBuf(key_str), rec_out, true) );
+    rec_out.free();
+
+    CHK_Z( db->getNearestRecordByKey(jungle::SizedBuf(key_str), rec_out) );
+    rec_out.free();
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -2690,6 +2752,7 @@ int main(int argc, char** argv) {
               TestRange<int>(0, 4, 1, StepType::LINEAR));
     ts.doTest("get by prefix test",
               get_by_prefix_test, TestRange<size_t>( {0, 8, 16} ));
+    ts.doTest("kmv get memory test", kmv_get_memory_test);
 
     return 0;
 }
