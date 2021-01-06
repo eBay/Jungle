@@ -755,7 +755,9 @@ Status LogMgr::getSN(const uint64_t seq_num, Record& rec_out) {
         return Status::KEY_NOT_FOUND;
     }
 
-    EP( gg->file->getSN(seq_num, rec_out) );
+    Record rec_out_local;
+    EP( gg->file->getSN(seq_num, rec_out_local) );
+    rec_out_local.copyTo(rec_out);
     return Status();
 }
 
@@ -779,6 +781,7 @@ Status LogMgr::get(const uint64_t chk,
 
     if (parentDb) parentDb->p->updateOpHistory();
 
+    Record rec_out_local;
     uint64_t chk_local = chk;
     if (valid_number(chk)) {
         // Snapshot: beyond the last flushed log.
@@ -786,9 +789,12 @@ Status LogMgr::get(const uint64_t chk,
         auto entry = l_list->rbegin();
         while (entry != l_list->rend()) {
             LogFileInfo* l_info = *entry;
-            s = l_info->file->get(chk_local, key, hash_values, rec_out,
+            s = l_info->file->get(chk_local, key, hash_values, rec_out_local,
                                   true, true);
-            if (s) return s;
+            if (s) {
+                rec_out_local.copyTo(rec_out);
+                return s;
+            }
             entry++;
         }
     } else {
@@ -801,9 +807,10 @@ Status LogMgr::get(const uint64_t chk,
             for (int64_t ii = max_log_num; ii >= (int64_t)min_log_num; --ii) {
                 LogFileInfoGuard li(mani->getLogFileInfoP(ii));
                 if (li.empty() || li.ptr->isRemoved()) continue;
-                s = li->file->get(chk_local, key, hash_values, rec_out,
+                s = li->file->get(chk_local, key, hash_values, rec_out_local,
                                   false, true);
                 if (s) {
+                    rec_out_local.copyTo(rec_out);
                     return s;
                 }
             }
@@ -831,9 +838,10 @@ Status LogMgr::get(const uint64_t chk,
                     chk_local = std::min(chk_local, visible_seq_barrier);
                 }
 
-                s = l_info->file->get(chk_local, key, hash_values, rec_out,
+                s = l_info->file->get(chk_local, key, hash_values, rec_out_local,
                                       false, true);
                 if (s) {
+                    rec_out_local.copyTo(rec_out);
                     found = true;
                     break;
                 }
@@ -887,7 +895,7 @@ Status LogMgr::getNearest(const uint64_t chk,
     // NOTE:
     //   Since it is log and we scan file backward,
     //   we should return once we see the first exact match.
-
+    Record rec_out_local;
     uint64_t chk_local = chk;
     if (valid_number(chk)) {
         // Snapshot: beyond the last flushed log.
@@ -895,11 +903,12 @@ Status LogMgr::getNearest(const uint64_t chk,
         auto entry = l_list->rbegin();
         while (entry != l_list->rend()) {
             LogFileInfo* l_info = *entry;
-            s = l_info->file->getNearest(chk_local, key, rec_out,
+            s = l_info->file->getNearest(chk_local, key, rec_out_local,
                                          true, true, s_opt);
             if (s) {
-                update_cur_nearest(rec_out);
-                if (cmp_func(key, cur_nearest.kv.key)) {
+                update_cur_nearest(rec_out_local);
+                if (cmp_func(key, cur_nearest.kv.key) == 0) {
+                    rec_out_local.copyTo(rec_out);
                     return s;
                 }
             }
@@ -915,11 +924,12 @@ Status LogMgr::getNearest(const uint64_t chk,
             for (int64_t ii = max_log_num; ii >= (int64_t)min_log_num; --ii) {
                 LogFileInfoGuard li(mani->getLogFileInfoP(ii));
                 if (li.empty() || li.ptr->isRemoved()) continue;
-                s = li->file->getNearest(chk_local, key, rec_out,
+                s = li->file->getNearest(chk_local, key, rec_out_local,
                                          false, true, s_opt);
                 if (s) {
-                    update_cur_nearest(rec_out);
-                    if (cmp_func(key, cur_nearest.kv.key)) {
+                    update_cur_nearest(rec_out_local);
+                    if (cmp_func(key, cur_nearest.kv.key) == 0) {
+                        rec_out_local.copyTo(rec_out);
                         return s;
                     }
                 }
@@ -948,14 +958,15 @@ Status LogMgr::getNearest(const uint64_t chk,
                     chk_local = std::min(chk_local, visible_seq_barrier);
                 }
 
-                s = l_info->file->getNearest(chk_local, key, rec_out,
+                s = l_info->file->getNearest(chk_local, key, rec_out_local,
                                              false, true, s_opt);
                 if (s) {
-                    update_cur_nearest(rec_out);
+                    update_cur_nearest(rec_out_local);
                     if ( s_opt.isExactMatchAllowed() &&
                          cmp_func(key, cur_nearest.kv.key) == 0 ) {
                         // If `equal` is allowed, then return the
                         // first found exact match.
+                        rec_out_local.copyTo(rec_out);
                         found = true;
                         break;
                     }
@@ -978,7 +989,7 @@ Status LogMgr::getNearest(const uint64_t chk,
         if (cmp_func(key, cur_nearest.kv.key) < 0) return Status::KEY_NOT_FOUND;
     }
 
-    rec_out = cur_nearest;
+    cur_nearest.copyTo(rec_out);
     return Status();
 }
 

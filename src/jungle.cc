@@ -565,32 +565,38 @@ Status DB::mergeLevel(const CompactOptions& options,
 
 
 // NOTE:
-//  MemTable --> LogFile --> LogMgr ----> DB --(memcpy)--+--> User
-//  TableFile --(memcpy)---> TableMgr --> DB ------------+
+//  MemTable --> LogFile --> LogMgr --(memcpy)--+--> DB ---> User
+//  TableFile --(memcpy)---> TableMgr ----------+
 
 Status DB::get(const SizedBuf& key, SizedBuf& value_out) {
     Status s;
     EP( p->checkHandleValidity() );
 
-    Record rec_local;
+    Record rec_log;
+    Record::Holder h_rec_log(rec_log);
     uint64_t chknum = (sn)?(sn->chkNum):(NOT_INITIALIZED);
     std::list<LogFileInfo*>* l_list = (sn)?(sn->logList):(nullptr);
-    s = p->logMgr->get(chknum, l_list, key, rec_local);
+    s = p->logMgr->get(chknum, l_list, key, rec_log);
     if (s) {
-        if (!rec_local.isIns()) {
+        if (!rec_log.isIns()) {
             // Removed key, should return without searching tables.
             return Status::KEY_NOT_FOUND;
         }
-        value_out.alloc(rec_local.kv.value.size, rec_local.kv.value.data);
+        rec_log.kv.value.moveTo(value_out);
         return s;
     }
 
     // Not exist in log, but maybe they have been purged.
     // Search in table.
     Record rec;
+    Record::Holder h_rec(rec);
+
+    // Temporarily assign memory given by user, SHOULD NOT BE FREED.
     rec.kv.key = key;
     DB* snap_handle = (this->sn)?(this):(nullptr);
     s = p->tableMgr->get(snap_handle, rec);
+    // Clear the memory by user, to avoid freeing it.
+    rec.kv.key.clear();
     if (s) {
         if (!rec.isIns()) {
             // Removed key.
@@ -606,12 +612,13 @@ Status DB::getSN(const uint64_t seq_num, KV& kv_out) {
     EP( p->checkHandleValidity() );
 
     Record rec;
+    Record::Holder h_rec(rec);
     s = p->logMgr->getSN(seq_num, rec);
     if (!s) return s;
     if (!rec.isIns()) {
         return Status::NOT_KV_PAIR;
     }
-    rec.kv.copyTo(kv_out);
+    rec.kv.moveTo(kv_out);
     return s;
 }
 
@@ -620,9 +627,10 @@ Status DB::getRecord(const uint64_t seq_num, Record& rec_out) {
     EP( p->checkHandleValidity() );
 
     Record rec;
+    Record::Holder h_rec(rec);
     s = p->logMgr->getSN(seq_num, rec);
     if (!s) return s;
-    rec.copyTo(rec_out);
+    rec.moveTo(rec_out);
     return s;
 }
 
@@ -633,20 +641,21 @@ Status DB::getRecordByKey(const SizedBuf& key,
     Status s;
     EP( p->checkHandleValidity() );
 
-    Record rec_local;
+    Record rec_log;
+    Record::Holder h_rec_log(rec_log);
     uint64_t chknum = (sn)?(sn->chkNum):(NOT_INITIALIZED);
     std::list<LogFileInfo*>* l_list = (sn)?(sn->logList):(nullptr);
-    s = p->logMgr->get(chknum, l_list, key, rec_local);
+    s = p->logMgr->get(chknum, l_list, key, rec_log);
     if (s) {
-        if (!meta_only && !rec_local.isIns()) {
+        if (!meta_only && !rec_log.isIns()) {
             // NOT meta only mode + removed key:
             // should return without searching tables.
             return Status::KEY_NOT_FOUND;
         }
         if (meta_only) {
-            rec_local.kv.value.clear();
+            rec_log.kv.value.free();
         }
-        rec_local.copyTo(rec_out);
+        rec_log.moveTo(rec_out);
         return s;
     }
 
@@ -683,11 +692,13 @@ Status DB::getNearestRecordByKey(const SizedBuf& key,
     }
 
     Record rec_from_log;
+    Record::Holder h_rec_from_log(rec_from_log);
     uint64_t chknum = (sn)?(sn->chkNum):(NOT_INITIALIZED);
     std::list<LogFileInfo*>* l_list = (sn)?(sn->logList):(nullptr);
     p->logMgr->getNearest(chknum, l_list, key, rec_from_log, opt);
 
     Record rec_from_table;
+    Record::Holder h_rec_from_table(rec_from_table);
     DB* snap_handle = (this->sn)?(this):(nullptr);
     p->tableMgr->getNearest(snap_handle, key, rec_from_table, opt, meta_only);
 
@@ -741,8 +752,7 @@ Status DB::getNearestRecordByKey(const SizedBuf& key,
 
     if (choose_log) {
         // Choose the one from log.
-        rec_from_log.copyTo(rec_out);
-        rec_from_table.free();
+        rec_from_log.moveTo(rec_out);
     } else {
         // Choose the one from table.
         rec_from_table.moveTo(rec_out);
