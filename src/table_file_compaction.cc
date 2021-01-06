@@ -173,7 +173,14 @@ Status TableFile::compactToManully(FdbHandle* compact_handle,
             fdb_set(dst_handle->db, ret_doc);
             cnt++;
 
-            if (dst_bf) dst_bf->set(ret_doc->key, ret_doc->keylen);
+            if (dst_bf) {
+                size_t hash_size = ret_doc->keylen;
+                if ( local_config.keyLenLimitForHash &&
+                     hash_size > local_config.keyLenLimitForHash ) {
+                    hash_size = local_config.keyLenLimitForHash;
+                }
+                dst_bf->set(ret_doc->key, hash_size);
+            }
         }
 
         free(ret_doc->key);
@@ -378,7 +385,14 @@ Status TableFile::mergeCompactTo(const std::string& file_to_merge,
             (*cnt)++;
             final_cnt++;
 
-            if (dst_bf) dst_bf->set(doc_choosen->key, doc_choosen->keylen);
+            if (dst_bf) {
+                size_t hash_size = doc_choosen->keylen;
+                if ( db_config->keyLenLimitForHash &&
+                     hash_size > db_config->keyLenLimitForHash ) {
+                    hash_size = db_config->keyLenLimitForHash;
+                }
+                dst_bf->set(doc_choosen->key, hash_size);
+            }
         }
         fdb_doc_free(doc_choosen);
 

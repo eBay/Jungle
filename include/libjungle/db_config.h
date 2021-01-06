@@ -357,7 +357,6 @@ public:
 
         /**
          * If `true`, use direct-IO bypassing OS page cache.
-         * Currently only supported for log files.
          * Default: `false`
          */
         bool enabled;
@@ -374,7 +373,7 @@ public:
     };
 
     /**
-     * Direct-IO related options.
+     * [EXPERIMENTAL] Direct-IO related options.
      */
     DirectIoOptions directIoOpt;
 
