@@ -102,12 +102,18 @@ fdb_config TableFile::FdbHandle::getFdbSettings(const DBConfig* db_config) {
     config.bulk_load_mode = true;
     config.do_not_search_wal = true;
 
-    // NOTE:
-    //   During compaction, Jungle manually reads records and copies it
-    //   to new file, which may spoil the block cache of ForestDB,
-    //   due to unnecessary doc block caching that will not be read again.
-    //   We should disable caching doc block.
-    config.do_not_cache_doc_blocks = true;
+    if (!db_config->directIoOpt.enabled) {
+        // NOTE:
+        //   During compaction, Jungle manually reads records and copies it
+        //   to new file, which may spoil the block cache of ForestDB,
+        //   due to unnecessary doc block caching that will not be read again.
+        //   We should disable caching doc block.
+        config.do_not_cache_doc_blocks = true;
+    } else {
+        // Direct-IO mode.
+        config.do_not_cache_doc_blocks = false;
+        config.durability_opt = FDB_DRB_ODIRECT;
+    }
 
     // Disable auto compaction,
     // temporarily enable block reuse.
