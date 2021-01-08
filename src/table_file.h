@@ -120,7 +120,8 @@ public:
     Status setSingle(uint32_t key_hash_val,
                      const Record& rec,
                      uint64_t& offset_out,
-                     bool set_as_it_is = false);
+                     bool set_as_it_is = false,
+                     bool is_last_level = false);
 
     Status setBatch(std::list<Record*>& batch,
                     std::list<uint64_t>& checkpoints,
@@ -256,6 +257,8 @@ public:
 
     Status returnSnapshot(Snapshot* snapshot);
 
+    TableInfo* getTableInfo() const { return tableInfo; }
+
 private:
 // === TYPES
     /**
@@ -326,6 +329,9 @@ private:
     static void rawMetaToUserMeta(const SizedBuf& raw_meta,
                                   InternalMeta& internal_meta_out,
                                   SizedBuf& user_meta_out);
+
+    static void readInternalMeta(const SizedBuf& raw_meta,
+                                 InternalMeta& internal_meta_out);
 
     static uint32_t tfExtractFlags(const SizedBuf& raw_meta);
 
