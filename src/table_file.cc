@@ -131,7 +131,7 @@ fdb_config TableFile::FdbHandle::getFdbSettings(const DBConfig* db_config) {
     config.max_block_reusing_cycle = db_config->maxBlockReuseCycle;
     config.min_block_reuse_filesize = tFileOpt.minBlockReuseFileSize;
     config.seqtree_opt = FDB_SEQTREE_USE;
-    config.purging_interval = 60 * 60; // 1 hour.
+    config.purging_interval = 0; // Disable.
     config.num_keeping_headers = 10;
     config.do_not_move_to_compacted_file = true;
     //config.enable_reusable_block_reservation = true;
@@ -723,6 +723,35 @@ void TableFile::rawMetaToUserMeta(const SizedBuf& raw_meta,
     rw.get(user_meta_out.data, user_meta_out.size);
 }
 
+void TableFile::readInternalMeta(const SizedBuf& raw_meta,
+                                 InternalMeta& internal_meta_out)
+{
+    if (raw_meta.empty()) return;
+
+    RwSerializer rw(raw_meta);
+
+    // Check identifier.
+    uint8_t identifier = rw.getU8();
+    if (identifier != 0x1) {
+        // No conversion.
+        return;
+    }
+
+    // Version.
+    uint32_t version = rw.getU32();
+    (void)version; // TODO: version.
+
+    // Flags.
+    uint32_t flags = rw.getU32();
+    if (flags & TF_FLAG_TOMBSTONE) internal_meta_out.isTombstone = true;
+    if (flags & TF_FLAG_COMPRESSED) internal_meta_out.isCompressed = true;
+
+    if (internal_meta_out.isCompressed) {
+        // Original value length (if compressed).
+        internal_meta_out.originalValueLen = rw.getU32();
+    }
+}
+
 uint32_t TableFile::tfExtractFlags(const SizedBuf& raw_meta) {
     RwSerializer rw(raw_meta);
     rw.getU8();
@@ -754,7 +783,8 @@ size_t TableFile::getInternalMetaLen(const InternalMeta& meta) {
 Status TableFile::setSingle(uint32_t key_hash_val,
                             const Record& rec,
                             uint64_t& offset_out,
-                            bool set_as_it_is)
+                            bool set_as_it_is,
+                            bool is_last_level)
 {
     fdb_doc doc;
     fdb_status fs;
@@ -850,7 +880,23 @@ Status TableFile::setSingle(uint32_t key_hash_val,
     doc.seqnum = rec.seqNum;
     doc.flags = FDB_CUSTOM_SEQNUM;
 
-    fs = fdb_set(kvs_db, &doc);
+    bool deletion_executed = false;
+    if ( db_config->purgeDeletedDocImmediately &&
+         tableInfo &&
+         tableInfo->level &&
+         is_last_level ) {
+        // Immediate purging option,
+        // only for the bottom-most non-zero level.
+        InternalMeta i_meta_from_rec;
+        readInternalMeta(rec.meta, i_meta_from_rec);
+        if (i_meta_from_rec.isTombstone) {
+            fs = fdb_del(kvs_db, &doc);
+            deletion_executed = true;
+        }
+    }
+    if (!deletion_executed) {
+        fs = fdb_set(kvs_db, &doc);
+    }
     if (fs != FDB_RESULT_SUCCESS) {
         return Status::FDB_SET_FAIL;
     }

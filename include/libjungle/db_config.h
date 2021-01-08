@@ -112,6 +112,7 @@ public:
         , readOnly(false)
         , preFlushDirtyInterval_sec(5)
         , numExpectedUserThreads(8)
+        , purgeDeletedDocImmediately(true)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -452,6 +453,13 @@ public:
      * performance and resource usage.
      */
     uint32_t numExpectedUserThreads;
+
+    /**
+     * If `true`, deleted records will purged as soon as it
+     * is merged into the bottom-most level. After that,
+     * its meta data will not be retrieved even with `meta_only` flag.
+     */
+    bool purgeDeletedDocImmediately;
 };
 
 class GlobalConfig {

@@ -371,7 +371,8 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
                             TableInfo* victim_table,
                             size_t level)
 {
-    if (level == 0 || level >= mani->getNumLevels()) return Status::INVALID_LEVEL;
+    size_t num_levels = mani->getNumLevels();
+    if (level == 0 || level >= num_levels) return Status::INVALID_LEVEL;
     if ( victim_table &&
          victim_table->level != level ) return Status::INVALID_PARAMETERS;
 
@@ -459,7 +460,8 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
 
         uint32_t key_hash_val = getMurmurHash32(rec_out.kv.key);;
         uint64_t offset_out = 0; // not used.
-        target_table->file->setSingle(key_hash_val, rec_out, offset_out);
+        target_table->file->setSingle(key_hash_val, rec_out, offset_out,
+                                      false, level + 1 == num_levels);
         total_count++;
     } while (itr->next().ok());
     itr->close();

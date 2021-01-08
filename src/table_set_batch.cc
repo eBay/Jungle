@@ -63,6 +63,10 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
     DBMgr* mgr = DBMgr::getWithoutInit();
     DebugParams d_params = mgr->getDebugParams();
 
+    size_t num_levels = mani->getNumLevels();
+    size_t dst_level = (dst_file && dst_file->getTableInfo()) ?
+                       dst_file->getTableInfo()->level : 0;
+
     const GlobalConfig* global_config = mgr->getGlobalConfig();
     const GlobalConfig::CompactionThrottlingOptions& t_opt =
         global_config->ctOpt;
@@ -103,7 +107,8 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
         //   Since `rec_out` from `getByOffset` contains raw meta and
         //   compressed value (if enabled), we should skip processing
         //   meta and compression.
-        dst_file->setSingle(key_hash_val, rec_out, offset_out, true);
+        dst_file->setSingle(key_hash_val, rec_out, offset_out,
+                            true, dst_level + 1 == num_levels);
 
         if (d_params.compactionItrScanDelayUs) {
             // If debug parameter is given, sleep here.

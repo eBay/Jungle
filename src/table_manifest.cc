@@ -543,6 +543,8 @@ Status TableManifest::getTablesPoint(const size_t level,
             // If `hash_len` is given, use prefix only.
             SizedBuf data_to_hash(hash_len, key.data);
             target_hash = getMurmurHash(data_to_hash, target_hash);
+        } else {
+            target_hash = getMurmurHash(key, target_hash);
         }
         return getTablesByHash(l_info, target_hash, tables_out);
 
