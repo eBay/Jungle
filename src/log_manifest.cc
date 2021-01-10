@@ -783,7 +783,7 @@ Status LogManifest::removeLogFile(uint64_t log_num) {
     skiplist_wait_for_free(&info->snode);
 
     skiplist_erase_node(&logFilesBySeq, &info->snodeBySeq);
-    skiplist_wait_for_free(&info->snode);
+    skiplist_wait_for_free(&info->snodeBySeq);
 
     return Status();
 }
