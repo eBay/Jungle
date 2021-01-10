@@ -113,6 +113,7 @@ fdb_config TableFile::FdbHandle::getFdbSettings(const DBConfig* db_config) {
         // Direct-IO mode.
         config.do_not_cache_doc_blocks = false;
         config.durability_opt = FDB_DRB_ODIRECT;
+        config.num_blocks_readahead = db_config->directIoOpt.readaheadSize / 4096;
     }
 
     // Disable auto compaction,
