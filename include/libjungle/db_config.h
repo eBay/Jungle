@@ -92,6 +92,8 @@ public:
         , compactionCbFunc(nullptr)
         , allowLogging(true)
         , throttlingThreshold(10000)
+        , throttlingNumLogFilesSoft(16)
+        , throttlingNumLogFilesHard(128)
         , bulkLoading(false)
         , numL0Partitions(4)
         , minNumTablesPerLevel(8)
@@ -215,9 +217,21 @@ public:
     bool allowLogging;
 
     /**
-     * Minimum number of records for triggering write throttling.
+     * Minimum number of flushed records for triggering write throttling.
      */
     uint32_t throttlingThreshold;
+
+    /**
+     * Write throttling will be enabled only if the current number of
+     * log files is greater than this number.
+     */
+    uint32_t throttlingNumLogFilesSoft;
+
+    /**
+     * If the current number of log files is greater than this number,
+     * Jungle will do an extreme throttling which may cause write stalls.
+     */
+    uint32_t throttlingNumLogFilesHard;
 
     /**
      * Bulk loading mode.
