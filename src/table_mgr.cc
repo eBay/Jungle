@@ -95,6 +95,10 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
     } else {
         _log_info(myLog, "auto compaction is disabled");
     }
+    if (db_config->directIoOpt.enabled) {
+        _log_info(myLog, "direct-IO with readahead %zu bytes",
+                  db_config->directIoOpt.readaheadSize);
+    }
     if (db_config->compactionCbFunc) {
         _log_info(myLog, "compaction callback function is given by user");
     }

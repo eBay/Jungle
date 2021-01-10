@@ -354,6 +354,7 @@ public:
             : enabled(false)
             , bufferSize(16384)
             , alignSize(512)
+            , readaheadSize(65536)
             {}
 
         /**
@@ -371,6 +372,12 @@ public:
          * The alignment size of memory buffer for direct-IO.
          */
         size_t alignSize;
+
+        /**
+         * The amount of read-ahead in bytes.
+         * Disabled if zero.
+         */
+        size_t readaheadSize;
     };
 
     /**
