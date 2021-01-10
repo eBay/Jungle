@@ -25,8 +25,14 @@ limitations under the License.
 
 namespace jungle {
 
+void TableFile::releaseDstHandle(void* void_handle) {
+    FdbHandle* handle = (FdbHandle*)void_handle;
+    delete handle;
+}
+
 Status TableFile::compactTo(const std::string& dst_filename,
-                            const CompactOptions& options)
+                            const CompactOptions& options,
+                            void*& dst_handle_out)
 {
     Status s;
     const DBConfig* db_config = tableMgr->getDbConfig();
@@ -36,7 +42,8 @@ Status TableFile::compactTo(const std::string& dst_filename,
 
     s = compactToManully( compact_handle,
                           dst_filename,
-                          options );
+                          options,
+                          dst_handle_out );
 
     delete compact_handle;
     return s;
@@ -78,7 +85,8 @@ bool TableFile::isFdbDocTombstone(fdb_doc* doc)
 
 Status TableFile::compactToManully(FdbHandle* compact_handle,
                                    const std::string& dst_filename,
-                                   const CompactOptions& options)
+                                   const CompactOptions& options,
+                                   void*& dst_handle_out)
 {
     _log_info(myLog, "doing manual compaction");
     Timer tt;
@@ -94,7 +102,8 @@ Status TableFile::compactToManully(FdbHandle* compact_handle,
     dst_opt.minBlockReuseFileSize = std::numeric_limits<uint64_t>::max();
 
     FdbHandle* dst_handle = new FdbHandle(this, &local_config, dst_opt);
-    GcDelete<FdbHandle*> gc_dst(dst_handle);
+    dst_handle_out = dst_handle;
+    //GcDelete<FdbHandle*> gc_dst(dst_handle);
 
     EP( openFdbHandle(&local_config, dst_filename, dst_handle) );
 
