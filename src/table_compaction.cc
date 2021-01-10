@@ -569,6 +569,8 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
                level, opt.prefixNum, local_victim->number,
                local_victim->minKey.toReadableString().c_str() );
 
+    void* dst_handle = nullptr;
+
    try {
     if (level == 1) numL1Compactions.fetch_add(1);
 
@@ -589,7 +591,11 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
         opt.fOps->remove(dst_filename);
     }
 
-    TC( local_victim->file->compactTo(dst_filename, options) );
+    // WARNING:
+    //   The handle of the destination file should be cloased
+    //   AFTER the file is officially opened by the manifest.
+    //   Otherwise, the cached block will be purged and re-loaded.
+    TC( local_victim->file->compactTo(dst_filename, options, dst_handle) );
 
     // Open newly compacted file, and add it to manifest.
     TableFile* newly_compacted_file = new TableFile(this);
@@ -602,6 +608,9 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
     uint64_t new_file_last_seqnum = 0;
     newly_compacted_file->getLatestSnapMarker(new_file_last_seqnum);
     newly_compacted_file->addCheckpoint(0, new_file_last_seqnum);
+
+    // Close the destination handle.
+    local_victim->file->releaseDstHandle(dst_handle);
 
     {   // Remove source table file.
         std::lock_guard<std::mutex> l(mani->getLock());
@@ -621,6 +630,8 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
     return Status::OK;
 
    } catch (Status s) { // ------------------------------------
+    // Close the destination handle.
+    local_victim->file->releaseDstHandle(dst_handle);
 
     // WARNING: Ditto.
     if (!victim_table) local_victim->done();
@@ -816,7 +827,9 @@ Status TableMgr::compactL0(const CompactOptions& options,
 
         } else {
             // 2) L0-only mode: only happens at the beginning.
-            s = origin_table->file->compactTo(dst_filename, options);
+            void* dst_handle = nullptr;
+            s = origin_table->file->compactTo(dst_filename, options, dst_handle);
+            origin_table->file->releaseDstHandle(dst_handle);
         }
         if (!s) throw s;
     }

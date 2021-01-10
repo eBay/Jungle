@@ -159,7 +159,10 @@ public:
     bool isFdbDocTombstone(fdb_doc* doc);
 
     Status compactTo(const std::string& dst_filename,
-                     const CompactOptions& options);
+                     const CompactOptions& options,
+                     void*& dst_handle_out);
+
+    void releaseDstHandle(void* void_handle);
 
     Status mergeCompactTo(const std::string& file_to_merge,
                           const std::string& dst_filename,
@@ -355,7 +358,8 @@ private:
 
     Status compactToManully(FdbHandle* compact_handle,
                             const std::string& dst_filename,
-                            const CompactOptions& options);
+                            const CompactOptions& options,
+                            void*& dst_handle_out);
 
 // === VARIABLES
     // File name.
