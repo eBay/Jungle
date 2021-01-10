@@ -254,9 +254,20 @@ Status TableManifest::store(bool call_fsync) {
         // | Table entry,           ...
         // +--- M times
         LevelInfo* l_info = levels[ii];
-        ss.putU32(l_info->numTables.load(MOR));
+
+        // WARNING:
+        //   `l_info->numTables` may not match the number of entries in
+        //   `l_info->tables`, hence it should be overwritten if the
+        //   mismatch is detected.
+        size_t num_tables = l_info->numTables.load(MOR);
+        size_t pos_num_tables = ss.pos();
+        ss.putU32(num_tables);
+
+        size_t num_tables_counted = 0;
         skiplist_node* cursor = skiplist_begin(l_info->tables);
         while (cursor) {
+            num_tables_counted++;
+
             //   << Table entry format >>
             // Table number,                        8 bytes
             // Table min key length (L),            4 bytes
@@ -292,6 +303,17 @@ Status TableManifest::store(bool call_fsync) {
             skiplist_release_node(&t_info->snode);
         }
         if (cursor) skiplist_release_node(cursor);
+
+        if (num_tables_counted != num_tables) {
+            // Adjust and overwrite.
+            _log_info(myLog, "mismatch on the number of tables detected at lv %zu: "
+                      "manifest %zu, actual %zu, will adjust it",
+                      ii, num_tables, num_tables_counted);
+            size_t cur_pos = ss.pos();
+            ss.pos(pos_num_tables);
+            ss.putU32(num_tables_counted);
+            ss.pos(cur_pos);
+        }
     }
 
     // Footer.
