@@ -109,6 +109,7 @@ fdb_config TableFile::FdbHandle::getFdbSettings(const DBConfig* db_config) {
         //   due to unnecessary doc block caching that will not be read again.
         //   We should disable caching doc block.
         config.do_not_cache_doc_blocks = true;
+        config.num_blocks_readahead = 0;
     } else {
         // Direct-IO mode.
         config.do_not_cache_doc_blocks = false;

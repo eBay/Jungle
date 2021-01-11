@@ -1408,11 +1408,13 @@ void LogMgr::adjustThrottling(uint64_t num_records_flushed,
     }
     double slowest_speed = getSlowestMergeRate(false);
 
+    const DBConfig* db_config = getDbConfig();
     size_t num_log_files = getNumLogFiles();
     _log_info( myLog, "numFilesLimit %zu, num log files %zu, "
                "num records flushed %zu, num set records %zd, "
                "incoming rate %.1f iops, flush rate %.1f iops, "
-               "slowest rate %.1f iops, last flush interval %zu ms",
+               "slowest rate %.1f iops, last flush interval %zu ms, "
+               "num log files limit soft %zu hard %zu",
                options.numFilesLimit,
                num_log_files,
                num_records_flushed,
@@ -1420,17 +1422,20 @@ void LogMgr::adjustThrottling(uint64_t num_records_flushed,
                incoming_rate,
                log_flush_rate,
                slowest_speed,
-               lastFlushIntervalMs.load() );
+               lastFlushIntervalMs.load(),
+               db_config->throttlingNumLogFilesSoft,
+               db_config->throttlingNumLogFilesHard );
     bool enable_throttling = false;
     bool too_many_logs = false;
 
-    if (num_log_files > 128) {
+    if (num_log_files > db_config->throttlingNumLogFilesHard) {
         enable_throttling = true;
         too_many_logs = true;
     }
 
-    if ( slowest_speed > 0 &&
-         num_records_flushed > getDbConfig()->throttlingThreshold &&
+    if ( num_log_files > db_config->throttlingNumLogFilesSoft &&
+         slowest_speed > 0 &&
+         num_records_flushed > db_config->throttlingThreshold &&
          incoming_rate > slowest_speed ) {
         enable_throttling = true;
     }

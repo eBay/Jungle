@@ -140,6 +140,9 @@ int JungleAdapter::open(const std::string& db_file,
     TEST_CUSTOM_DB_CONFIG(config);
     config.keyLenLimitForHash = 16;
 
+    //config.throttlingNumLogFilesSoft = 128;
+    //config.throttlingNumLogFilesHard = 512;
+
     config.compactionFactor = 300;
     _jint(config.compactionFactor, configObj, "compaction_factor");
 
@@ -162,6 +165,9 @@ int JungleAdapter::open(const std::string& db_file,
     bool direct_io = false;
     _jbool(direct_io, configObj, "direct_io");
     config.directIoOpt.enabled = direct_io;
+    if (direct_io) {
+        config.directIoOpt.readaheadSize = 64 * 1024;
+    }
 
     /*
     config.lookupBoosterLimit_mb = { (uint32_t)cache_size_mb / 12,
