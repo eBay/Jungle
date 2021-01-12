@@ -185,36 +185,20 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
                   victim_stats.numKvs);
     }
 
-    SizedBuf empty_key;
-    itr = new TableFile::Iterator();
-    TC( itr->init(nullptr, local_victim->file, empty_key, empty_key) );
-
     std::vector<uint64_t> offsets;
     // Reserve 10% more headroom, just in case.
     offsets.reserve(victim_stats.approxDocCount * 11 / 10);
 
     Timer throttling_timer(t_opt.resolution_ms);
 
-    // Initial scan to get
-    //   1) number of files after split, and
-    //   2) min keys for each new file.
-    do {
-        if (!isCompactionAllowed()) {
-            throw Status(Status::COMPACTION_CANCELLED);
-        }
-
-        Record rec_out;
-        Record::Holder h_rec_out(rec_out);
-        size_t value_size_out = 0;
-        uint64_t offset_out = 0;
-        s = itr->getMeta(rec_out, value_size_out, offset_out);
-        if (!s) break;
-
-        offsets.push_back(offset_out);
+    auto update_next_table_info = [&](const Record& cur_rec,
+                                      uint64_t cur_offset,
+                                      uint64_t cur_valuesize) {
+        offsets.push_back(cur_offset);
         uint64_t cur_index = offsets.size() - 1;
 
         if ( next_table &&
-             rec_out.kv.key >= next_table->minKey ) {
+             cur_rec.kv.key >= next_table->minKey ) {
             // New table.
             cur_group = new RecGroupItr( next_table->minKey,
                                          cur_index,
@@ -226,7 +210,7 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
             // Skip tables whose range is not overlapping.
             while (t_itr != tables.end()) {
                 TableInfo* tt = *t_itr;
-                if (tt->minKey <= rec_out.kv.key) {
+                if (tt->minKey <= cur_rec.kv.key) {
                     cur_group->table = tt;
                 } else {
                     break;
@@ -250,10 +234,10 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
                 _log_info( myLog, "next table changed to %zu, %s, cur rec %s",
                            next_table->number,
                            next_table->minKey.toReadableString().c_str(),
-                           rec_out.kv.key.toReadableString().c_str() );
+                           cur_rec.kv.key.toReadableString().c_str() );
             } else {
                 _log_info( myLog, "next table changed to NULL, cur rec %s",
-                           rec_out.kv.key.toReadableString().c_str() );
+                           cur_rec.kv.key.toReadableString().c_str() );
             }
 
         } else if ( acc_size > TABLE_LIMIT ||
@@ -263,17 +247,17 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
             // move to a new table that is not in `tables`.
             //
             // BUT, ONLY WHEN THE KEY IS BIGGER THAN THE LAST TABLE'S MAX KEY.
-            if (rec_out.kv.key > max_key_table) {
+            if (cur_rec.kv.key > max_key_table) {
                 _log_info( myLog, "rec key %s is greater than max table key %s, "
                            "urgent split at level %zu, acc size %zu, "
                            "acc records %zu, limit %zu",
-                           rec_out.kv.key.toReadableString().c_str(),
+                           cur_rec.kv.key.toReadableString().c_str(),
                            max_key_table.toReadableString().c_str(),
                            level + 1,
                            acc_size,
                            acc_records,
                            TABLE_LIMIT );
-                cur_group = new RecGroupItr( rec_out.kv.key,
+                cur_group = new RecGroupItr( cur_rec.kv.key,
                                              cur_index,
                                              nullptr);
                 new_tables.push_back(cur_group);
@@ -283,7 +267,9 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
             // We SHOULD NOT move table cursor (`t_itr`) here.
         }
 
-        acc_size += (rec_out.size() + value_size_out + APPROX_META_SIZE);
+        // WARNING:
+        //   If `fastIndexScan` option is on, `acc_size` is meaningless.
+        acc_size += (cur_rec.size() + cur_valuesize + APPROX_META_SIZE);
         acc_records++;
         num_records_read++;
 
@@ -294,10 +280,65 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
 
         // Do throttling, if enabled.
         TableMgr::doCompactionThrottling(t_opt, throttling_timer);
+    };
 
-    } while (itr->next().ok());
-    itr->close();
-    DELETE(itr);
+    SizedBuf empty_key;
+    auto it_cb = [&](const TableFile::IndexTraversalParams& params) ->
+                 TableFile::IndexTraversalDecision {
+        Record cur_rec;
+        size_t value_size = 0;
+        bool need_to_free = false;
+        GcFunc gc{[&](){ if (need_to_free) cur_rec.free(); }};
+        cur_rec.kv.key = params.key;
+
+        // Check if `params.key` is prefix of `next_table->minKey`.
+        if ( next_table &&
+             params.key.size < next_table->minKey.size ) {
+            SizedBuf tmp(params.key.size, next_table->minKey.data);
+            if (SizedBuf::cmp(params.key, tmp) == 0) {
+                // It is prefix, should read the whole record.
+                local_victim->file->getByOffset(nullptr, params.offset, cur_rec);
+                value_size = cur_rec.kv.value.size;
+                need_to_free = true;
+            }
+        }
+        update_next_table_info(cur_rec, params.offset, value_size);
+
+        return TableFile::IndexTraversalDecision::NEXT;
+    };
+
+    if (db_config->fastIndexScan) {
+        // Fast scanning by index traversal.
+        _log_info(myLog, "do fast scan by index traversal");
+        local_victim->file->traverseIndex(nullptr, empty_key, it_cb);
+
+    } else {
+        // Normal scanning by iterator.
+        _log_info(myLog, "do normal scan by iteration");
+        itr = new TableFile::Iterator();
+        TC( itr->init(nullptr, local_victim->file, empty_key, empty_key) );
+
+        // Initial scan to get
+        //   1) number of files after split, and
+        //   2) min keys for each new file.
+        do {
+            if (!isCompactionAllowed()) {
+                throw Status(Status::COMPACTION_CANCELLED);
+            }
+
+            Record rec_out;
+            Record::Holder h_rec_out(rec_out);
+            size_t value_size_out = 0;
+            uint64_t offset_out = 0;
+            s = itr->getMeta(rec_out, value_size_out, offset_out);
+            if (!s) break;
+
+            update_next_table_info(rec_out, offset_out, value_size_out);
+
+        } while (itr->next().ok());
+        itr->close();
+        DELETE(itr);
+    }
 
     uint64_t elapsed_us = std::max( tt.getUs(), (uint64_t)1 );
     double scan_rate = (double)num_records_read * 1000000 / elapsed_us;

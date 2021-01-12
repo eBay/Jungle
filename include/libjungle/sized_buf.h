@@ -416,7 +416,7 @@ public:
      *
      * @return String instance.
      */
-    std::string toString() {
+    std::string toString() const {
         return std::string((const char*)data, size);
     }
 

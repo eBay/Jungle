@@ -144,6 +144,30 @@ public:
                      const SizedBuf& prefix,
                      SearchCbFunc cb_func);
 
+    enum IndexTraversalDecision : int {
+        /**
+         * Continue traversal.
+         */
+        NEXT = 0,
+
+        /**
+         * Stop traversal.
+         */
+        STOP = 1,
+    };
+
+    struct IndexTraversalParams {
+        SizedBuf key;
+        uint64_t offset;
+    };
+
+    using IndexTraversalCbFunc =
+        std::function< IndexTraversalDecision(const IndexTraversalParams&) >;
+
+    Status traverseIndex(DB* snap_handle,
+                         const SizedBuf& start_key,
+                         IndexTraversalCbFunc cb_func);
+
     Status getByOffset(DB* snap_handle,
                        uint64_t offset,
                        Record& rec_out);
@@ -360,6 +384,11 @@ private:
                             const std::string& dst_filename,
                             const CompactOptions& options,
                             void*& dst_handle_out);
+
+    Status compactToManullyFastScan(FdbHandle* compact_handle,
+                                    const std::string& dst_filename,
+                                    const CompactOptions& options,
+                                    void*& dst_handle_out);
 
 // === VARIABLES
     // File name.
