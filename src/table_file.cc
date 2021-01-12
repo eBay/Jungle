@@ -1422,6 +1422,47 @@ Status TableFile::getPrefix(DB* snap_handle,
     return Status::OK;
 }
 
+fdb_index_traversal_decision cb_fdb_index_traversal( fdb_kvs_handle *fhandle,
+                                                     void* key,
+                                                     size_t keylen,
+                                                     uint64_t offset,
+                                                     void *ctx )
+{
+    TableFile::IndexTraversalCbFunc* cb_func = (TableFile::IndexTraversalCbFunc*)ctx;
+    TableFile::IndexTraversalParams params;
+    params.key = SizedBuf(keylen, key);
+    params.offset = offset;
+    TableFile::IndexTraversalDecision dec = (*cb_func)(params);
+    if (dec == TableFile::IndexTraversalDecision::STOP) {
+        return FDB_IT_STOP;
+    }
+    return FDB_IT_NEXT;
+}
+
+Status TableFile::traverseIndex(DB* snap_handle,
+                                const SizedBuf& start_key,
+                                IndexTraversalCbFunc cb_func)
+{
+    FdbHandleGuard g(this, snap_handle ? nullptr: getIdleHandle());
+    fdb_kvs_handle* kvs_db = nullptr;
+    if (snap_handle) {
+        mGuard l(snapHandlesLock);
+        auto entry = snapHandles.find(snap_handle);
+        if (entry == snapHandles.end()) return Status::SNAPSHOT_NOT_FOUND;
+        kvs_db = entry->second;
+    } else {
+        kvs_db = g.handle->db;
+    }
+
+    fdb_traverse_index( kvs_db,
+                        start_key.data,
+                        start_key.size,
+                        cb_fdb_index_traversal,
+                        (void*)&cb_func );
+
+    return Status::OK;
+}
+
 Status TableFile::decompressValue(DB* parent_db,
                                   const DBConfig* db_config,
                                   Record& rec_io,

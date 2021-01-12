@@ -106,13 +106,7 @@ int JungleAdapter::open(const std::string& db_file,
 
     jungle::GlobalConfig g_config;
     g_config.numFlusherThreads = 1;
-    //g_config.flusherSleepDuration_ms = 5000;
-    uint64_t wal_size_mb = 256;
-    _jint(wal_size_mb, configObj, "wal_size_mb");
-    g_config.flusherMinRecordsToTrigger =
-        bench_config.valueLen.median
-        ? wal_size_mb * 1024 * 1024 / bench_config.valueLen.median
-        : 65536;
+    _jint(g_config.flusherMinRecordsToTrigger, configObj, "min_records_to_flush");
 
     uint64_t cache_size_mb = 4096;
     _jint(cache_size_mb, configObj, "cache_size_mb");
@@ -140,8 +134,8 @@ int JungleAdapter::open(const std::string& db_file,
     TEST_CUSTOM_DB_CONFIG(config);
     config.keyLenLimitForHash = 16;
 
-    //config.throttlingNumLogFilesSoft = 128;
-    //config.throttlingNumLogFilesHard = 512;
+    _jint(config.throttlingNumLogFilesSoft, configObj, "throttling_num_log_files_soft");
+    _jint(config.throttlingNumLogFilesHard, configObj, "throttling_num_log_files_hard");
 
     config.compactionFactor = 300;
     _jint(config.compactionFactor, configObj, "compaction_factor");
@@ -153,6 +147,12 @@ int JungleAdapter::open(const std::string& db_file,
     config.maxBlockReuseCycle = 100;
 
     config.nextLevelExtension = true;
+    _jbool(config.nextLevelExtension, configObj, "next_level_extension");
+
+    _jint(config.maxLogFileSize, configObj, "log_file_size");
+
+    config.fastIndexScan = true;
+    _jbool(config.fastIndexScan, configObj, "fast_index_scan");
 
     uint64_t table_size_mb = 1024;
     _jint(table_size_mb, configObj, "l0_table_size_mb");

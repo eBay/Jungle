@@ -42,9 +42,10 @@
   ],
   "db_configs": {
     "cache_size_mb": 1024,
-    "wal_size_mb": 64,
+    "min_records_to_flush": 65536,
     "compaction_factor": 240,
     "block_reuse_factor": 0,
+    "log_file_size": 4194304,
     "l0_table_size_mb": 1024,
     "l1_table_size_mb": 2560,
     "l1_size_mb": 1048576,

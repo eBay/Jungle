@@ -2773,6 +2773,85 @@ int immediate_purging_test() {
     return 0;
 }
 
+int compaction_by_fast_scan_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::DB* db;
+    jungle::Status s;
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.purgeDeletedDocImmediately = false;
+    config.fastIndexScan = true;
+    config.minFileSizeToCompact = 1024;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    for (size_t ii = 0; ii < 10000; ++ii) {
+        jungle::Record rec;
+        std::string key_str = "key" + TestSuite::lzStr(5, ii);
+        std::string meta_str = "meta" + TestSuite::lzStr(5, ii);
+        std::string value_str = "value" + TestSuite::lzStr(5, ii);
+        rec.kv.key = jungle::SizedBuf(key_str);
+        rec.kv.value = jungle::SizedBuf(value_str);
+        rec.meta = jungle::SizedBuf(meta_str);
+        CHK_Z( db->setRecordByKey(rec) );
+    }
+
+    CHK_Z( db->sync(false) );
+    CHK_Z( db->flushLogs() );
+    for (size_t ii = 0; ii < 4; ++ii) {
+        CHK_Z( db->compactL0(jungle::CompactOptions(), ii) );
+    }
+
+    auto verify_func = [&](bool after_deletion) -> int {
+        for (size_t ii = 0; ii < 10000; ++ii) {
+            TestSuite::setInfo("ii == %zu", ii);
+            jungle::Record rec;
+            std::string key_str = "key" + TestSuite::lzStr(5, ii);
+            std::string meta_str = "meta" + TestSuite::lzStr(5, ii);
+            std::string value_str = "value" + TestSuite::lzStr(5, ii);
+            jungle::Record rec_out;
+            jungle::Record::Holder h_rec_out(rec_out);
+            s = db->getRecordByKey(jungle::SizedBuf(key_str), rec_out);
+            if (after_deletion && ii % 2 == 0) {
+                CHK_GT(0, s);
+            } else {
+                CHK_Z(s);
+            }
+        }
+        return 0;
+    };
+    CHK_Z( verify_func(false) );
+
+    for (size_t ii = 0; ii < 10000; ii += 2) {
+        jungle::Record rec;
+        std::string key_str = "key" + TestSuite::lzStr(5, ii);
+        CHK_Z( db->del( jungle::SizedBuf(key_str) ) );
+    }
+    CHK_Z( verify_func(true) );
+
+    CHK_Z( db->sync(false) );
+    CHK_Z( db->flushLogs() );
+    for (size_t ii = 0; ii < 4; ++ii) {
+        CHK_Z( db->compactL0(jungle::CompactOptions(), ii) );
+    }
+    CHK_Z( verify_func(true) );
+
+    for (size_t ii = 0; ii < 6; ++ii) {
+        TestSuite::setInfo("ii == %zu", ii);
+        CHK_Z( db->compactInplace(jungle::CompactOptions(), 1) );
+    }
+    CHK_Z( verify_func(true) );
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -2825,6 +2904,7 @@ int main(int argc, char** argv) {
               get_by_prefix_test, TestRange<size_t>( {0, 8, 16} ));
     ts.doTest("kmv get memory test", kmv_get_memory_test);
     ts.doTest("immediate purging test", immediate_purging_test);
+    ts.doTest("compaction by fast scan test", compaction_by_fast_scan_test);
 
     return 0;
 }

@@ -83,7 +83,8 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
         _log_info( myLog, "compaction factor %u, reuse factor %zu, "
                    "num writes to compact %zu, "
                    "min file size %zu, cycle at least %u at most %u, "
-                   "tombstones: %s",
+                   "tombstones: %s, fast index scan: %s, "
+                   "num log files for throttling limit %zu - %zu",
                    db_config->compactionFactor,
                    db_config->blockReuseFactor,
                    db_config->numWritesToCompact,
@@ -91,7 +92,11 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
                    db_config->minBlockReuseCycleToCompact,
                    db_config->maxBlockReuseCycle,
                    db_config->purgeDeletedDocImmediately
-                   ? "purge immediately" : "keep until compaction");
+                   ? "purge immediately" : "keep until compaction",
+                   db_config->fastIndexScan
+                   ? "ON" : "OFF",
+                   db_config->throttlingNumLogFilesSoft,
+                   db_config->throttlingNumLogFilesHard );
     } else {
         _log_info(myLog, "auto compaction is disabled");
     }

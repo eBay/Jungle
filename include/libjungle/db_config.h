@@ -115,6 +115,7 @@ public:
         , preFlushDirtyInterval_sec(5)
         , numExpectedUserThreads(8)
         , purgeDeletedDocImmediately(true)
+        , fastIndexScan(false)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -481,6 +482,13 @@ public:
      * its meta data will not be retrieved even with `meta_only` flag.
      */
     bool purgeDeletedDocImmediately;
+
+    /**
+     * [EXPERIMENTAL]
+     * If `true`, do fast/compact index scan during compaction,
+     * instead of iteration.
+     */
+    bool fastIndexScan;
 };
 
 class GlobalConfig {
