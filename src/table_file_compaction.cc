@@ -296,7 +296,7 @@ Status TableFile::compactToManullyFastScan(FdbHandle* compact_handle,
         return TableFile::IndexTraversalDecision::NEXT;
     };
     traverseIndex(nullptr, SizedBuf(), it_cb);
-    uint64_t fs_us = tt.getUs();
+    uint64_t fs_us = std::max( tt.getUs(), (uint64_t)1 );
     _log_info( myLog, "fast scanning took %zu us, %.1f iops",
                fs_us, offsets.size() * 1000000.0 / fs_us );
 
