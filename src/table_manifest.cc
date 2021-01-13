@@ -735,6 +735,8 @@ Status TableManifest::getTablesPrefix(const size_t level,
                      SizedBuf::cmp( SizedBuf(prefix.size, t_info->minKey.data),
                                     prefix ) != 0 ) {
                     // Prefix doesn't match, don't need to search next table.
+                    // SHOULD RELEASE SKIPLIST NODE.
+                    skiplist_release_node(cur_next);
                     cur_next = nullptr;
                 }
             }
