@@ -1237,6 +1237,7 @@ Status LogMgr::flush(const FlushOptions& options,
 
     Status s;
     Timer tt;
+    const DBConfig* db_config = getDbConfig();
 
     // Grab all logs and pass them to table manager
     uint64_t ln_from, ln_to, ln_to_original;
@@ -1322,6 +1323,19 @@ Status LogMgr::flush(const FlushOptions& options,
         parentDb->p->flags.seqLoading = increasing_order;
 
         if (records.size()) {
+            if (!increasing_order && db_config->preFlushDirtySize) {
+                auto less_records = [](const Record* ll, const Record* rr) -> bool {
+                    return (ll->kv.key < rr->kv.key);
+                };
+                Timer sort_timer;
+                records.sort(less_records);
+                _log_info(myLog, "sorting %zu records took %zu us",
+                          records.size(), sort_timer.getUs());
+                // FIXME:
+                //   Sorting `records` discards checkpoint info.
+                checkpoints.clear();
+            }
+
             EP( table_mgr->setBatch(records, checkpoints) );
             EP( table_mgr->storeManifest() );
             _log_debug(myLog, "Updated table files.");

@@ -385,11 +385,6 @@ private:
                             const CompactOptions& options,
                             void*& dst_handle_out);
 
-    Status compactToManullyFastScan(FdbHandle* compact_handle,
-                                    const std::string& dst_filename,
-                                    const CompactOptions& options,
-                                    void*& dst_handle_out);
-
 // === VARIABLES
     // File name.
     std::string filename;

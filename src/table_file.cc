@@ -939,6 +939,8 @@ Status TableFile::setBatch(std::list<Record*>& batch,
     size_t num_l0 = tableMgr->getNumL0Partitions();
     size_t set_count = 0;
     size_t del_count = 0;
+    uint64_t total_dirty = 0;
+    uint64_t time_for_flush_us = 0;
 
     for (auto& entry: batch) {
         Record* rec = entry;
@@ -974,8 +976,17 @@ Status TableFile::setBatch(std::list<Record*>& batch,
 
         if (rec->isDel()) del_count++;
         else set_count++;
+        total_dirty += rec->size();
 
         prev_seqnum = rec->seqNum;
+
+        if ( db_config->preFlushDirtySize &&
+             db_config->preFlushDirtySize < total_dirty ) {
+            Timer flush_time;
+            fdb_sync_file(writer->dbFile);
+            total_dirty = 0;
+            time_for_flush_us += flush_time.getUs();
+        }
     }
 
     // Set all remaining (record[n] <= chk) checkpoints.
@@ -999,26 +1010,30 @@ Status TableFile::setBatch(std::list<Record*>& batch,
     if (tableInfo) {
         if (tableInfo->level) {
             _log_( ll, myLog,
-                   "L%zu: file %zu_%zu, set %zu del %zu, %zu us, %zu us",
+                   "L%zu: file %zu_%zu, set %zu del %zu, %zu us, %zu us, %zu us",
                    tableInfo->level,
                    tableMgr->getTableMgrOptions()->prefixNum,
                    myNumber,
-                   set_count, del_count, tt.getUs(), bf_elapsed );
+                   set_count, del_count, tt.getUs(), bf_elapsed,
+                   time_for_flush_us );
         } else {
             _log_( ll, myLog,
-                   "L%zu: hash %zu, file %zu_%zu, set %zu del %zu, %zu us, %zu us",
+                   "L%zu: hash %zu, file %zu_%zu, set %zu del %zu, %zu us, %zu us, "
+                   "%zu us",
                    tableInfo->level,
                    tableInfo->hashNum,
                    tableMgr->getTableMgrOptions()->prefixNum,
                    myNumber,
-                   set_count, del_count, tt.getUs(), bf_elapsed );
+                   set_count, del_count, tt.getUs(), bf_elapsed,
+                   time_for_flush_us );
         }
     } else {
         _log_( ll, myLog,
-               "brand new table: file %zu_%zu, set %zu del %zu, %zu us, %zu us",
+               "brand new table: file %zu_%zu, set %zu del %zu, %zu us, %zu us, %zu us",
                tableMgr->getTableMgrOptions()->prefixNum,
                myNumber,
-               set_count, del_count, tt.getUs(), bf_elapsed );
+               set_count, del_count, tt.getUs(), bf_elapsed,
+               time_for_flush_us );
     }
 
     // Bulk load mode: all done here.
