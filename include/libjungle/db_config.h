@@ -113,6 +113,7 @@ public:
         , maxParallelWritesPerJob(0)
         , readOnly(false)
         , preFlushDirtyInterval_sec(5)
+        , preFlushDirtySize(0)
         , numExpectedUserThreads(8)
         , purgeDeletedDocImmediately(true)
         , fastIndexScan(false)
@@ -401,11 +402,31 @@ public:
     DirectIoOptions directIoOpt;
 
     /**
-     * Interval of flushing dirty data during long-running compaction/split.
-     * If 0, dirty data will be flushed only at the end of the task,
-     * which may cause burst IO and high latency.
+     * Below two options are for flushing dirty data during
+     * long-running compaction or split.
+     *   * Without these options: dirty data will be flushed only once
+     *     at the end of the task.
+     *     - Pros: can minimize the number of disk writes.
+     *     - Cons: may cause high latency of other operations during
+     *             the burst write.
+     *   * With these options: dirty data can be flushed in the
+     *     middle of the task.
+     *     - Pros: can mitigate the high latency issue.
+     *     - Cons: may increase the number of disk writes, and also
+     *             make tasks slower.
+     */
+
+    /**
+     * Periodic flush by time (seconds).
+     * Disabled if zero.
      */
     uint32_t preFlushDirtyInterval_sec;
+
+    /**
+     * Periodic flush by size (bytes).
+     * Disabled if zero.
+     */
+    uint64_t preFlushDirtySize;
 
     /**
      * Type definition for pluggable compression options.

@@ -154,6 +154,8 @@ int JungleAdapter::open(const std::string& db_file,
     config.fastIndexScan = true;
     _jbool(config.fastIndexScan, configObj, "fast_index_scan");
 
+    _jint(config.preFlushDirtySize, configObj, "pre_flush_dirty_size");
+
     uint64_t table_size_mb = 1024;
     _jint(table_size_mb, configObj, "l0_table_size_mb");
     config.maxL0TableSize = table_size_mb * 1024 * 1024;

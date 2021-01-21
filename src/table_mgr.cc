@@ -130,6 +130,10 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
         _log_info( myLog, "ratio: %s", ratio_str.c_str() );
     }
 
+    _log_info( myLog, "pre flush condition %zu sec, %zu bytes",
+               db_config->preFlushDirtyInterval_sec,
+               db_config->preFlushDirtySize );
+
     DBMgr* mgr = DBMgr::getWithoutInit();
     if (mgr) {
         GlobalConfig* g_conf = mgr->getGlobalConfig();

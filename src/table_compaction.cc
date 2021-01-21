@@ -176,13 +176,38 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
         TABLE_LIMIT_NUM = (victim_stats.numKvs / min_num_tables_for_new_level) + 1;
         if (!TABLE_LIMIT_NUM) TABLE_LIMIT_NUM = tmp_backup;
 
-        _log_info(myLog, "table limit is adjusted to %zu and %zu, "
+        _log_info(myLog, "[FIRST L1 WRITE] table limit is adjusted to %zu and %zu, "
                   "num tables %zu, victim WSS %zu, %zu records",
                   TABLE_LIMIT,
                   TABLE_LIMIT_NUM,
                   min_num_tables_for_new_level,
                   victim_stats.workingSetSizeByte,
                   victim_stats.numKvs);
+    }
+
+    if (!TABLE_LIMIT_NUM && tables.size() && db_config->fastIndexScan) {
+        uint64_t dst_total_records = 0;
+        uint64_t dst_total_size = 0;
+        for (TableInfo* ti: tables) {
+            TableStats t_st;
+            ti->file->getStats(t_st);
+            dst_total_records += t_st.numKvs;
+            dst_total_size += t_st.workingSetSizeByte;
+        }
+
+        if (dst_total_records && dst_total_size) {
+            // Adjust limit using the ratio max L1 size : cur average size.
+            TABLE_LIMIT_NUM = dst_total_records / tables.size();
+            TABLE_LIMIT_NUM *= db_config->maxL1TableSize * tables.size();
+            TABLE_LIMIT_NUM /= dst_total_size;
+            _log_info(myLog, "[FAST SCAN] table limit is adjusted to %zu and %zu, "
+                      "num tables %zu, total records %zu, total size %zu",
+                      TABLE_LIMIT,
+                      TABLE_LIMIT_NUM,
+                      tables.size(),
+                      dst_total_records,
+                      dst_total_size);
+        }
     }
 
     std::vector<uint64_t> offsets;

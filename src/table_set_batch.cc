@@ -81,6 +81,9 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
     Timer throttling_timer(t_opt.resolution_ms);
     sync_timer.setDurationMs(db_config->preFlushDirtyInterval_sec * 1000);
 
+    uint64_t total_dirty = 0;
+    uint64_t time_for_flush_us = 0;
+
    try {
     for (uint64_t ii = start_index; ii < start_index + count; ++ii) {
         if (!isCompactionAllowed()) {
@@ -109,6 +112,7 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
         //   meta and compression.
         dst_file->setSingle(key_hash_val, rec_out, offset_out,
                             true, dst_level + 1 == num_levels);
+        total_dirty += rec_out.size();
 
         if (d_params.compactionItrScanDelayUs) {
             // If debug parameter is given, sleep here.
@@ -117,12 +121,17 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
 
         // Periodic flushing to avoid burst disk write & freeze,
         // which have great impact on (user-facing) latency.
-        if (sync_timer.timeout()) {
+        if ( ( db_config->preFlushDirtySize &&
+               db_config->preFlushDirtySize < total_dirty ) ||
+             sync_timer.timeout() ) {
+            Timer flush_time;
             dst_file->sync();
             // Resetting timer should be done after fsync,
             // as it may take long time.
             sync_timer.reset();
             throttling_timer.reset();
+            total_dirty = 0;
+            time_for_flush_us += flush_time.getUs();
         }
 
         // Do throttling, if enabled.
@@ -131,8 +140,8 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
 
     // Final commit, and generate snapshot on it.
     setTableFileItrFlush(dst_file, recs_batch, false);
-    _log_info(myLog, "(end of batch) set total %zu records, %zu us",
-              count, elapsed_timer.getUs());
+    _log_info(myLog, "(end of batch) set total %zu records, %zu us, %zu us for flush",
+              count, elapsed_timer.getUs(), time_for_flush_us);
 
    } catch (Status s) { // -----------------------------------
     _log_err(myLog, "got error: %d", (int)s);

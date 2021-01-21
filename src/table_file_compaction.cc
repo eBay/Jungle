@@ -40,17 +40,10 @@ Status TableFile::compactTo(const std::string& dst_filename,
     FdbHandle* compact_handle = new FdbHandle(this, db_config, myOpt);
     EP( openFdbHandle(db_config, filename, compact_handle) );
 
-    if (db_config->fastIndexScan) {
-        s = compactToManullyFastScan( compact_handle,
-                                      dst_filename,
-                                      options,
-                                      dst_handle_out );
-    } else {
-        s = compactToManully( compact_handle,
-                              dst_filename,
-                              options,
-                              dst_handle_out );
-    }
+    s = compactToManully( compact_handle,
+                          dst_filename,
+                          options,
+                          dst_handle_out );
 
     delete compact_handle;
     return s;
@@ -95,12 +88,16 @@ Status TableFile::compactToManully(FdbHandle* compact_handle,
                                    const CompactOptions& options,
                                    void*& dst_handle_out)
 {
-    _log_info(myLog, "doing manual compaction");
     Timer tt;
     Status s;
 
     bool is_last_level = (tableInfo->level == tableMgr->getNumLevels() - 1);
     DBConfig local_config = *(tableMgr->getDbConfig());
+
+    _log_info(myLog, "doing manual compaction (%s)",
+              local_config.fastIndexScan
+              ? "fast index scan" : "normal iteration");
+
     // Set bulk loading true to set WAL-flush-before-commit.
     local_config.bulkLoading = true;
 
@@ -130,108 +127,174 @@ Status TableFile::compactToManully(FdbHandle* compact_handle,
         dst_bf = new BloomFilter(bf_bitmap_size, 3);
     }
 
+    DBMgr* mgr = DBMgr::getWithoutInit();
+    DebugParams d_params = mgr->getDebugParams();
+
+    const GlobalConfig* global_config = mgr->getGlobalConfig();
+    const GlobalConfig::CompactionThrottlingOptions& t_opt =
+        global_config->ctOpt;
+
+    // Flush block cache for every given second.
+    Timer sync_timer;
+    Timer throttling_timer(t_opt.resolution_ms);
+
+    sync_timer.setDurationMs(local_config.preFlushDirtyInterval_sec * 1000);
+
+    uint64_t total_dirty = 0;
+    uint64_t time_for_flush_us = 0;
+    uint64_t cnt = 0;
+    uint64_t discards = 0;
+    s = Status::OK;
+
+    auto write_to_new_file = [&](fdb_doc* ret_doc) -> bool {
+        // If 1) flag (for not to delete tombstone) is set, OR
+        //    2) LSM / level extension mode AND
+        //       current level is not the last level,
+        // then skip checking whether the given record is tombstone.
+        bool is_tombstone_out = false;
+        bool check_tombstone = true;
+        if (options.preserveTombstone) {
+            check_tombstone = false;
+        }
+        if ( local_config.nextLevelExtension &&
+             !is_last_level ) {
+            check_tombstone = false;
+        }
+        if (check_tombstone) {
+            is_tombstone_out = isFdbDocTombstone(ret_doc);
+        }
+
+        if (is_tombstone_out) {
+            // Tombstone.
+            discards++;
+        } else {
+            // WARNING: SHOULD KEEP THE SAME SEQUENCE NUMBER!
+            ret_doc->flags = FDB_CUSTOM_SEQNUM;
+            fdb_set(dst_handle->db, ret_doc);
+            cnt++;
+            total_dirty += ret_doc->keylen + ret_doc->metalen + ret_doc->bodylen;
+
+            if (dst_bf) {
+                size_t hash_size = ret_doc->keylen;
+                if ( local_config.keyLenLimitForHash &&
+                     hash_size > local_config.keyLenLimitForHash ) {
+                    hash_size = local_config.keyLenLimitForHash;
+                }
+                dst_bf->set(ret_doc->key, hash_size);
+            }
+        }
+
+        free(ret_doc->key);
+        free(ret_doc->meta);
+        free(ret_doc->body);
+
+        if (!tableMgr->isCompactionAllowed()) {
+            s = Status::COMPACTION_CANCELLED;
+            return false;
+        }
+
+        if ( ( local_config.preFlushDirtySize &&
+               local_config.preFlushDirtySize < total_dirty ) ||
+             sync_timer.timeout() ) {
+            // NOTE:
+            //   The purpose of pre-flushing is to reduce burst IO,
+            //   by sacrificing the compaction time, hence making
+            //   it synchronous (blocking call) here.
+            //   If we make this flushing in parallel with compaction,
+            //   it makes the amount of IO (per second) higher again,
+            //   which is against the purpose of pre-flushing.
+            Timer flush_time;
+            fdb_sync_file(dst_handle->dbFile);
+            sync_timer.reset();
+            throttling_timer.reset();
+            total_dirty = 0;
+            time_for_flush_us += flush_time.getUs();
+        }
+
+        if (d_params.compactionDelayUs) {
+            // If debug parameter is given, sleep here.
+            Timer::sleepUs(d_params.compactionDelayUs);
+        }
+
+        // Do throttling, if enabled.
+        TableMgr::doCompactionThrottling(t_opt, throttling_timer);
+        return true;
+    };
+
     fdb_iterator* itr = nullptr;
     fdb_status fs = FDB_RESULT_SUCCESS;
-    fs = fdb_iterator_init( compact_handle->db,
-                            &itr,
-                            nullptr, 0, nullptr, 0,
-                            FDB_ITR_NO_DELETES );
-    if (fs != FDB_RESULT_SUCCESS) return Status::MANUAL_COMPACTION_OPEN_FAILED;
 
-    uint64_t cnt = 0;
-    uint64_t discards = 0;
-    s = Status::OK;
+    if (local_config.fastIndexScan) {
+        // Fast index scan.
+        std::vector<uint64_t> offsets;
+        // Reserve 10% more headroom, just in case.
+        TableStats my_stats;
+        getStats(my_stats);
+        offsets.reserve(my_stats.approxDocCount * 11 / 10);
 
-    DBMgr* mgr = DBMgr::getWithoutInit();
-    DebugParams d_params = mgr->getDebugParams();
+        auto it_cb = [&](const TableFile::IndexTraversalParams& params) ->
+                     TableFile::IndexTraversalDecision {
+            offsets.push_back(params.offset);
+            return TableFile::IndexTraversalDecision::NEXT;
+        };
+        traverseIndex(nullptr, SizedBuf(), it_cb);
+        uint64_t fs_us = std::max( tt.getUs(), (uint64_t)1 );
+        _log_info( myLog, "fast scanning took %zu us, %.1f iops",
+                   fs_us, offsets.size() * 1000000.0 / fs_us );
 
-    const GlobalConfig* global_config = mgr->getGlobalConfig();
-    const GlobalConfig::CompactionThrottlingOptions& t_opt =
-        global_config->ctOpt;
+        // TODO (potential improvement):
+        //   Currently the elems in `offsets` are in a key order.
+        //   Sorting `offsets` and reading docs sequential order
+        //   will be better for performance, but we should keep
+        //   records in memory to write them to the destination
+        //   file in a key order.
 
-    // Flush block cache for every given second.
-    Timer sync_timer;
-    Timer throttling_timer(t_opt.resolution_ms);
+        for (uint64_t cur_offset: offsets) {
+            fdb_doc tmp_doc;
+            memset(&tmp_doc, 0x0, sizeof(tmp_doc));
+            tmp_doc.offset = cur_offset;
 
-    sync_timer.setDurationMs(local_config.preFlushDirtyInterval_sec * 1000);
+            fs = fdb_get_byoffset_raw(compact_handle->db, &tmp_doc);
+            if (fs != FDB_RESULT_SUCCESS) break;
 
-    do {
-        fdb_doc tmp_doc;
-        memset(&tmp_doc, 0x0, sizeof(tmp_doc));
-
-        fdb_doc *ret_doc = &tmp_doc;
-        fs = fdb_iterator_get(itr, &ret_doc);
-        if (fs != FDB_RESULT_SUCCESS) break;
-
-        // If 1) flag (for not to delete tombstone) is set, OR
-        //    2) LSM / level extension mode AND
-        //       current level is not the last level,
-        // then skip checking whether the given record is tombstone.
-        bool is_tombstone_out = false;
-        bool check_tombstone = true;
-        if (options.preserveTombstone) {
-            check_tombstone = false;
-        }
-        if ( local_config.nextLevelExtension &&
-             !is_last_level ) {
-            check_tombstone = false;
-        }
-        if (check_tombstone) {
-            is_tombstone_out = isFdbDocTombstone(ret_doc);
-        }
-
-        if (is_tombstone_out) {
-            // Tombstone.
-            discards++;
-        } else {
-            // WARNING: SHOULD KEEP THE SAME SEQUENCE NUMBER!
-            ret_doc->flags = FDB_CUSTOM_SEQNUM;
-            fdb_set(dst_handle->db, ret_doc);
-            cnt++;
-
-            if (dst_bf) {
-                size_t hash_size = ret_doc->keylen;
-                if ( local_config.keyLenLimitForHash &&
-                     hash_size > local_config.keyLenLimitForHash ) {
-                    hash_size = local_config.keyLenLimitForHash;
-                }
-                dst_bf->set(ret_doc->key, hash_size);
+            if (!write_to_new_file(&tmp_doc)) {
+                break;
             }
-        }
+        };
 
-        free(ret_doc->key);
-        free(ret_doc->meta);
-        free(ret_doc->body);
+    } else {
+        // Normal iteration.
+        fs = fdb_iterator_init( compact_handle->db,
+                                &itr,
+                                nullptr, 0, nullptr, 0,
+                                FDB_ITR_NO_DELETES );
+        if (fs != FDB_RESULT_SUCCESS) return Status::MANUAL_COMPACTION_OPEN_FAILED;
 
-        if (!tableMgr->isCompactionAllowed()) {
-            s = Status::COMPACTION_CANCELLED;
-            break;
-        }
+        do {
+            fdb_doc tmp_doc;
+            memset(&tmp_doc, 0x0, sizeof(tmp_doc));
 
-        if (sync_timer.timeout()) {
-            fdb_sync_file(dst_handle->dbFile);
-            sync_timer.reset();
-            throttling_timer.reset();
-        }
+            fdb_doc *ret_doc = &tmp_doc;
+            fs = fdb_iterator_get(itr, &ret_doc);
+            if (fs != FDB_RESULT_SUCCESS) break;
 
-        if (d_params.compactionDelayUs) {
-            // If debug parameter is given, sleep here.
-            Timer::sleepUs(d_params.compactionDelayUs);
-        }
+            if (!write_to_new_file(ret_doc)) {
+                break;
+            }
 
-        // Do throttling, if enabled.
-        TableMgr::doCompactionThrottling(t_opt, throttling_timer);
-
-    } while (fdb_iterator_next(itr) == FDB_RESULT_SUCCESS);
+        } while (fdb_iterator_next(itr) == FDB_RESULT_SUCCESS);
+    }
 
     uint64_t elapsed_us = std::max( tt.getUs(), (uint64_t)1 );
     uint64_t bf_size = (dst_bf) ? dst_bf->size() : 0;
     _log_info( myLog, "in-place compaction moved %zu live docs, "
-               "%zu tombstones, BF size %zu bytes (%zu bits), %zu us, %.1f iops",
+               "%zu tombstones, BF size %zu bytes (%zu bits), %zu us, %.1f iops, "
+               "%zu us for flushing",
                cnt, discards,
                bf_size / 8, bf_size,
                elapsed_us,
-               (double)(cnt + discards) * 1000000 / elapsed_us );
+               (double)(cnt + discards) * 1000000 / elapsed_us,
+               time_for_flush_us );
 
     // WARNING: Should be done before commit.
     if (dst_bf) {
@@ -240,176 +303,10 @@ Status TableFile::compactToManully(FdbHandle* compact_handle,
     }
     dst_handle->commit();
 
-    fs = fdb_iterator_close(itr);
-    itr = nullptr;
-
-    return s;
-}
-
-Status TableFile::compactToManullyFastScan(FdbHandle* compact_handle,
-                                           const std::string& dst_filename,
-                                           const CompactOptions& options,
-                                           void*& dst_handle_out)
-{
-    _log_info(myLog, "doing manual compaction (with fast scan)");
-    Timer tt;
-    Status s;
-
-    bool is_last_level = (tableInfo->level == tableMgr->getNumLevels() - 1);
-    DBConfig local_config = *(tableMgr->getDbConfig());
-    // Set bulk loading true to set WAL-flush-before-commit.
-    local_config.bulkLoading = true;
-
-    // Block reuse shouldn't happen during compaction.
-    TableFileOptions dst_opt;
-    dst_opt.minBlockReuseFileSize = std::numeric_limits<uint64_t>::max();
-
-    FdbHandle* dst_handle = new FdbHandle(this, &local_config, dst_opt);
-    dst_handle_out = dst_handle;
-    //GcDelete<FdbHandle*> gc_dst(dst_handle);
-
-    EP( openFdbHandle(&local_config, dst_filename, dst_handle) );
-
-    // Create bloom filter for destination file.
-    TableStats my_stats;
-    getStats(my_stats);
-    BloomFilter* dst_bf = nullptr;
-    if ( local_config.bloomFilterBitsPerUnit > 0.0 ) {
-        // Calculate based on WSS.
-        uint64_t bf_bitmap_size = myOpt.bloomFilterSize;
-        if (my_stats.workingSetSizeByte) {
-            bf_bitmap_size = getBfSizeByWss(&local_config, my_stats.workingSetSizeByte);
-        }
-        if (!bf_bitmap_size) {
-            bf_bitmap_size = getBfSizeByLevel(&local_config, tableInfo->level);
-        }
-        dst_bf = new BloomFilter(bf_bitmap_size, 3);
+    if (itr) {
+        fs = fdb_iterator_close(itr);
+        itr = nullptr;
     }
-
-    std::vector<uint64_t> offsets;
-    // Reserve 10% more headroom, just in case.
-    offsets.reserve(my_stats.approxDocCount * 11 / 10);
-
-    auto it_cb = [&](const TableFile::IndexTraversalParams& params) ->
-                 TableFile::IndexTraversalDecision {
-        offsets.push_back(params.offset);
-        return TableFile::IndexTraversalDecision::NEXT;
-    };
-    traverseIndex(nullptr, SizedBuf(), it_cb);
-    uint64_t fs_us = std::max( tt.getUs(), (uint64_t)1 );
-    _log_info( myLog, "fast scanning took %zu us, %.1f iops",
-               fs_us, offsets.size() * 1000000.0 / fs_us );
-
-    uint64_t cnt = 0;
-    uint64_t discards = 0;
-    s = Status::OK;
-
-    DBMgr* mgr = DBMgr::getWithoutInit();
-    DebugParams d_params = mgr->getDebugParams();
-
-    const GlobalConfig* global_config = mgr->getGlobalConfig();
-    const GlobalConfig::CompactionThrottlingOptions& t_opt =
-        global_config->ctOpt;
-
-    // Flush block cache for every given second.
-    Timer sync_timer;
-    Timer throttling_timer(t_opt.resolution_ms);
-
-    sync_timer.setDurationMs(local_config.preFlushDirtyInterval_sec * 1000);
-
-    fdb_status fs;
-    // TODO (potential improvement):
-    //   Currently the elems in `offsets` are in a key order.
-    //   Sorting `offsets` and reading docs sequential order
-    //   will be better for performance, but we should keep
-    //   records in memory to write them to the destination
-    //   file in a key order.
-    for (uint64_t cur_offset: offsets) {
-        fdb_doc tmp_doc;
-        memset(&tmp_doc, 0x0, sizeof(tmp_doc));
-        tmp_doc.offset = cur_offset;
-
-        fs = fdb_get_byoffset_raw(compact_handle->db, &tmp_doc);
-        if (fs != FDB_RESULT_SUCCESS) break;
-
-        fdb_doc *ret_doc = &tmp_doc;
-
-        // If 1) flag (for not to delete tombstone) is set, OR
-        //    2) LSM / level extension mode AND
-        //       current level is not the last level,
-        // then skip checking whether the given record is tombstone.
-        bool is_tombstone_out = false;
-        bool check_tombstone = true;
-        if (options.preserveTombstone) {
-            check_tombstone = false;
-        }
-        if ( local_config.nextLevelExtension &&
-             !is_last_level ) {
-            check_tombstone = false;
-        }
-        if (check_tombstone) {
-            is_tombstone_out = isFdbDocTombstone(ret_doc);
-        }
-
-        if (is_tombstone_out) {
-            // Tombstone.
-            discards++;
-        } else {
-            // WARNING: SHOULD KEEP THE SAME SEQUENCE NUMBER!
-            ret_doc->flags = FDB_CUSTOM_SEQNUM;
-            fdb_set(dst_handle->db, ret_doc);
-            cnt++;
-
-            if (dst_bf) {
-                size_t hash_size = ret_doc->keylen;
-                if ( local_config.keyLenLimitForHash &&
-                     hash_size > local_config.keyLenLimitForHash ) {
-                    hash_size = local_config.keyLenLimitForHash;
-                }
-                dst_bf->set(ret_doc->key, hash_size);
-            }
-        }
-
-        free(ret_doc->key);
-        free(ret_doc->meta);
-        free(ret_doc->body);
-
-        if (!tableMgr->isCompactionAllowed()) {
-            s = Status::COMPACTION_CANCELLED;
-            break;
-        }
-
-        if (sync_timer.timeout()) {
-            fdb_sync_file(dst_handle->dbFile);
-            sync_timer.reset();
-            throttling_timer.reset();
-        }
-
-        if (d_params.compactionDelayUs) {
-            // If debug parameter is given, sleep here.
-            Timer::sleepUs(d_params.compactionDelayUs);
-        }
-
-        // Do throttling, if enabled.
-        TableMgr::doCompactionThrottling(t_opt, throttling_timer);
-
-    };
-
-    uint64_t elapsed_us = std::max( tt.getUs(), (uint64_t)1 );
-    uint64_t bf_size = (dst_bf) ? dst_bf->size() : 0;
-    _log_info( myLog, "in-place compaction moved %zu live docs, "
-               "%zu tombstones, BF size %zu bytes (%zu bits), %zu us, %.1f iops",
-               cnt, discards,
-               bf_size / 8, bf_size,
-               elapsed_us,
-               (double)(cnt + discards) * 1000000 / elapsed_us );
-
-    // WARNING: Should be done before commit.
-    if (dst_bf) {
-        saveBloomFilter(dst_filename + ".bf", dst_bf, true);
-        DELETE(dst_bf);
-    }
-    dst_handle->commit();
 
     return s;
 }
