@@ -149,6 +149,7 @@ public:
         INPLACE = 0x3,
         MERGE = 0x4,
         INPLACE_OLD = 0x5,
+        FIX = 0x6,
     };
 
     Status init(const TableMgrOptions& _options);
@@ -204,6 +205,8 @@ public:
                            uint64_t& wss_out,
                            uint64_t& total_out);
 
+    Status pickTableToFix(size_t level, TableInfo*& victim_table_out);
+
     TableInfo* findLocalVictim(size_t level,
                                TableInfo* given_victim,
                                VictimPolicy policy,
@@ -216,6 +219,10 @@ public:
     Status mergeLevel(const CompactOptions& options,
                       TableInfo* victim_table,
                       size_t level);
+
+    Status fixTable(const CompactOptions& options,
+                    TableInfo* victim_table,
+                    size_t level);
 
     Status compactLevelItr(const CompactOptions& options,
                            TableInfo* victim_table,

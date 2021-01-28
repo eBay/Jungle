@@ -786,7 +786,8 @@ Status TableFile::setSingle(uint32_t key_hash_val,
                             const Record& rec,
                             uint64_t& offset_out,
                             bool set_as_it_is,
-                            bool is_last_level)
+                            bool is_last_level,
+                            bool force_delete)
 {
     fdb_doc doc;
     fdb_status fs;
@@ -883,15 +884,16 @@ Status TableFile::setSingle(uint32_t key_hash_val,
     doc.flags = FDB_CUSTOM_SEQNUM;
 
     bool deletion_executed = false;
-    if ( db_config->purgeDeletedDocImmediately &&
-         tableInfo &&
-         tableInfo->level &&
-         is_last_level ) {
+    if ( ( db_config->purgeDeletedDocImmediately &&
+           tableInfo &&
+           tableInfo->level &&
+           is_last_level ) ||
+         force_delete ) {
         // Immediate purging option,
         // only for the bottom-most non-zero level.
         InternalMeta i_meta_from_rec;
         readInternalMeta(rec.meta, i_meta_from_rec);
-        if (i_meta_from_rec.isTombstone) {
+        if (i_meta_from_rec.isTombstone || force_delete) {
             fs = fdb_del(kvs_db, &doc);
             deletion_executed = true;
         }
@@ -1744,6 +1746,24 @@ Status TableFile::getMaxKey(SizedBuf& max_key_out) {
     TC( itr.get(rec_out) );
 
     rec_out.kv.key.moveTo(max_key_out);
+    return Status();
+
+ } catch (Status s) {
+    return s;
+ }
+}
+
+Status TableFile::getMinKey(SizedBuf& min_key_out) {
+    Status s;
+    TableFile::Iterator itr;
+    EP( itr.init(nullptr, this, SizedBuf(), SizedBuf()) );
+
+ try {
+    Record rec_out;
+    Record::Holder h_rec_out(rec_out);
+    TC( itr.get(rec_out) );
+
+    rec_out.kv.key.moveTo(min_key_out);
     return Status();
 
  } catch (Status s) {

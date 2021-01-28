@@ -317,6 +317,32 @@ Status TableMgr::pickVictimTable(size_t level,
     return Status::OK;
 }
 
+// WARNING:
+//   `victim_table_out` returned by this function
+//   should be released (i.e., done()) by the caller.
+Status TableMgr::pickTableToFix(size_t level, TableInfo*& victim_table_out)
+{
+    Status s;
+    victim_table_out = nullptr;
+
+    std::list<TableInfo*> tables;
+    SizedBuf empty_key;
+    EP( mani->getTablesRange(level, empty_key, empty_key, tables) );
+
+    for (TableInfo* ti: tables) {
+        if (isTableLocked(ti->number)) continue;
+        if (ti->prevTableSearchRequired) {
+            victim_table_out = ti;
+            break;
+        }
+    }
+    for (TableInfo* ti: tables) {
+        if (victim_table_out != ti) ti->done();
+    }
+
+    return Status::OK;
+}
+
 TableInfo* TableMgr::findLocalVictim(size_t level,
                                      TableInfo* given_victim,
                                      VictimPolicy policy,
@@ -658,9 +684,17 @@ Status TableMgr::chkLPCompactCond(size_t level,
         }
     }
 
+    TableInfo* victim_table = nullptr;
+    // Find table to fix (highest priority).
+    s = pickTableToFix(level, victim_table);
+    if (s && victim_table) {
+        s_out = TableMgr::FIX;
+        victim_table_out = victim_table;
+        return s;
+    }
+
     // Find table to split (when WSS > 1.5x table limit).
     TableMgr::VictimPolicy v_policy = TableMgr::WORKING_SET_SIZE_SPLIT;
-    TableInfo* victim_table = nullptr;
     wss = total = 0;
     s = pickVictimTable( level, v_policy, true,
                          victim_table, wss, total );

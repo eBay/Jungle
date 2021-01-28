@@ -245,6 +245,10 @@ void Compactor::work(WorkerOptions* opt_base) {
                 s = target_db->p->tableMgr->compactInPlace
                     ( c_opt, target_table, target_level, true );
 
+            } else if ( target_strategy == TableMgr::FIX ) {
+                s = target_db->p->tableMgr->fixTable
+                    ( c_opt, target_table, target_level );
+
             } else {
                 assert(0);
             }

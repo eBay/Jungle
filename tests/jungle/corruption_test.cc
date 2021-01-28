@@ -917,8 +917,219 @@ int duplicate_seq_flush_test() {
     return 0;
 }
 
-
 } using namespace corruption_test;
+
+#include "db_internal.h"
+#include "table_manifest.h"
+#include "table_mgr.h"
+
+#include <libjungle/jungle.h>
+
+// To access the internal structure of DB.
+namespace jungle {
+namespace checker {
+class Checker {
+public:
+static int corrupted_table_manifest_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+
+    jungle::GlobalConfig g_conf;
+    g_conf.compactorSleepDuration_ms = 500;
+    jungle::init(g_conf);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.minFileSizeToCompact = 65536;
+    jungle::DB* db;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    const size_t NUM = 10000;
+
+    // Write something.
+    for (size_t ii=0; ii<NUM; ++ii) {
+        std::string k_str = "k" + TestSuite::lzStr(6, ii * 10);
+        std::string m_str = "m" + TestSuite::lzStr(6, ii * 10);
+        std::string v_str = "v" + TestSuite::lzStr(6, ii * 10);
+        Record rec;
+        rec.kv.key = k_str;
+        rec.kv.value = v_str;
+        rec.meta = m_str;
+        CHK_Z( db->setRecordByKey(rec) );
+    }
+    CHK_Z( db->sync(false) );
+    CHK_Z( db->flushLogs() );
+
+    for (size_t ii = 0; ii < 4; ++ii) {
+        CHK_Z( db->compactL0(jungle::CompactOptions(), ii) );
+    }
+
+    std::list<TableInfo*> tables_out;
+    db->p->tableMgr->mani->getTablesRange(1, SizedBuf(), SizedBuf(), tables_out);
+
+    TableInfo* t1 = nullptr;
+    TableInfo* t2 = nullptr;
+    auto itr = tables_out.begin();
+    for (size_t ii = 0; ii < 3; ++ii) {
+        if (ii == 1) {
+            t1 = *itr;
+        }
+        if (ii == 2) {
+            t2 = *itr;
+        }
+        itr++;
+    }
+    int t1_idx = std::atoi(t2->minKey.toString().substr(1).c_str()) + 1;
+    int t2_idx = std::atoi(t2->minKey.toString().substr(1).c_str());
+    int t3_idx = std::atoi(t2->minKey.toString().substr(1).c_str()) - 1;
+
+    {    // Insert a record whose key is bigger than t2's min key.
+        uint64_t offset_out;
+        Record rec;
+        std::string k_str = "k" + TestSuite::lzStr(6, t1_idx);
+        std::string m_str = "m" + TestSuite::lzStr(6, t1_idx);
+        std::string v_str = "v" + TestSuite::lzStr(6, t1_idx);
+        rec.kv = KV(k_str, v_str);
+        rec.meta = m_str;
+        rec.seqNum = NUM * 2;
+        uint32_t key_hash_val = getMurmurHash32(rec.kv.key);;
+        CHK_Z( t1->file->setSingle(key_hash_val, rec, offset_out, false, true) );
+    }
+
+    {    // Insert a record with existing key but higher seq number.
+        uint64_t offset_out;
+        Record rec;
+        std::string k_str = "k" + TestSuite::lzStr(6, t2_idx);
+        std::string m_str = "M" + TestSuite::lzStr(6, t2_idx);
+        std::string v_str = "V" + TestSuite::lzStr(6, t2_idx);
+        rec.kv = KV(k_str, v_str);
+        rec.meta = m_str;
+        rec.seqNum = NUM * 2 + 1;
+        uint32_t key_hash_val = getMurmurHash32(rec.kv.key);
+        CHK_Z( t1->file->setSingle(key_hash_val, rec, offset_out, false, true) );
+    }
+
+    {    // Insert a record whose key is smaller than t2's min key.
+        uint64_t offset_out;
+        Record rec;
+        std::string k_str = "k" + TestSuite::lzStr(6, t3_idx);
+        std::string m_str = "m" + TestSuite::lzStr(6, t3_idx);
+        std::string v_str = "v" + TestSuite::lzStr(6, t3_idx);
+        rec.kv = KV(k_str, v_str);
+        rec.meta = m_str;
+        rec.seqNum = NUM * 2 + 2;
+        uint32_t key_hash_val = getMurmurHash32(rec.kv.key);
+        CHK_Z( t2->file->setSingle(key_hash_val, rec, offset_out, false, true) );
+    }
+
+    // Commit.
+    std::list<Record*> rr;
+    std::list<uint64_t> cc;
+    SizedBuf empty_key;
+    CHK_Z( t1->file->setBatch(rr, cc, empty_key, empty_key, -1, false) );
+    CHK_Z( t2->file->setBatch(rr, cc, empty_key, empty_key, -1, false) );
+
+    for (TableInfo* ii: tables_out) {
+        ii->done();
+    }
+
+    // Close and reopen.
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    auto verify_func = [&]() -> int {
+        // 3 keys should be found.
+        {
+            std::string k_str = "k" + TestSuite::lzStr(6, t1_idx);
+            std::string m_str = "m" + TestSuite::lzStr(6, t1_idx);
+            std::string v_str = "v" + TestSuite::lzStr(6, t1_idx);
+            Record rec_out;
+            Record::Holder h(rec_out);
+            CHK_Z( db->getRecordByKey(SizedBuf(k_str), rec_out) );
+            CHK_EQ(v_str, rec_out.kv.value.toString());
+            CHK_EQ(m_str, rec_out.meta.toString());
+        }
+        {
+            std::string k_str = "k" + TestSuite::lzStr(6, t2_idx);
+            std::string m_str = "M" + TestSuite::lzStr(6, t2_idx);
+            std::string v_str = "V" + TestSuite::lzStr(6, t2_idx);
+            Record rec_out;
+            Record::Holder h(rec_out);
+            CHK_Z( db->getRecordByKey(SizedBuf(k_str), rec_out) );
+            CHK_EQ(v_str, rec_out.kv.value.toString());
+            CHK_EQ(m_str, rec_out.meta.toString());
+        }
+        {
+            std::string k_str = "k" + TestSuite::lzStr(6, t3_idx);
+            std::string m_str = "m" + TestSuite::lzStr(6, t3_idx);
+            std::string v_str = "v" + TestSuite::lzStr(6, t3_idx);
+            Record rec_out;
+            Record::Holder h(rec_out);
+            CHK_Z( db->getRecordByKey(SizedBuf(k_str), rec_out) );
+            CHK_EQ(v_str, rec_out.kv.value.toString());
+            CHK_EQ(m_str, rec_out.meta.toString());
+        }
+
+        // Should be found by iterator as well.
+        {
+            Iterator itr;
+            std::string k_str = "k" + TestSuite::lzStr(6, t3_idx);
+            itr.init(db, SizedBuf{k_str});
+
+            Record rec_out;
+            CHK_Z( itr.get(rec_out) );
+            CHK_EQ( SizedBuf(k_str), rec_out.kv.key );
+            std::string exp_v = "v" + TestSuite::lzStr(6, t3_idx);
+            std::string exp_m = "m" + TestSuite::lzStr(6, t3_idx);
+            CHK_EQ( exp_v, rec_out.kv.value.toString() );
+            CHK_EQ( exp_m, rec_out.meta.toString() );
+            rec_out.free();
+
+            CHK_Z( itr.next() );
+            CHK_Z( itr.get(rec_out) );
+            std::string exp_k = "k" + TestSuite::lzStr(6, t2_idx);
+            exp_v = "V" + TestSuite::lzStr(6, t2_idx);
+            exp_m = "M" + TestSuite::lzStr(6, t2_idx);
+            CHK_EQ( SizedBuf(exp_k), rec_out.kv.key );
+            CHK_EQ( exp_v, rec_out.kv.value.toString() );
+            CHK_EQ( exp_m, rec_out.meta.toString() );
+            rec_out.free();
+
+            CHK_Z( itr.next() );
+            CHK_Z( itr.get(rec_out) );
+            exp_k = "k" + TestSuite::lzStr(6, t1_idx);
+            exp_v = "v" + TestSuite::lzStr(6, t1_idx);
+            exp_m = "m" + TestSuite::lzStr(6, t1_idx);
+            CHK_EQ( exp_k, rec_out.kv.key.toString() );
+            CHK_EQ( exp_v, rec_out.kv.value.toString() );
+            CHK_EQ( exp_m, rec_out.meta.toString() );
+            rec_out.free();
+
+            itr.close();
+        }
+        return 0;
+    };
+    CHK_Z(verify_func());
+
+    TestSuite::sleep_sec(1);
+
+    // Close and reopen.
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::DB::open(&db, filename, config));
+    CHK_Z(verify_func());
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+};
+} // namespace checker
+} // namespace jungle
 
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
@@ -961,6 +1172,10 @@ int main(int argc, char** argv) {
 
     ts.doTest("duplicate seq number test",
               duplicate_seq_flush_test);
+
+    ts.doTest("corrupted table manifest test",
+              jungle::checker::Checker::corrupted_table_manifest_test);
+
 
     return 0;
 }
