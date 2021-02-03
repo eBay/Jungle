@@ -45,44 +45,68 @@ static bool force_use_existing = false;
 static char* ABT_ARRAY = (char*)"abcdefghijklmnopqrstuvwxyz";
 static size_t ABT_NUM = 26;
 
-void generate_key(const BenchConfig& conf,
-                  uint64_t index,
-                  char* buf,
-                  size_t& buflen_inout)
-{
-    size_t len = conf.keyLen.get(index);
-    // Minimum length: 8 bytes.
-    if (len < 8) len = 8;
-
+void generate_snippt(uint64_t index,
+                     char* buf,
+                     size_t len) {
     uint64_t vv = index;
-    int ii = 7;
-    while (vv >= ABT_NUM) {
-        buf[ii--] = ABT_ARRAY[vv % ABT_NUM];
-        vv /= ABT_NUM;
-    }
-    buf[ii--] = ABT_ARRAY[vv];
-    for (int jj=ii; jj>=0; --jj) {
-        buf[jj] = ABT_ARRAY[0];
-    }
-
-    vv = index;
-
 #if 1
     uint32_t seed = 0;
-    for (size_t jj=8; jj<len; ++jj) {
+    for (size_t jj = 0; jj < len; ++jj) {
         MurmurHash3_x86_32(&vv, sizeof(vv), seed, &seed);
         buf[jj] = ABT_ARRAY[seed % ABT_NUM];
     }
 
 #else
-    for (size_t jj=8; jj<len; ++jj) {
+    for (size_t jj = 0; jj < len; ++jj) {
         vv = vv % ABT_NUM;
         buf[jj] = ABT_ARRAY[vv];
         vv = (vv * 48271) % 199;
     }
 #endif
 
-    buflen_inout = len;
+}
+
+void generate_key(const BenchConfig& conf,
+                  uint64_t index,
+                  char* buf,
+                  size_t& buflen_inout)
+{
+
+    // TODO: conf should ensure the total length of key <= MAX_KEYLEN
+    // or in there?
+    size_t buf_len = 0;
+    char* key = buf;
+
+    size_t prefix_index = index;
+    for (const auto& prefix_len : conf.prefixLens) {
+        auto len = prefix_len.get(++prefix_index);
+        generate_snippt(prefix_index, key, len);
+        key[len++] = '|';
+        key += len;
+        buf_len += len;
+    }
+
+    size_t len = conf.keyLen.get(index);
+    // Minimum length: 8 bytes.
+    if (len < 8) len = 8;
+    buf_len += len;
+
+    uint64_t vv = index;
+    int ii = 7;
+    while (vv >= ABT_NUM) {
+        key[ii--] = ABT_ARRAY[vv % ABT_NUM];
+        vv /= ABT_NUM;
+    }
+    key[ii--] = ABT_ARRAY[vv];
+    for (int jj=ii; jj>=0; --jj) {
+        key[jj] = ABT_ARRAY[0];
+    }
+
+    vv = index;
+    key += 8;
+    generate_snippt(vv, key, len - 8);
+
+    buflen_inout = buf_len;
 }
 
 std::string generate_value(const BenchConfig& conf,
@@ -308,6 +332,10 @@ int initial_load(const BenchConfig& conf,
             dd.set( 1, 3, "%.1f ops/s",
                     (double)num_sets * 1000000 / tt.getTimeUs() );
 
+            auto prefix_median_sum = std::accumulate(conf.prefixLens.begin(), conf.prefixLens.end(),
+                static_cast<uint64_t>(0), [](uint64_t sum, const DistDef& dist_def) {
+                return sum + dist_def.median;
+            });
             if (wamp_timer.timeout()) {
                 wamp_timer.reset();
 
@@ -315,7 +343,7 @@ int initial_load(const BenchConfig& conf,
                 w_amount = get_write_bytes() - wamp_base;
                 dd.set( 2, 1, "%.1f",
                         (double)w_amount / num_sets /
-                        ( conf.keyLen.median + conf.valueLen.median ) );
+                        ( conf.keyLen.median + conf.valueLen.median + prefix_median_sum) );
 
                 // CPU.
                 cpu_ms = get_cpu_usage_ms() - cpu_base;
@@ -333,7 +361,7 @@ int initial_load(const BenchConfig& conf,
                 s_amount = jungle::FileMgr::dirSize(conf.dbPath, true);
                 dd.set( 2, 3, "%.1f",
                         (double)s_amount / num_sets /
-                        ( conf.keyLen.median + conf.valueLen.median ) );
+                        ( conf.keyLen.median + conf.valueLen.median + prefix_median_sum) );
             }
 
             // Write log file.
@@ -616,6 +644,11 @@ int displayer(TestSuite::ThreadArgs* base_args) {
     TestSuite::Timer samp_timer(5000);
     TestSuite::Timer log_timer(5000);
     tt.resetSec(args->conf.durationSec);
+
+    auto prefix_median_sum = std::accumulate(args->conf.prefixLens.begin(), args->conf.prefixLens.end(),
+        static_cast<uint64_t>(0), [](uint64_t sum, const DistDef& dist_def) {
+        return sum + dist_def.median;
+    });
     while (!tt.timeout() && !args->stopSignal.load()) {
         TestSuite::sleep_ms(80);
         uint64_t cur_us = tt.getTimeUs();
@@ -677,7 +710,7 @@ int displayer(TestSuite::ThreadArgs* base_args) {
                 // Write amplification.
                 dd.set( 4, 2, "%.1fx",
                         (double)w_amt / args->stat.numSet /
-                        ( args->conf.keyLen.median + args->conf.valueLen.median ) );
+                        ( args->conf.keyLen.median + args->conf.valueLen.median + prefix_median_sum) );
             } else {
                 dd.set( 4, 2, "--" );
             }
@@ -720,7 +753,7 @@ int displayer(TestSuite::ThreadArgs* base_args) {
                     TestSuite::sizeToString(samp).c_str() );
             dd.set( 5, 2, "%.1fx",
                     (double)samp / args->conf.numKvPairs /
-                    ( args->conf.keyLen.median + args->conf.valueLen.median ) );
+                    ( args->conf.keyLen.median + args->conf.valueLen.median + prefix_median_sum) );
         }
 
         // Write log file.
