@@ -9,6 +9,21 @@
   "initial_load": true,
   "initial_load_rate": 50000,
   "initial_load_order": "random",
+  "prefix": [{
+    "length": {
+      "type": "random",
+      "median": 8,
+      "sigma": 2
+    },
+    "fanout": 2
+  }, {
+    "length": {
+      "type": "random",
+      "median": 4,
+      "sigma": 1
+    },
+    "fanout": 3
+  }],
   "key": {
     "type": "random",
     "median": 8,

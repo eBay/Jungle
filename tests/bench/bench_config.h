@@ -72,6 +72,15 @@ struct BenchConfig {
             (initial_load_order.find("seq") == std::string::npos)
             ? RANDOM : SEQ;
 
+        const auto& prefix = obj["prefix"];
+        if (prefix.NotNull()) {
+            conf.prefixLens.reserve(prefix.size());
+            conf.prefixFanout.reserve(prefix.size());
+            for (auto& element: obj["prefix"].ArrayRange()) {
+                conf.prefixLens.push_back(load_dist_def_from_json(element["length"]));
+                conf.prefixFanout.push_back(element["fanout"].ToInt());
+            }
+        }
         if (obj["key"].NotNull()) {
             conf.keyLen = load_dist_def_from_json( obj["key"] );
         }
@@ -157,6 +166,8 @@ struct BenchConfig {
     bool initialLoad;
     size_t initialLoadRate;
     InitialLoadOrder initialLoadOrder;
+    std::vector<DistDef> prefixLens;
+    std::vector<size_t> prefixFanout;
     DistDef keyLen;
     DistDef valueLen;
     std::vector<WorkerDef> workerDefs;
