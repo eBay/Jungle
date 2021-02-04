@@ -302,6 +302,11 @@ int initial_load(const BenchConfig& conf,
     uint64_t cpu_ms = 0;
     uint64_t rss_amount = 0;
 
+    auto prefix_median_sum = std::accumulate(
+        conf.prefixLens.begin(),
+        conf.prefixLens.end(),
+        static_cast<uint64_t>(0),
+        [](uint64_t sum, const DistDef& dist_def) { return sum + dist_def.median; });
     char key_buf[MAX_KEYLEN];
     size_t key_len = 0;
     for (size_t ii = 0; ii < conf.numKvPairs; ++ii) {
@@ -333,13 +338,6 @@ int initial_load(const BenchConfig& conf,
             dd.set( 1, 3, "%.1f ops/s",
                     (double)num_sets * 1000000 / tt.getTimeUs() );
 
-            auto prefix_median_sum =
-                std::accumulate(conf.prefixLens.begin(),
-                                conf.prefixLens.end(),
-                                static_cast<uint64_t>(0),
-                                [](uint64_t sum, const DistDef& dist_def) {
-                                    return sum + dist_def.median;
-                                });
             if (wamp_timer.timeout()) {
                 wamp_timer.reset();
 
