@@ -234,7 +234,7 @@ public:
         return !operator<(l, r);
     }
 
-    #define MSG_MAX 24
+    #define MSG_MAX 48
     /**
      * Print the contents of the given SizedBuf with readable
      * (i.e., ASCII printable) characters.

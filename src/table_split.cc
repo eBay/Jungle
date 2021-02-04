@@ -514,5 +514,175 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
    }
 }
 
+Status TableMgr::fixTable(const CompactOptions& options,
+                          TableInfo* victim_table,
+                          size_t level)
+{
+    size_t num_levels = mani->getNumLevels();
+    if (level == 0 || level >= num_levels) return Status::INVALID_LEVEL;
+    if ( !victim_table ) return Status::INVALID_PARAMETERS;
+    if ( victim_table &&
+         victim_table->level != level ) return Status::INVALID_PARAMETERS;
+    if ( !victim_table->prevTableSearchRequired ) return Status::INVALID_PARAMETERS;
+
+    Status s;
+    DBMgr* mgr = DBMgr::getWithoutInit();
+    DebugParams d_params = mgr->getDebugParams();
+
+    TableInfo* local_victim = victim_table;
+    if (!local_victim) return Status::TABLE_NOT_FOUND;
+
+    // Find the target table (i.e., right before the victim).
+    std::list<TableInfo*> tables;
+    SizedBuf empty_key;
+    mani->getTablesRange(level, empty_key, empty_key, tables);
+
+    TableInfo* target_table = nullptr;
+    for (TableInfo* tt: tables) {
+        // NOTE: `tables` is sorted by `minKey`, so if we break here,
+        //       `target_table` is the one right before `local_victim`.
+        if (tt == local_victim) break;
+        target_table = tt;
+    }
+    for (TableInfo* tt: tables) {
+        if (tt != target_table) tt->done();
+    }
+
+    TableFile::Iterator* itr = nullptr;
+   try {
+    assert(target_table);
+    if (!target_table || target_table == local_victim) {
+        // It should not happen anyway.
+        local_victim->prevTableSearchRequired = false;
+        throw Status( Status::TABLE_NOT_FOUND );
+    }
+
+    _log_info( myLog,
+               "fix table level %zu, %zu_%zu min key %s <- "
+               "%zu_%zu min key %s begins",
+               level,
+               opt.prefixNum, local_victim->number,
+               local_victim->minKey.toReadableString().c_str(),
+               opt.prefixNum, target_table->number,
+               target_table->minKey.toReadableString().c_str() );
+
+    Timer timer;
+    TableStats victim_stats;
+    local_victim->file->getStats(victim_stats);
+    _log_info(myLog, "fix table WSS %zu / total %zu, %zu records",
+              victim_stats.workingSetSizeByte,
+              victim_stats.totalSizeByte,
+              victim_stats.numKvs);
+
+    // Lock order (in the same level):
+    //   smaller number table to bigger number table.
+    uint64_t num_sm = std::min(target_table->number, local_victim->number);
+    uint64_t num_gt = std::max(target_table->number, local_victim->number);
+
+    TableLockHolder tl_sm_holder( this, {num_sm} );
+    if (!tl_sm_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    TableLockHolder tl_gt_holder( this, {num_gt} );
+    if (!tl_gt_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    // Read records in target table, starting from min-key of victim table.
+    itr = new TableFile::Iterator();
+    TC( itr->init(nullptr, target_table->file, local_victim->minKey, empty_key) );
+
+    // Move target_table -> victim_table.
+    uint64_t total_count = 0;
+    uint64_t total_moved_count = 0;
+    do {
+        if (d_params.compactionItrScanDelayUs) {
+            // If debug parameter is given, sleep here.
+            Timer::sleepUs(d_params.compactionItrScanDelayUs);
+        }
+
+        if (!isCompactionAllowed()) {
+            throw Status(Status::COMPACTION_CANCELLED);
+        }
+
+        Record rec_out;
+        Record::Holder h(rec_out);
+        s = itr->get(rec_out);
+        if (!s) break;
+
+        // Search the same key in victim table,
+        // compare the sequence number if exists.
+        Record rec_victim;
+        Record::Holder h_victim(rec_victim);
+        rec_victim.kv.key = rec_out.kv.key;
+        s = local_victim->file->get(nullptr, rec_victim);
+        rec_victim.kv.key.clear();
+
+        bool skip_record = false;
+        if (s) {
+            // Proceed only when `rec_out` is newer.
+            if (rec_out.seqNum <= rec_victim.seqNum) {
+                // Skip this key.
+                skip_record = true;
+            }
+        }
+
+        uint32_t key_hash_val = getMurmurHash32(rec_out.kv.key);
+        uint64_t offset_out = 0; // not used.
+        if (!skip_record) {
+            local_victim->file->setSingle(key_hash_val, rec_out, offset_out,
+                                          false, level + 1 == num_levels);
+            total_moved_count++;
+        }
+        total_count++;
+
+        // Should remove the key from target table.
+        target_table->file->setSingle(key_hash_val, rec_out, offset_out,
+                                      false, level + 1 == num_levels, true);
+
+    } while (itr->next().ok());
+    itr->close();
+    delete itr;
+
+    // Set a dummy batch to trigger commit (for both).
+    std::list<Record*> dummy_batch;
+    std::list<uint64_t> dummy_chk;
+    SizedBuf empty_key;
+    target_table->file->setBatch(dummy_batch, dummy_chk, empty_key, empty_key,
+                                 _SCU32(-1), false);
+    local_victim->file->setBatch(dummy_batch, dummy_chk, empty_key, empty_key,
+                                 _SCU32(-1), false);
+
+    // There is no manifest change. Just remove the flag.
+    local_victim->prevTableSearchRequired = false;
+
+    uint64_t elapsed_us = std::max( timer.getUs(), (uint64_t)1 );
+    double write_rate = (double)total_count * 1000000 / elapsed_us;
+    _log_info( myLog,
+               "fix table level %zu, %zu_%zu min key %s <- "
+               "%zu_%zu min key %s done, %zu / %zu records, %zu us, %.1f iops",
+               level,
+               opt.prefixNum, local_victim->number,
+               local_victim->minKey.toReadableString().c_str(),
+               opt.prefixNum, target_table->number,
+               target_table->minKey.toReadableString().c_str(),
+               total_moved_count, total_count,
+               elapsed_us, write_rate );
+
+    // WARNING:
+    //   Caller is responsible to release the `victim_table`.
+    if (target_table) target_table->done();
+
+    return Status();
+
+   } catch (Status ss) {
+    _log_err(myLog, "fix table failed: %d", (int)ss);
+
+    if (itr) {
+        itr->close();
+        delete itr;
+    }
+    if (target_table) target_table->done();
+    return ss;
+   }
+}
+
 }
 

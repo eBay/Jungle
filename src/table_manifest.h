@@ -62,6 +62,7 @@ struct TableInfo {
         , status( query_purpose ? QUERY_PURPOSE : NORMAL )
         , stack(nullptr)
         , baseTable(true)
+        , prevTableSearchRequired(false)
     {
         if (query_purpose) return;
         skiplist_init_node(&snode);
@@ -72,6 +73,9 @@ struct TableInfo {
         minKey.free();
         delete stack.load();
         stack = nullptr;
+        if (refCount.load()) {
+            assert(refCount.load() == 0);
+        }
         assert(refCount.load() == 0);
     }
 
@@ -158,6 +162,10 @@ struct TableInfo {
     // `true` if this table is the owner of stack.
     // `false` if this table belongs to the stack of other table.
     bool baseTable;
+
+    // If `true`, there is a problem with manifest.
+    // Get or iterate should search its previous table as well.
+    std::atomic<bool> prevTableSearchRequired;
 };
 
 class TableManifest {

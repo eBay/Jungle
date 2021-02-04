@@ -170,6 +170,11 @@ Status TableManifest::load(const std::string& path,
         uint32_t num_tables = ss.getU32(s);
         l_info->numTables.store(num_tables, MOR);
 
+        // Remember the last table's max-key (within the same level).
+        SizedBuf last_max_key;
+        SizedBuf::Holder h_last_max_key(last_max_key);
+        uint64_t prev_table_number = 0;
+
         for (size_t jj=0; jj<num_tables; ++jj) {
             // For each table
             uint64_t table_number = ss.getU64(s);
@@ -208,8 +213,43 @@ Status TableManifest::load(const std::string& path,
             TableFileOptions t_opt;
             t_file->load(ii, table_number, t_filename, fOps, t_opt);
 
-            // Checkpoints
+            // Checkpoints.
             t_file->loadCheckpoints(ss);
+
+            // Get actual min key in table (if not L0).
+            if (ii > 0) {
+                SizedBuf table_min_key;
+                SizedBuf::Holder h_table_min_key(table_min_key);
+                s = t_file->getMinKey(table_min_key);
+                if ( s &&
+                     !t_info->minKey.empty() &&
+                     table_min_key < t_info->minKey ) {
+                    _log_warn( myLog, "detected min key mismatch, table %zu, manifest %s, "
+                               "table %s",
+                               table_number,
+                               HexDump::toString(t_info->minKey).c_str(),
+                               HexDump::toString(table_min_key).c_str() );
+                    t_info->minKey.free();
+                    table_min_key.moveTo(t_info->minKey);
+                }
+
+                // Current table's min key should be bigger than `last_max_key`.
+                // Otherwise, set the flag.
+                if ( !t_info->minKey.empty() &&
+                     last_max_key >= t_info->minKey ) {
+                    _log_warn( myLog, "detected key order inversion. prev table %zu max key %s, "
+                               "table %zu min key %s, set prevTableSearchRequired flag",
+                               prev_table_number,
+                               HexDump::toString(last_max_key).c_str(),
+                               table_number,
+                               HexDump::toString(t_info->minKey).c_str() );
+                    t_info->prevTableSearchRequired = true;
+                }
+
+                // Max key.
+                last_max_key.free();
+                t_file->getMaxKey(last_max_key);
+            }
 
             t_info->file = t_file;
             t_info->file->setTableInfo(t_info);
@@ -218,6 +258,7 @@ Status TableManifest::load(const std::string& path,
             if (add_to_skiplist) {
                 skiplist_insert(l_info->tables, &t_info->snode);
             }
+            prev_table_number = table_number;
         }
     }
 
@@ -583,6 +624,16 @@ Status TableManifest::getTablesPoint(const size_t level,
         pushTablesInStack(t_info, tables_out);
         tables_out.push_back(t_info);
 
+        if (t_info->prevTableSearchRequired) {
+            skiplist_node* cur_prev = skiplist_prev(l_info->tables, cursor);
+            if (cur_prev) {
+                TableInfo* t_prev = _get_entry(cur_prev, TableInfo, snode);
+                t_prev->grab();
+                pushTablesInStack(t_prev, tables_out);
+                tables_out.push_back(t_prev);
+                skiplist_release_node(cur_prev);
+            }
+        }
         skiplist_release_node(&t_info->snode);
     }
 
@@ -630,8 +681,24 @@ Status TableManifest::getTablesRange(const size_t level,
                                 ( l_info->tables, &query.snode );
         if (!cursor) cursor = skiplist_begin(l_info->tables);
 
+        bool is_first_table = true;
         while (cursor) {
             TableInfo* t_info = _get_entry(cursor, TableInfo, snode);
+            if ( is_first_table &&
+                 t_info->prevTableSearchRequired ) {
+                // WARNING:
+                //   Should do this ONLY WHEN IT IS THE FIRST TABLE.
+                //   Otherwise, `t_prev` may duplicate.
+                skiplist_node* prev_cursor = skiplist_prev(l_info->tables, cursor);
+                if (prev_cursor) {
+                    TableInfo* t_prev = _get_entry(prev_cursor, TableInfo, snode);
+                    t_prev->grab();
+                    pushTablesInStack(t_prev, tables_out);
+                    tables_out.push_back(t_prev);
+                    skiplist_release_node(prev_cursor);
+                }
+            }
+
             if ( max_key.empty() ||
                  t_info->minKey <= max_key ) {
                 t_info->grab();
@@ -641,6 +708,7 @@ Status TableManifest::getTablesRange(const size_t level,
 
             cursor = skiplist_next(l_info->tables, cursor);
             skiplist_release_node(&t_info->snode);
+            is_first_table = false;
         }
         if (cursor) skiplist_release_node(cursor);
     }

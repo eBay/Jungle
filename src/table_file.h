@@ -121,7 +121,8 @@ public:
                      const Record& rec,
                      uint64_t& offset_out,
                      bool set_as_it_is = false,
-                     bool is_last_level = false);
+                     bool is_last_level = false,
+                     bool force_delete = false);
 
     Status setBatch(std::list<Record*>& batch,
                     std::list<uint64_t>& checkpoints,
@@ -214,6 +215,8 @@ public:
     const std::string& getName() const { return filename; }
 
     uint64_t getNumber() const { return myNumber; }
+
+    Status getMinKey(SizedBuf& min_key_out);
 
     Status getMaxKey(SizedBuf& max_key_out);
 

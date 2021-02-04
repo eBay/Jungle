@@ -400,22 +400,25 @@ Status TableMgr::get(DB* snap_handle,
         if (!s) continue;
 
         TableInfo* sm_table = nullptr;
+        // [Only for L0]
         // Search smallest normal table first and then the others,
         // as it always has the newest data for the same key.
-        sm_table = getSmallestNormalTable(tables);
-        if (sm_table) {
-            Record new_rec;
-            new_rec.kv.key = rec_inout.kv.key;
-            s = sm_table->file->get(snap_handle, new_rec, meta_only);
-            if (s) {
-                // `latest_rec` should be empty.
-                assert(latest_rec.empty());
-                new_rec.moveTo(latest_rec);
-                for (TableInfo* tt: tables) tt->done();
-                break;
+        if (ii == 0) {
+            sm_table = getSmallestNormalTable(tables);
+            if (sm_table) {
+                Record new_rec;
+                new_rec.kv.key = rec_inout.kv.key;
+                s = sm_table->file->get(snap_handle, new_rec, meta_only);
+                if (s) {
+                    // `latest_rec` should be empty.
+                    assert(latest_rec.empty());
+                    new_rec.moveTo(latest_rec);
+                    for (TableInfo* tt: tables) tt->done();
+                    break;
+                }
             }
+            // Smallest table doesn't exist or exists but doesn't have the key.
         }
-        // Smallest table doesn't exist or exists but doesn't have the key.
 
         for (TableInfo* table: tables) {
             if (sm_table && table == sm_table) {
