@@ -55,6 +55,19 @@ TableMgr::~TableMgr() {
     shutdown();
 }
 
+uint32_t TableMgr::getKeyHash(const SizedBuf& key) const {
+    size_t target_size = key.size;
+    if ( opt.dbConfig->keyLenLimitForHash &&
+         target_size > opt.dbConfig->keyLenLimitForHash ) {
+        // If `keyLenLimitForHash` is given, AND
+        // key length is longer than `keyLenLimitForHash`,
+        // calculate the hash only on the given length.
+        target_size = opt.dbConfig->keyLenLimitForHash;
+    }
+    SizedBuf data_to_hash(target_size, key.data);
+    return getMurmurHash32(data_to_hash);
+}
+
 Status TableMgr::createNewTableFile( size_t level,
                                      TableFile*& table_file_out,
                                      const TableFileOptions& t_opt ) {

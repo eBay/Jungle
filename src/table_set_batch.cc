@@ -103,7 +103,7 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
             assert(0);
             continue;
         }
-        uint32_t key_hash_val = getMurmurHash32(rec_out.kv.key);;
+        uint32_t key_hash_val = getKeyHash(rec_out.kv.key);
         uint64_t offset_out = 0; // not used.
 
         // WARNING:

@@ -2852,6 +2852,80 @@ int compaction_by_fast_scan_test() {
     return 0;
 }
 
+int key_length_limit_for_hash_test(size_t hash_len) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 1000;
+    config.keyLenLimitForHash = hash_len;
+    config.bloomFilterBitsPerUnit = 10;
+    config.minFileSizeToCompact = 65536;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    const size_t NUM = 10000;
+
+    // Shuffle (0 -- 99).
+    std::vector<size_t> idx_arr(NUM);
+    std::iota(idx_arr.begin(), idx_arr.end(), 0);
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        size_t jj = std::rand() % NUM;
+        std::swap(idx_arr[ii], idx_arr[jj]);
+    }
+
+    // Insert key-value pair.
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        size_t idx = idx_arr[ii];
+        std::string key_str = "key" + TestSuite::lzStr(5, idx) + "dummy_string";
+        std::string val_str = "val" + TestSuite::lzStr(5, idx);
+        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+    }
+
+    auto verify_func = [&]() -> int {
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            size_t idx = idx_arr[ii];
+            std::string key_str = "key" + TestSuite::lzStr(5, idx) + "dummy_string";
+            std::string val_str = "val" + TestSuite::lzStr(5, idx);
+
+            jungle::SizedBuf value_out;
+            jungle::SizedBuf::Holder h(value_out);
+            CHK_Z( db->get(key_str, value_out) );
+            CHK_EQ(val_str, value_out.toString());
+        }
+        return 0;
+    };
+
+    // Verify.
+    CHK_Z( verify_func() );
+
+    // Flush to L0 and verify.
+    CHK_Z( db->sync(false) );
+    CHK_Z( db->flushLogs() );
+    CHK_Z( verify_func() );
+
+    // Flush to L1 and verify.
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z( db->compactL0(jungle::CompactOptions(), ii) );
+    }
+    CHK_Z( verify_func() );
+
+    // Do in-place compaction and verify.
+    for (size_t ii = 0; ii < config.minNumTablesPerLevel; ++ii) {
+        CHK_Z( db->compactInplace(jungle::CompactOptions(), 1) );
+    }
+    CHK_Z( verify_func() );
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -2905,6 +2979,8 @@ int main(int argc, char** argv) {
     ts.doTest("kmv get memory test", kmv_get_memory_test);
     ts.doTest("immediate purging test", immediate_purging_test);
     ts.doTest("compaction by fast scan test", compaction_by_fast_scan_test);
+    ts.doTest("key length limit for hash test",
+              key_length_limit_for_hash_test, TestRange<size_t>( {24, 8, 7, 0} ));
 
     return 0;
 }
