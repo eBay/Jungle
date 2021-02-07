@@ -948,12 +948,7 @@ Status TableFile::setBatch(std::list<Record*>& batch,
         Record* rec = entry;
 
         // If hash is given, check hash.
-        SizedBuf data_to_hash = rec->kv.key;
-        if ( db_config->keyLenLimitForHash &&
-             data_to_hash.size > db_config->keyLenLimitForHash ) {
-            data_to_hash.size = db_config->keyLenLimitForHash;
-        }
-        uint32_t hash_val = getMurmurHash32(data_to_hash);
+        uint32_t hash_val = tableMgr->getKeyHash(rec->kv.key);
         if (target_hash != _SCU32(-1)) {
             size_t key_hash = hash_val % num_l0;
             if (key_hash != target_hash) continue;
@@ -1254,7 +1249,7 @@ Status TableFile::getNearest(DB* snap_handle,
         //   Unlike Bloom filter, we can still use table lookup booster
         //   as it returns true if exact match exists.
         bool skip_normal_search = false;
-        uint32_t key_hash = getMurmurHash32(key);
+        uint32_t key_hash = tableMgr->getKeyHash(key);
         IF ( s_opt.isExactMatchAllowed() && !meta_only && tlbByKey ) {
             // Search booster if exists.
             memset(&doc_by_offset, 0x0, sizeof(doc_by_offset));

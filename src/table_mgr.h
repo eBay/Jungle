@@ -314,6 +314,8 @@ public:
                 (const GlobalConfig::CompactionThrottlingOptions& t_opt,
                  Timer& throttling_timer);
 
+    uint32_t getKeyHash(const SizedBuf& key) const;
+
     struct Iterator {
     public:
         Iterator();

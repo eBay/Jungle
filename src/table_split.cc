@@ -458,7 +458,7 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
         s = itr->get(rec_out);
         if (!s) break;
 
-        uint32_t key_hash_val = getMurmurHash32(rec_out.kv.key);;
+        uint32_t key_hash_val = getKeyHash(rec_out.kv.key);
         uint64_t offset_out = 0; // not used.
         target_table->file->setSingle(key_hash_val, rec_out, offset_out,
                                       false, level + 1 == num_levels);
@@ -624,7 +624,7 @@ Status TableMgr::fixTable(const CompactOptions& options,
             }
         }
 
-        uint32_t key_hash_val = getMurmurHash32(rec_out.kv.key);
+        uint32_t key_hash_val = getKeyHash(rec_out.kv.key);
         uint64_t offset_out = 0; // not used.
         if (!skip_record) {
             local_victim->file->setSingle(key_hash_val, rec_out, offset_out,
