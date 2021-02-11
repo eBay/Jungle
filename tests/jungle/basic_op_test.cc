@@ -2773,11 +2773,6 @@ int immediate_purging_test() {
     return 0;
 }
 
-// FIXME:
-//   Remove this once the fast index scan bug is fixed.
-//   Tests are currently failing.
-#define AVOID_FAST_INDEX_SCAN_TESTS
-
 int compaction_by_fast_scan_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -2789,10 +2784,9 @@ int compaction_by_fast_scan_test() {
     jungle::DBConfig config;
     TEST_CUSTOM_DB_CONFIG(config);
     config.purgeDeletedDocImmediately = false;
-#ifndef AVOID_FAST_INDEX_SCAN_TESTS
     config.fastIndexScan = true;
-#endif
     config.minFileSizeToCompact = 1024;
+    config.bloomFilterBitsPerUnit = 10;
     CHK_Z( jungle::DB::open(&db, filename, config) );
 
     const size_t NUM_DIGITS = 6;
@@ -2860,7 +2854,7 @@ int compaction_by_fast_scan_test() {
     return 0;
 }
 
-int invalid_l1_flush_by_fast_scan_test() {
+int common_prefix_l1_flush_by_fast_scan_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
 
@@ -2943,9 +2937,7 @@ int invalid_l1_flush_by_fast_scan_test() {
 
     // Close and reopen with fast index scan option.
     CHK_Z(jungle::DB::close(db));
-#ifndef AVOID_FAST_INDEX_SCAN_TESTS
     config.fastIndexScan = true;
-#endif
     CHK_Z(jungle::DB::open(&db, filename, config));
 
     // Insert new key sets with newer date.
@@ -3101,7 +3093,8 @@ int main(int argc, char** argv) {
     ts.doTest("kmv get memory test", kmv_get_memory_test);
     ts.doTest("immediate purging test", immediate_purging_test);
     ts.doTest("compaction by fast scan test", compaction_by_fast_scan_test);
-    ts.doTest("invalid L1 flush by fast scan test", invalid_l1_flush_by_fast_scan_test);
+    ts.doTest("common prefix L1 flush by fast scan test",
+              common_prefix_l1_flush_by_fast_scan_test);
     ts.doTest("key length limit for hash test",
               key_length_limit_for_hash_test, TestRange<size_t>( {24, 8, 7, 0} ));
 
