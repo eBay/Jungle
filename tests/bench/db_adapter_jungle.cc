@@ -132,7 +132,7 @@ int JungleAdapter::open(const std::string& db_file,
 
     jungle::DBConfig config;
     TEST_CUSTOM_DB_CONFIG(config);
-    config.keyLenLimitForHash = 16;
+    _jint(config.keyLenLimitForHash, configObj, "key_len_limit_for_hash");
 
     _jint(config.throttlingNumLogFilesSoft, configObj, "throttling_num_log_files_soft");
     _jint(config.throttlingNumLogFilesHard, configObj, "throttling_num_log_files_hard");
