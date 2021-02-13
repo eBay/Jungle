@@ -329,11 +329,19 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
         GcFunc gc{[&](){ if (need_to_free) cur_rec.free(); }};
         cur_rec.kv.key = params.key;
 
+        // Remove trailing NULL chars,
+        // as it may contain padding bytes at the end.
+        // `cur_rec.kv.key.size` should be non-zero.
+        while (cur_rec.kv.key.size > 1 &&
+               cur_rec.kv.key.data[cur_rec.kv.key.size - 1] == 0x0) {
+            cur_rec.kv.key.size--;
+        }
+
         // Check if `params.key` is prefix of `next_table->minKey`.
         if ( next_table &&
-             params.key.size < next_table->minKey.size ) {
-            SizedBuf tmp(params.key.size, next_table->minKey.data);
-            if (SizedBuf::cmp(params.key, tmp) == 0) {
+             cur_rec.kv.key.size < next_table->minKey.size ) {
+            SizedBuf tmp(cur_rec.kv.key.size, next_table->minKey.data);
+            if (SizedBuf::cmp(cur_rec.kv.key, tmp) == 0) {
                 // It is prefix, should read the whole record.
                 local_victim->file->getByOffset(nullptr, params.offset, cur_rec);
                 value_size = cur_rec.kv.value.size;
