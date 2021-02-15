@@ -282,9 +282,22 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
                            acc_size,
                            acc_records,
                            TABLE_LIMIT );
-                cur_group = new RecGroupItr( cur_rec.kv.key,
-                                             cur_index,
-                                             nullptr);
+                if (db_config->fastIndexScan) {
+                    // If fast index scan mode, `cur_rec` may not have the
+                    // full version of key. Read it from the offset.
+                    Record rec_from_disk;
+                    Record::Holder h(rec_from_disk);
+                    local_victim->file->getByOffset(nullptr, cur_offset, rec_from_disk);
+                    _log_info( myLog, "fast index scan mode, full key %s",
+                               rec_from_disk.kv.key.toReadableString().c_str() );
+                    cur_group = new RecGroupItr( rec_from_disk.kv.key,
+                                                 cur_index,
+                                                 nullptr);
+                } else {
+                    cur_group = new RecGroupItr( cur_rec.kv.key,
+                                                 cur_index,
+                                                 nullptr);
+                }
                 new_tables.push_back(cur_group);
                 acc_size = 0;
                 acc_records = 0;
@@ -316,11 +329,19 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
         GcFunc gc{[&](){ if (need_to_free) cur_rec.free(); }};
         cur_rec.kv.key = params.key;
 
+        // Remove trailing NULL chars,
+        // as it may contain padding bytes at the end.
+        // `cur_rec.kv.key.size` should be non-zero.
+        while (cur_rec.kv.key.size > 1 &&
+               cur_rec.kv.key.data[cur_rec.kv.key.size - 1] == 0x0) {
+            cur_rec.kv.key.size--;
+        }
+
         // Check if `params.key` is prefix of `next_table->minKey`.
         if ( next_table &&
-             params.key.size < next_table->minKey.size ) {
-            SizedBuf tmp(params.key.size, next_table->minKey.data);
-            if (SizedBuf::cmp(params.key, tmp) == 0) {
+             cur_rec.kv.key.size < next_table->minKey.size ) {
+            SizedBuf tmp(cur_rec.kv.key.size, next_table->minKey.data);
+            if (SizedBuf::cmp(cur_rec.kv.key, tmp) == 0) {
                 // It is prefix, should read the whole record.
                 local_victim->file->getByOffset(nullptr, params.offset, cur_rec);
                 value_size = cur_rec.kv.value.size;
