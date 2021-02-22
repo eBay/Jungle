@@ -1237,7 +1237,6 @@ Status LogMgr::flush(const FlushOptions& options,
 
     Status s;
     Timer tt;
-    const DBConfig* db_config = getDbConfig();
 
     // Grab all logs and pass them to table manager
     uint64_t ln_from, ln_to, ln_to_original;
@@ -1323,6 +1322,15 @@ Status LogMgr::flush(const FlushOptions& options,
         parentDb->p->flags.seqLoading = increasing_order;
 
         if (records.size()) {
+#if 0
+            // NOTE:
+            //   Sorting records in a key order will not help,
+            //   because there is a seq-index in table file.
+            //   Sorting records by key makes them random for seq-index,
+            //   thus there is no benefit.
+            //
+            //   Need to re-visit this logic later.
+            const DBConfig* db_config = getDbConfig();
             if (!increasing_order && db_config->preFlushDirtySize) {
                 auto less_records = [](const Record* ll, const Record* rr) -> bool {
                     return (ll->kv.key < rr->kv.key);
@@ -1335,7 +1343,7 @@ Status LogMgr::flush(const FlushOptions& options,
                 //   Sorting `records` discards checkpoint info.
                 checkpoints.clear();
             }
-
+#endif
             EP( table_mgr->setBatch(records, checkpoints) );
             EP( table_mgr->storeManifest() );
             _log_debug(myLog, "Updated table files.");
