@@ -114,7 +114,12 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     SizedBuf max_key_table;
     SizedBuf::Holder h_max_key_table(max_key_table);
     if (max_table) {
-        max_table->file->getMaxKey(max_key_table);
+        if(max_table->file->isEmpty()){
+            _log_info( myLog, "Table is empty, setting table's min key as the max key");
+            max_table->minKey.copyTo(max_key_table);
+        } else {
+            max_table->file->getMaxKey(max_key_table);
+        }
         _log_info( myLog, "max key among tables %s",
                    max_key_table.toReadableString().c_str() );
     }

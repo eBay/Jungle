@@ -145,6 +145,8 @@ public:
                      const SizedBuf& prefix,
                      SearchCbFunc cb_func);
 
+    bool isEmpty();
+
     enum IndexTraversalDecision : int {
         /**
          * Continue traversal.

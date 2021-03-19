@@ -922,7 +922,6 @@ int duplicate_seq_flush_test() {
 #include "db_internal.h"
 #include "table_manifest.h"
 #include "table_mgr.h"
-
 #include <libjungle/jungle.h>
 
 // To access the internal structure of DB.
@@ -930,6 +929,175 @@ namespace jungle {
 namespace checker {
 class Checker {
 public:
+
+static int compaction_empty_table_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::DB *db;
+    jungle::Status s;
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.purgeDeletedDocImmediately = false;
+    config.fastIndexScan = true;
+    config.minFileSizeToCompact = 1024;
+    config.bloomFilterBitsPerUnit = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    //Inserting NUM_ENTRIES no of entries
+    const size_t NUM_DIGITS = 6;
+    const size_t NUM_ENTRIES = 10000;
+    for (size_t ii = 0; ii < NUM_ENTRIES; ++ii)
+    {
+        jungle::Record rec;
+        std::string key_str = "key" + TestSuite::lzStr(NUM_DIGITS, ii);
+        std::string meta_str = "meta" + TestSuite::lzStr(NUM_DIGITS, ii);
+        std::string value_str = "value" + TestSuite::lzStr(NUM_DIGITS, ii);
+        rec.kv.key = jungle::SizedBuf(key_str);
+        rec.kv.value = jungle::SizedBuf(value_str);
+        rec.meta = jungle::SizedBuf(meta_str);
+        CHK_Z(db->setRecordByKey(rec));
+    }
+
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+    for (size_t ii = 0; ii < 4; ++ii)
+    {
+        CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
+    }
+
+
+    //Getting the information on the last table in level 1
+    std::list<jungle::TableInfo *> tables_out;
+    db->p->tableMgr->mani->getTablesRange(1, jungle::SizedBuf(), jungle::SizedBuf(), tables_out);
+    size_t table_size_before_deletion = tables_out.size();
+    jungle::TableInfo *t_last = nullptr;
+    auto itr = tables_out.begin();
+    for (size_t ii = 0; ii < tables_out.size(); ++ii)
+    {
+
+        if (ii == tables_out.size() - 1)
+        {
+            t_last = *itr;
+        }
+        itr++;
+    }
+
+    std::cout << "No of tables: " << table_size_before_deletion << "\n Last table minKey " << t_last->minKey.toReadableString() << "\n";
+    std::cout << std::endl;
+
+    CHK_TRUE(!t_last->file->isEmpty());
+
+
+    for (TableInfo* ii: tables_out) {
+        ii->done();
+    }
+
+    size_t t_last_idx = (size_t)std::atoi(t_last->minKey.toString().substr(3).c_str());
+    std::string key_t_last_idx = "key" + TestSuite::lzStr(NUM_DIGITS, t_last_idx);
+
+    auto verify_func = [&](bool after_deletion) -> int {
+        for (size_t ii = 0; ii < NUM_ENTRIES; ++ii)
+        {
+            TestSuite::setInfo("ii == %zu", ii);
+            jungle::Record rec;
+            std::string key_str = "key" + TestSuite::lzStr(NUM_DIGITS, ii);
+            std::string meta_str = "meta" + TestSuite::lzStr(NUM_DIGITS, ii);
+            std::string value_str = "value" + TestSuite::lzStr(NUM_DIGITS, ii);
+            jungle::Record rec_out;
+            jungle::Record::Holder h_rec_out(rec_out);
+            s = db->getRecordByKey(jungle::SizedBuf(key_str), rec_out);
+            if (after_deletion && ii >= t_last_idx)
+            {
+                CHK_GT(0, s);
+            }
+            else
+            {
+                CHK_Z(s);
+            }
+        }
+        return 0;
+    };
+    CHK_Z(verify_func(false));
+
+    //Delete all the entries in last table file of Level 1
+    for (size_t ii = t_last_idx; ii < NUM_ENTRIES; ii++)
+    {
+        jungle::Record rec;
+        std::string key_str = "key" + TestSuite::lzStr(NUM_DIGITS, ii);
+        CHK_Z(db->del(jungle::SizedBuf(key_str)));
+    }
+    CHK_Z(verify_func(true));
+
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+    for (size_t ii = 0; ii < 4; ++ii)
+    {
+        CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
+    }
+    CHK_Z(verify_func(true));
+
+    for (size_t ii = 0; ii < 8; ++ii)
+    {
+        TestSuite::setInfo("ii == %zu", ii);
+        CHK_Z(db->compactInplace(jungle::CompactOptions(), 1));
+    }
+    CHK_Z(verify_func(true));
+
+    std::list<jungle::TableInfo *> tables_out_del;
+    db->p->tableMgr->mani->getTablesRange(1, jungle::SizedBuf(), jungle::SizedBuf(), tables_out_del);
+    size_t table_size_after_deletion = tables_out_del.size();
+    jungle::TableInfo *t_last_del = nullptr;
+    auto itr_del = tables_out_del.begin();
+    for (size_t ii = 0; ii < tables_out_del.size(); ++ii)
+    {
+
+        if (ii == tables_out_del.size() - 1)
+        {
+            t_last_del = *itr_del;
+        }
+        itr_del++;
+    }
+    //After in place compaction the last table in level 1 should be empty
+
+    CHK_EQ(table_size_after_deletion, table_size_before_deletion);
+    CHK_TRUE(t_last_del->file->isEmpty());
+
+    for (TableInfo* ii: tables_out_del) {
+        ii->done();
+    }
+    //Now enter some entries where the key of them are greater than minKey of the empty table
+    for (size_t ii = NUM_ENTRIES; ii < NUM_ENTRIES + 10; ++ii)
+    {
+        jungle::Record rec;
+        std::string key_str = "key" + TestSuite::lzStr(NUM_DIGITS, ii);
+        std::string meta_str = "meta" + TestSuite::lzStr(NUM_DIGITS, ii);
+        std::string value_str = "value" + TestSuite::lzStr(NUM_DIGITS, ii);
+        rec.kv.key = jungle::SizedBuf(key_str);
+        rec.kv.value = jungle::SizedBuf(value_str);
+        rec.meta = jungle::SizedBuf(meta_str);
+        CHK_Z(db->setRecordByKey(rec));
+    }
+
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+
+    //Now compact the L0 to L1 should try to compact the empty table
+    for (size_t ii = 0; ii < 4; ++ii)
+    {
+        CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
+    }
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+
 static int corrupted_table_manifest_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1134,7 +1302,7 @@ static int corrupted_table_manifest_test() {
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
-    //ts.options.printTestMessage = true;
+    ts.options.printTestMessage = true;
     ts.doTest("log file truncation test",
               log_file_truncation_test,
               TestRange<size_t>({100, 127, 60}));
@@ -1176,6 +1344,7 @@ int main(int argc, char** argv) {
     ts.doTest("corrupted table manifest test",
               jungle::checker::Checker::corrupted_table_manifest_test);
 
+    ts.doTest("compaction for empty table test", jungle::checker::Checker::compaction_empty_table_test);
 
     return 0;
 }

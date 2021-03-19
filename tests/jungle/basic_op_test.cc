@@ -16,6 +16,11 @@ limitations under the License.
 
 #include "jungle_test_common.h"
 
+#include "db_internal.h"
+#include "table_manifest.h"
+#include "table_mgr.h"
+#include <libjungle/jungle.h>
+
 #include <numeric>
 #include <random>
 #include <vector>
@@ -2854,6 +2859,7 @@ int compaction_by_fast_scan_test() {
     return 0;
 }
 
+
 int common_prefix_l1_flush_by_fast_scan_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -3043,7 +3049,7 @@ int key_length_limit_for_hash_test(size_t hash_len) {
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
-    //ts.options.printTestMessage = true;
+    ts.options.printTestMessage = true;
     ts.doTest("basic operation test", basic_operations_test);
     ts.doTest("many logs test", many_logs_test);
     ts.doTest("overwrite sequence number test", overwrite_seq);
@@ -3093,6 +3099,7 @@ int main(int argc, char** argv) {
     ts.doTest("kmv get memory test", kmv_get_memory_test);
     ts.doTest("immediate purging test", immediate_purging_test);
     ts.doTest("compaction by fast scan test", compaction_by_fast_scan_test);
+
     ts.doTest("common prefix L1 flush by fast scan test",
               common_prefix_l1_flush_by_fast_scan_test);
     ts.doTest("key length limit for hash test",
