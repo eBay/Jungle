@@ -233,12 +233,16 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
         return ss.str();
     }
 
+    static const size_t ITERATE_NUMBER_LIMIT = 100;
+
     // Options.
     bool hex_key = false;
     bool prefix_match = false;
     bool iterate = false;
     size_t iterate_number = 1;
-    for (size_t ii=2; ii<tokens.size(); ++ii) {
+    bool iterate_by_seqnum = false;
+    uint64_t seqnum_start = -1, seqnum_end = -1;
+    for (size_t ii=1; ii<tokens.size(); ++ii) {
         if (tokens[ii] == "-h" || tokens[ii] == "--hex") {
             hex_key = true;
         }
@@ -249,6 +253,17 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
              ( tokens[ii] == "-i" || tokens[ii] == "--iterate") ) {
             iterate = true;
             iterate_number = std::atoll(tokens[++ii].c_str());
+        }
+        if (ii + 1 < tokens.size() && tokens[ii] == "-s") {
+            iterate_by_seqnum = true;
+            seqnum_start = std::atoll(tokens[++ii].c_str());
+            if (ii + 1 < tokens.size()) {
+                uint64_t end = std::atoll(tokens[++ii].c_str());
+                if (end < seqnum_end) {
+                    seqnum_end = end;
+                }
+            }
+            iterate_number = seqnum_end - seqnum_start + 1;
         }
     }
 
@@ -299,9 +314,13 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
 
     size_t count = 0;
     Status s;
-    if (prefix_match || iterate) {
+    if (prefix_match || iterate || iterate_by_seqnum) {
         jungle::Iterator itr;
-        s = itr.init(target_dbw->db, key_buf);
+        if (iterate_by_seqnum) {
+            s = itr.initSN(target_dbw->db, seqnum_start, seqnum_end);
+        } else {
+            s = itr.init(target_dbw->db, key_buf);
+        }
         if (!s) {
             ss << "iterator init failed: " << (int)s << std::endl;
             itr.close();
@@ -327,7 +346,7 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
             if (iterate && count >= iterate_number) {
                 break;
             }
-            if (count >= 100) {
+            if (count >= ITERATE_NUMBER_LIMIT) {
                 // To be safe, we limit the count by 100.
                 ss << "more records may exist ..." << std::endl;
                 break;
