@@ -233,7 +233,7 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
         return ss.str();
     }
 
-    static const size_t iterate_number_limit = 100;
+    static const size_t ITERATE_NUMBER_LIMIT = 100;
 
     // Options.
     bool hex_key = false;
@@ -241,7 +241,7 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
     bool iterate = false;
     size_t iterate_number = 1;
     bool iterate_by_seqnum = false;
-    size_t seqnum_start, seqnum_end;
+    uint64_t seqnum_start = -1, seqnum_end = -1;
     for (size_t ii=1; ii<tokens.size(); ++ii) {
         if (tokens[ii] == "-h" || tokens[ii] == "--hex") {
             hex_key = true;
@@ -254,13 +254,11 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
             iterate = true;
             iterate_number = std::atoll(tokens[++ii].c_str());
         }
-        if ( (ii + 1 < tokens.size() || ii + 2 < tokens.size()) &&
-            ( tokens[ii] == "-s") ) {
+        if (ii + 1 < tokens.size() && tokens[ii] == "-s") {
             iterate_by_seqnum = true;
             seqnum_start = std::atoll(tokens[++ii].c_str());
-            seqnum_end = seqnum_start + iterate_number_limit - 1;
             if (ii + 1 < tokens.size()) {
-                auto end = std::atoll(tokens[++ii].c_str());
+                uint64_t end = std::atoll(tokens[++ii].c_str());
                 if (end < seqnum_end) {
                     seqnum_end = end;
                 }
@@ -348,7 +346,7 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
             if (iterate && count >= iterate_number) {
                 break;
             }
-            if (count >= iterate_number_limit) {
+            if (count >= ITERATE_NUMBER_LIMIT) {
                 // To be safe, we limit the count by 100.
                 ss << "more records may exist ..." << std::endl;
                 break;
