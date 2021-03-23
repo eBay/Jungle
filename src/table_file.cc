@@ -1751,13 +1751,13 @@ Status TableFile::getMaxKey(SizedBuf& max_key_out) {
 bool TableFile::isEmpty() {
     Status s;
     TableFile::Iterator itr;
-    EP( itr.init(nullptr, this, SizedBuf(), SizedBuf()) );
+    EP(itr.init(nullptr, this, SizedBuf(), SizedBuf()));
     try {
         Record rec_out;
         Record::Holder h_rec_out(rec_out);
         TC(itr.get(rec_out));
 
-    }catch (Status s) {
+    } catch (Status s) {
         return true;
     }
 

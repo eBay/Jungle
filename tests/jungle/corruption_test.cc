@@ -934,7 +934,7 @@ static int compaction_empty_table_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
 
-    jungle::DB *db;
+    jungle::DB* db;
     jungle::Status s;
 
     // Open DB.
@@ -946,11 +946,10 @@ static int compaction_empty_table_test() {
     config.bloomFilterBitsPerUnit = 10;
     CHK_Z(jungle::DB::open(&db, filename, config));
 
-    //Inserting NUM_ENTRIES no of entries
+    // Inserting NUM_ENTRIES no of entries
     const size_t NUM_DIGITS = 6;
     const size_t NUM_ENTRIES = 10000;
-    for (size_t ii = 0; ii < NUM_ENTRIES; ++ii)
-    {
+    for (size_t ii = 0; ii < NUM_ENTRIES; ++ii) {
         jungle::Record rec;
         std::string key_str = "key" + TestSuite::lzStr(NUM_DIGITS, ii);
         std::string meta_str = "meta" + TestSuite::lzStr(NUM_DIGITS, ii);
@@ -963,44 +962,40 @@ static int compaction_empty_table_test() {
 
     CHK_Z(db->sync(false));
     CHK_Z(db->flushLogs());
-    for (size_t ii = 0; ii < 4; ++ii)
-    {
+    for (size_t ii = 0; ii < 4; ++ii) {
         CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
     }
 
-
-    //Getting the information on the last table in level 1
-    std::list<jungle::TableInfo *> tables_out;
-    db->p->tableMgr->mani->getTablesRange(1, jungle::SizedBuf(), jungle::SizedBuf(), tables_out);
+    // Getting the information on the last table in level 1
+    std::list<jungle::TableInfo*> tables_out;
+    db->p->tableMgr->mani->getTablesRange(
+        1, jungle::SizedBuf(), jungle::SizedBuf(), tables_out);
     size_t table_size_before_deletion = tables_out.size();
-    jungle::TableInfo *t_last = nullptr;
+    jungle::TableInfo* t_last = nullptr;
     auto itr = tables_out.begin();
-    for (size_t ii = 0; ii < tables_out.size(); ++ii)
-    {
+    for (size_t ii = 0; ii < tables_out.size(); ++ii) {
 
-        if (ii == tables_out.size() - 1)
-        {
+        if (ii == tables_out.size() - 1) {
             t_last = *itr;
         }
         itr++;
     }
     TestSuite::Msg test_msg;
-    test_msg << "No of tables: " << table_size_before_deletion << "\n Last table minKey "
-             << t_last->minKey.toReadableString() << "\n";
+    test_msg << "No of tables: " << table_size_before_deletion
+                << "\n Last table minKey " << t_last->minKey.toReadableString() << "\n";
 
     CHK_TRUE(!t_last->file->isEmpty());
-
 
     for (TableInfo* ii: tables_out) {
         ii->done();
     }
 
-    size_t t_last_idx = (size_t)std::atoi(t_last->minKey.toString().substr(3).c_str());
+    size_t t_last_idx =
+        (size_t)std::atoi(t_last->minKey.toString().substr(3).c_str());
     std::string key_t_last_idx = "key" + TestSuite::lzStr(NUM_DIGITS, t_last_idx);
 
     auto verify_func = [&](bool after_deletion) -> int {
-        for (size_t ii = 0; ii < NUM_ENTRIES; ++ii)
-        {
+        for (size_t ii = 0; ii < NUM_ENTRIES; ++ii) {
             TestSuite::setInfo("ii == %zu", ii);
             jungle::Record rec;
             std::string key_str = "key" + TestSuite::lzStr(NUM_DIGITS, ii);
@@ -1009,12 +1004,9 @@ static int compaction_empty_table_test() {
             jungle::Record rec_out;
             jungle::Record::Holder h_rec_out(rec_out);
             s = db->getRecordByKey(jungle::SizedBuf(key_str), rec_out);
-            if (after_deletion && ii >= t_last_idx)
-            {
+            if (after_deletion && ii >= t_last_idx) {
                 CHK_GT(0, s);
-            }
-            else
-            {
+            } else {
                 CHK_Z(s);
             }
         }
@@ -1022,9 +1014,8 @@ static int compaction_empty_table_test() {
     };
     CHK_Z(verify_func(false));
 
-    //Delete all the entries in last table file of Level 1
-    for (size_t ii = t_last_idx; ii < NUM_ENTRIES; ii++)
-    {
+    // Delete all the entries in last table file of Level 1
+    for (size_t ii = t_last_idx; ii < NUM_ENTRIES; ii++) {
         jungle::Record rec;
         std::string key_str = "key" + TestSuite::lzStr(NUM_DIGITS, ii);
         CHK_Z(db->del(jungle::SizedBuf(key_str)));
@@ -1033,34 +1024,31 @@ static int compaction_empty_table_test() {
 
     CHK_Z(db->sync(false));
     CHK_Z(db->flushLogs());
-    for (size_t ii = 0; ii < 4; ++ii)
-    {
+    for (size_t ii = 0; ii < 4; ++ii) {
         CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
     }
     CHK_Z(verify_func(true));
 
-    for (size_t ii = 0; ii < 8; ++ii)
-    {
+    for (size_t ii = 0; ii < 8; ++ii) {
         TestSuite::setInfo("ii == %zu", ii);
         CHK_Z(db->compactInplace(jungle::CompactOptions(), 1));
     }
     CHK_Z(verify_func(true));
 
-    std::list<jungle::TableInfo *> tables_out_del;
-    db->p->tableMgr->mani->getTablesRange(1, jungle::SizedBuf(), jungle::SizedBuf(), tables_out_del);
+    std::list<jungle::TableInfo*> tables_out_del;
+    db->p->tableMgr->mani->getTablesRange(
+        1, jungle::SizedBuf(), jungle::SizedBuf(), tables_out_del);
     size_t table_size_after_deletion = tables_out_del.size();
-    jungle::TableInfo *t_last_del = nullptr;
+    jungle::TableInfo* t_last_del = nullptr;
     auto itr_del = tables_out_del.begin();
-    for (size_t ii = 0; ii < tables_out_del.size(); ++ii)
-    {
+    for (size_t ii = 0; ii < tables_out_del.size(); ++ii) {
 
-        if (ii == tables_out_del.size() - 1)
-        {
+        if (ii == tables_out_del.size() - 1) {
             t_last_del = *itr_del;
         }
         itr_del++;
     }
-    //After in place compaction the last table in level 1 should be empty
+    // After in place compaction the last table in level 1 should be empty
 
     CHK_EQ(table_size_after_deletion, table_size_before_deletion);
     CHK_TRUE(t_last_del->file->isEmpty());
@@ -1068,9 +1056,9 @@ static int compaction_empty_table_test() {
     for (TableInfo* ii: tables_out_del) {
         ii->done();
     }
-    //Now enter some entries where the key of them are greater than minKey of the empty table
-    for (size_t ii = NUM_ENTRIES; ii < NUM_ENTRIES + 10; ++ii)
-    {
+    // Now enter some entries where the key of them are greater than minKey of the
+    // empty table
+    for (size_t ii = NUM_ENTRIES; ii < NUM_ENTRIES + 10; ++ii) {
         jungle::Record rec;
         std::string key_str = "key" + TestSuite::lzStr(NUM_DIGITS, ii);
         std::string meta_str = "meta" + TestSuite::lzStr(NUM_DIGITS, ii);
@@ -1084,9 +1072,8 @@ static int compaction_empty_table_test() {
     CHK_Z(db->sync(false));
     CHK_Z(db->flushLogs());
 
-    //Now compact the L0 to L1 should try to compact the empty table
-    for (size_t ii = 0; ii < 4; ++ii)
-    {
+    // Now compact the L0 to L1 should try to compact the empty table
+    for (size_t ii = 0; ii < 4; ++ii) {
         CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
     }
 
@@ -1096,7 +1083,6 @@ static int compaction_empty_table_test() {
     TEST_SUITE_CLEANUP_PATH();
     return 0;
 }
-
 
 static int corrupted_table_manifest_test() {
     std::string filename;
@@ -1344,7 +1330,8 @@ int main(int argc, char** argv) {
     ts.doTest("corrupted table manifest test",
               jungle::checker::Checker::corrupted_table_manifest_test);
 
-    ts.doTest("compaction for empty table test", jungle::checker::Checker::compaction_empty_table_test);
+    ts.doTest("compaction for empty table test",
+              jungle::checker::Checker::compaction_empty_table_test);
 
     return 0;
 }
