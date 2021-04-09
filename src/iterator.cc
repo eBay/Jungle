@@ -566,7 +566,7 @@ bool Iterator::IteratorInternal::checkValidByKey(ItrInt::ItrItem* item,
 }
 
 Status Iterator::close() {
-    if (p) {
+    if (p && p->db) {
         avl_node* cursor = avl_first(&p->curWindow);
         while (cursor) {
             ItrInt::ItrItem* item = _get_entry(cursor, ItrInt::ItrItem, an);
