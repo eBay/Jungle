@@ -2590,7 +2590,7 @@ int get_by_prefix_test(size_t hash_len) {
             recs_out.push_back(dst);
             return jungle::SearchCbDecision::NEXT;
         };
-        db->getRecordsByPrefix(jungle::SizedBuf(prefix_str), cb_func);
+        CHK_Z( db->getRecordsByPrefix(jungle::SizedBuf(prefix_str), cb_func) );
 
         CHK_EQ(ROUND_MAX, recs_out.size());
         for (jungle::Record& rec: recs_out) rec.free();
@@ -2611,7 +2611,7 @@ int get_by_prefix_test(size_t hash_len) {
             if (recs_out.size() >= STOP_AT) return jungle::SearchCbDecision::STOP;
             return jungle::SearchCbDecision::NEXT;
         };
-        db->getRecordsByPrefix(jungle::SizedBuf(prefix_str), cb_func);
+        CHK_Z( db->getRecordsByPrefix(jungle::SizedBuf(prefix_str), cb_func) );
 
         CHK_EQ(STOP_AT, recs_out.size());
         for (jungle::Record& rec: recs_out) rec.free();
@@ -2631,6 +2631,38 @@ int get_by_prefix_test(size_t hash_len) {
             CHK_Z( db->get( jungle::SizedBuf(key_str), value_out ) );
             CHK_EQ( val_str, value_out.toString() );
         }
+    }
+
+    {   // Insert a record with new prefix, and keep it in log section.
+        std::string key_str = "key_newprefix";
+        std::string val_str = "val_newprefix";
+        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        CHK_Z( db->sync(false) );
+
+        // Search keys with the new prefix, the API should return OK.
+        bool cb_invoked = false;
+        auto cb_func = [&](const jungle::SearchCbParams& params) ->
+                       jungle::SearchCbDecision {
+            cb_invoked = true;
+            return jungle::SearchCbDecision::NEXT;
+        };
+        CHK_Z( db->getRecordsByPrefix(jungle::SizedBuf(key_str), cb_func) );
+        CHK_TRUE( cb_invoked );
+
+        // Flush it to table, now log section is empty.
+        CHK_Z( db->flushLogs() );
+
+        cb_invoked = false;
+        CHK_Z( db->getRecordsByPrefix(jungle::SizedBuf(key_str), cb_func) );
+        CHK_TRUE( cb_invoked );
+
+        // Find non-existing key.
+        std::string ne_key_str = "non_existing_key";
+        cb_invoked = false;
+        s = db->getRecordsByPrefix(jungle::SizedBuf(ne_key_str), cb_func);
+        CHK_EQ( jungle::Status::KEY_NOT_FOUND, s.getValue() );
+        CHK_FALSE( cb_invoked );
+
     }
 
     CHK_Z(jungle::DB::close(db));

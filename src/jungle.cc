@@ -766,24 +766,39 @@ Status DB::getRecordsByPrefix(const SizedBuf& prefix,
     Status s;
     EP( p->checkHandleValidity() );
 
+    uint64_t record_count = 0;
+    SearchCbFunc cb_wrapper = [&record_count, &cb_func]
+                              (const SearchCbParams& params) -> SearchCbDecision {
+        record_count++;
+        return cb_func(params);
+    };
+
     Record rec_local;
     uint64_t chknum = (sn)?(sn->chkNum):(NOT_INITIALIZED);
     std::list<LogFileInfo*>* l_list = (sn)?(sn->logList):(nullptr);
-    s = p->logMgr->getPrefix(chknum, l_list, prefix, cb_func);
+    s = p->logMgr->getPrefix(chknum, l_list, prefix, cb_wrapper);
     if (s == Status::OPERATION_STOPPED) {
         // User wants to stop, return OK.
         return Status::OK;
-    } else if (!s.ok()) {
+    } else if ( !s.ok() && s != Status::KEY_NOT_FOUND ) {
         // Stopped by other reason.
         return s;
     }
 
     // Key not found or user wants to continue, search tables.
     DB* snap_handle = (this->sn)?(this):(nullptr);
-    s = p->tableMgr->getPrefix(snap_handle, prefix, cb_func);
-    if (!s.ok() && s != Status::OPERATION_STOPPED) {
+    s = p->tableMgr->getPrefix(snap_handle, prefix, cb_wrapper);
+    if ( !s.ok() &&
+         s != Status::OPERATION_STOPPED &&
+         s != Status::KEY_NOT_FOUND ) {
         // Stopped by other reason.
+        // NOTE:
+        //   `KEY_NOT_FOUND` should be tolerable, as there might be matching
+        //   records in the log section.
         return s;
+    }
+    if (!record_count) {
+        return Status::KEY_NOT_FOUND;
     }
     return Status::OK;
 }
