@@ -1291,6 +1291,65 @@ int empty_log_store_test() {
     return 0;
 }
 
+int get_log_file_info_byseq_race_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    config.logSectionOnly = true;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    auto write_log = [&](size_t ii) -> int {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+        return 0;
+    };
+
+    jungle::DebugParams dp;
+    dp.getLogFileInfoBySeqCb = [&](const jungle::DebugParams::GenericCbParams& pp) {
+        // At the moment `getSN` is being executed,
+        // add one more log so as to trigger adding new log file.
+        write_log(11);
+    };
+    jungle::DB::setDebugParams(dp);
+    jungle::DB::enableDebugCallbacks(true);
+
+    for (size_t ii=1; ii<=10; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+    }
+
+    jungle::KV kv_out;
+    // 11 should not be visible due to race.
+    CHK_NOT(db->getSN(11, kv_out));
+
+    // Append more logs.
+    for (size_t ii=12; ii<=40; ++ii) {
+        std::string key_str = "k" + std::to_string(ii);
+        std::string val_str = "v" + std::to_string(ii);
+        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+    }
+    CHK_Z( db->sync(false) );
+
+    // Truncate upto 25, removing log files should work without any problems.
+    jungle::FlushOptions fo;
+    fo.purgeOnly = true;
+    CHK_Z( db->flushLogs(fo, 25) );
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
@@ -1349,6 +1408,10 @@ int main(int argc, char** argv) {
 
     ts.doTest("empty log store test",
               empty_log_store_test);
+
+    ts.doTest("get log file info byseq race test",
+              get_log_file_info_byseq_race_test);
+
 
 #if 0
     ts.doTest("reload empty files test",

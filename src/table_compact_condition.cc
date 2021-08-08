@@ -46,7 +46,7 @@ Status TableMgr::pickVictimTable(size_t level,
     DBMgr* db_mgr = DBMgr::getWithoutInit();
     GlobalConfig* g_config = db_mgr->getGlobalConfig();
     DebugParams d_params = db_mgr->getDebugParams();
-    bool d_params_effective = db_mgr->isDebugParamsEffective();
+    bool d_params_effective = db_mgr->isDebugParamEffective();
 
     const DBConfig* db_config = getDbConfig();
     uint64_t MAX_TABLE_SIZE = db_config->getMaxTableSize(level);
@@ -457,7 +457,7 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
     DBMgr* db_mgr = DBMgr::getWithoutInit();
     GlobalConfig* g_config = db_mgr->getGlobalConfig();
     DebugParams d_params = db_mgr->getDebugParams();
-    bool d_params_effective = db_mgr->isDebugParamsEffective();
+    bool d_params_effective = db_mgr->isDebugParamEffective();
 
     // Urgent compaction:
     //   => If block reuse cycle goes beyond 2x of threshold,

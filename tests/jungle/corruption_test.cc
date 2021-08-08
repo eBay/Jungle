@@ -806,7 +806,8 @@ int incomplete_table_set_test() {
             }
             TestSuite::_msg("flush\n");
         };
-    db->setDebugParams(d_params);
+    jungle::DB::setDebugParams(d_params);
+    jungle::DB::enableDebugCallbacks(true);
 
     const size_t NUM = 1000;
 
