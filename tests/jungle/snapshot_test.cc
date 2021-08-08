@@ -1110,6 +1110,7 @@ int race_with_set_batch() {
         return 0;
     };
     jungle::DB::setDebugParams(dp);
+    jungle::DB::enableDebugCallbacks(true);
 
     // Put 10 records atomically.
     std::list<jungle::Record> recs;

@@ -174,6 +174,7 @@ struct DebugParams {
         , tableSetBatchCb(nullptr)
         , addNewLogFileCb(nullptr)
         , newLogBatchCb(nullptr)
+        , getLogFileInfoBySeqCb(nullptr)
         , forceMerge(false)
         {}
 
@@ -253,6 +254,13 @@ struct DebugParams {
      * visible.
      */
     std::function< void(const GenericCbParams&) > newLogBatchCb;
+
+    /**
+     * Callback function that will be invoked right after the log
+     * file for the given sequence number is found from skiplist, but
+     * before checking the max sequence number of the file.
+     */
+    std::function< void(const GenericCbParams&) > getLogFileInfoBySeqCb;
 
     /**
      * If true, merge will proceed the task even with the small number

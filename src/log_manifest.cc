@@ -21,6 +21,7 @@ limitations under the License.
 #include "event_awaiter.h"
 #include "internal_helper.h"
 #include "log_mgr.h"
+#include "skiplist.h"
 
 #include _MACRO_TO_STR(LOGGER_H)
 
@@ -709,6 +710,15 @@ Status LogManifest::getLogFileInfoBySeq(const uint64_t seq_num,
     LogFileInfo* info = _get_entry(cursor, LogFileInfo, snodeBySeq);
     LogFile* file = info->file;
 
+    DBMgr* mgr = DBMgr::getWithoutInit();
+    if (mgr && mgr->isDebugCallbackEffective()) {
+        DebugParams d_params = mgr->getDebugParams();
+        if (d_params.getLogFileInfoBySeqCb) {
+            DebugParams::GenericCbParams p;
+            d_params.getLogFileInfoBySeqCb(p);
+        }
+    }
+
     uint64_t file_min_seq = file->getMinSeqNum();
     if (valid_number(file_min_seq) && file_min_seq > seq_num) {
         // WARNING: This can happen for the first log file,
@@ -725,7 +735,11 @@ Status LogManifest::getLogFileInfoBySeq(const uint64_t seq_num,
         // * If it is the last file, we should return LOG_FILE_NOT_FOUND,
         //   as the given seq number is will be the biggest one (so that
         //   not an overwrite).
-        bool is_last_file = (skiplist_next(&logFilesBySeq, cursor) == nullptr);
+        skiplist_node* next_cursor = skiplist_next(&logFilesBySeq, cursor);
+        bool is_last_file = (next_cursor == nullptr);
+        if (next_cursor) {
+            skiplist_release_node(next_cursor);
+        }
         if (is_last_file || !allow_non_exact_match) {
             skiplist_release_node(cursor);
             return Status::LOG_FILE_NOT_FOUND;

@@ -552,6 +552,14 @@ public:
     static DebugParams getDebugParams();
 
     /**
+     * Enable callback functions given by debugging parameters.
+     *
+     * @param enable If `true`, callbacks are enabled.
+     * @return Old value.
+     */
+    static bool enableDebugCallbacks(bool enable);
+
+    /**
      * Set the level of debugging log file (i.e., `system_logs.log`).
      *
      * Log level follows that in SimpleLogger:

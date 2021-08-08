@@ -907,6 +907,12 @@ DebugParams DB::getDebugParams() {
     return mgr->getDebugParams();
 }
 
+bool DB::enableDebugCallbacks(bool enable) {
+    DBMgr* mgr = DBMgr::getWithoutInit();
+    if (!mgr) return false;
+    return mgr->enableDebugCallbacks(enable);
+}
+
 // === Internal ================================================================
 
 DB::DBInternal::DBInternal()

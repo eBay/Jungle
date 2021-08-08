@@ -158,9 +158,12 @@ DBMgr::DBMgr()
     , fQueue(new FlusherQueue())
     , twMgr(new TableWriterMgr())
     , gbExecutor(new GlobalBatchExecutor())
+    , debugCbEnabled(false)
     , idleTraffic(false)
     , myLog(nullptr)
 {
+    updateGlobalTime();
+
     skiplist_init(&dbMap, DBWrap::cmp);
 
     for (size_t ii = 0; ii < MAX_OP_HISTORY; ++ii) {

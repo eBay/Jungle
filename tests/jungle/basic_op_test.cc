@@ -15,6 +15,7 @@ limitations under the License.
 **************************************************************************/
 
 #include "jungle_test_common.h"
+#include "libjungle/params.h"
 
 #include <numeric>
 #include <random>
@@ -1791,20 +1792,23 @@ int add_new_log_file_race_test() {
     config.maxEntriesInLogFile = 10;
     CHK_Z(jungle::DB::open(&db, filename, config));
 
+    uint64_t seq_num_out = 0;
     jungle::DebugParams dp;
-    dp.addNewLogFileCb = [&db](const jungle::DebugParams::GenericCbParams& pp) {
+    dp.addNewLogFileCb = [&db, &seq_num_out]
+                         (const jungle::DebugParams::GenericCbParams& pp) {
         db->sync(false);
-        uint64_t seq_num_out = 0;
         CHK_Z( db->getLastSyncedSeqNum(seq_num_out) );
         return 0;
     };
     jungle::DB::setDebugParams(dp);
+    jungle::DB::enableDebugCallbacks(true);
 
     for (size_t ii=0; ii<11; ++ii) {
         std::string key_str = "k" + std::to_string(ii);
         std::string val_str = "v" + std::to_string(ii);
         CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
     }
+    CHK_EQ(10, seq_num_out);
     CHK_Z(jungle::DB::close(db));
     CHK_Z(jungle::shutdown());
 
@@ -1908,6 +1912,7 @@ int set_batch_test() {
         return 0;
     };
     jungle::DB::setDebugParams(dp);
+    jungle::DB::enableDebugCallbacks(true);
 
     // Put 10 records atomically.
     std::list<jungle::Record> recs;
@@ -2145,6 +2150,7 @@ int global_batch_test() {
         return 0;
     };
     jungle::DB::setDebugParams(dp);
+    jungle::DB::enableDebugCallbacks(true);
 
     // Put 10 records for each DB atomically.
     std::list<jungle::Record> recs_to_free;

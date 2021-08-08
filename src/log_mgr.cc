@@ -557,10 +557,12 @@ Status LogMgr::setSN(const Record& rec) {
         addNewLogFile(g_li, g_li);
 
         DBMgr* dbm = DBMgr::getWithoutInit();
-        DebugParams dp = dbm->getDebugParams();
-        if (dp.addNewLogFileCb) {
-            DebugParams::GenericCbParams p;
-            dp.addNewLogFileCb(p);
+        if (dbm && dbm->isDebugCallbackEffective()) {
+            DebugParams dp = dbm->getDebugParams();
+            if (dp.addNewLogFileCb) {
+                DebugParams::GenericCbParams p;
+                dp.addNewLogFileCb(p);
+            }
         }
     }
 
@@ -708,7 +710,6 @@ Status LogMgr::setMultiInternal(const std::list<Record>& batch,
 {
     Status s;
     DBMgr* dbm = DBMgr::getWithoutInit();
-    DebugParams dp = dbm->getDebugParams();
 
     // Get latest log file.
     uint64_t max_log_file_num = 0;
@@ -728,8 +729,11 @@ Status LogMgr::setMultiInternal(const std::list<Record>& batch,
     }
     max_seq_out = g_li->file->getMaxSeqNum();
 
-    if (dp.newLogBatchCb) {
-        dp.newLogBatchCb(DebugParams::GenericCbParams());
+    if (dbm && dbm->isDebugCallbackEffective()) {
+        DebugParams dp = dbm->getDebugParams();
+        if (dp.newLogBatchCb) {
+            dp.newLogBatchCb(DebugParams::GenericCbParams());
+        }
     }
     numSetRecords.fetch_add(batch.size());
     return Status();

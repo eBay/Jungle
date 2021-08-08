@@ -168,7 +168,7 @@ void Compactor::work(WorkerOptions* opt_base) {
             }
 
             uint64_t num_writes_to_compact = db_config.numWritesToCompact;
-            if ( dbm->isDebugParamsEffective() &&
+            if ( dbm->isDebugParamEffective() &&
                  dbm->getDebugParams().urgentCompactionNumWrites ) {
                 if (!num_writes_to_compact) {
                     num_writes_to_compact =

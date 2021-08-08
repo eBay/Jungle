@@ -130,7 +130,15 @@ public:
         return debugParams;
     }
 
-    bool isDebugParamsEffective() const { return !debugParamsTimer.timeout(); }
+    bool enableDebugCallbacks(bool new_value) {
+        bool old_value = debugCbEnabled.load(MOR);
+        debugCbEnabled.store(new_value, MOR);
+        return old_value;
+    }
+
+    bool isDebugParamEffective() const { return !debugParamsTimer.timeout(); }
+
+    bool isDebugCallbackEffective() const { return debugCbEnabled.load(MOR); }
 
 private:
     DBMgr();
@@ -171,6 +179,7 @@ private:
     DebugParams debugParams;
     std::mutex debugParamsLock;
     Timer debugParamsTimer;
+    std::atomic<bool> debugCbEnabled;
 
     // For async timer purpose.
     simple_thread_pool::ThreadPoolMgr tpMgr;

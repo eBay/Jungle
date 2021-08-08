@@ -280,7 +280,9 @@ Status TableMgr::setBatchHash( std::list<Record*>& batch,
             }
         }
 
-        if (d_params.tableSetBatchCb) {
+        if ( db_mgr &&
+             db_mgr->isDebugCallbackEffective() &&
+             d_params.tableSetBatchCb ) {
             DebugParams::GenericCbParams p;
             d_params.tableSetBatchCb(p);
         }
