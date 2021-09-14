@@ -597,18 +597,13 @@ Status TableManifest::getTablesPoint(const size_t level,
     if (level >= levels.size()) return Status::INVALID_LEVEL;
 
     LevelInfo* l_info = levels[level];
-    size_t hash_len = tableMgr->getDbConfig()->keyLenLimitForHash;
 
     if ( level == 0 ) {
         // Level-0: hash partition
-        uint32_t target_hash = tableMgr->getNumL0Partitions();
-        if (hash_len && key.size >= hash_len) {
-            // If `hash_len` is given, use prefix only.
-            SizedBuf data_to_hash(hash_len, key.data);
-            target_hash = getMurmurHash(data_to_hash, target_hash);
-        } else {
-            target_hash = getMurmurHash(key, target_hash);
-        }
+        SizedBuf data_to_hash = get_data_to_hash(tableMgr->getDbConfig(), key, false);
+        size_t num_partitions = tableMgr->getNumL0Partitions();
+        size_t target_hash = num_partitions;
+        target_hash = getMurmurHash(data_to_hash, num_partitions);
         return getTablesByHash(l_info, target_hash, tables_out);
 
     } else {
@@ -771,16 +766,20 @@ Status TableManifest::getTablesPrefix(const size_t level,
     if (level >= levels.size()) return Status::INVALID_LEVEL;
 
     LevelInfo* l_info = levels[level];
-    size_t hash_len = tableMgr->getDbConfig()->keyLenLimitForHash;
 
     if ( level == 0 ) {
         // Level-0: hash partition.
-        //   If prefix len is greater than hash len, we can do point search.
-        //   If not, return all.
-        uint32_t target_hash = tableMgr->getNumL0Partitions();
-        if (hash_len && prefix.size >= hash_len) {
-            SizedBuf data_to_hash(hash_len, prefix.data);
-            target_hash = getMurmurHash(data_to_hash, target_hash);
+        //   If the custom hash is used, we can do point search.
+        //   If not, return all (by setting `target_hash = num_partitions`).
+        bool used_custom_hash = false;
+        SizedBuf data_to_hash = get_data_to_hash( tableMgr->getDbConfig(),
+                                                  prefix,
+                                                  true,
+                                                  &used_custom_hash );
+        size_t num_partitions = tableMgr->getNumL0Partitions();
+        size_t target_hash = num_partitions;
+        if (used_custom_hash) {
+            target_hash = getMurmurHash(data_to_hash, num_partitions);
         }
         return getTablesByHash(l_info, target_hash, tables_out);
 

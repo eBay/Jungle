@@ -61,7 +61,7 @@ int memtable_key_itr_test() {
         sprintf(valbuf, "value%zu_%zu", ii, idx[ii]);
         SizedBuf key(keybuf);
         Record rec_out;
-        CHK_Z(mt.getRecordByKey(NOT_INITIALIZED, key, nullptr, rec_out, false, false));
+        CHK_Z(mt.getRecordByKey(NOT_INITIALIZED, key, rec_out, false, false));
         CHK_EQ(SizedBuf(valbuf), rec_out.kv.value);
     }
 
@@ -267,7 +267,9 @@ int memtable_nearest_search_test() {
 int memtable_prefix_search_test() {
     Status s;
     DBConfig config;
-    config.keyLenLimitForHash = 8;
+    config.customLenForHash = [](const HashKeyLenParams& params) -> size_t {
+        return 8;
+    };
     LogMgrOptions l_opt;
     l_opt.dbConfig = &config;
     LogMgr l_mgr(nullptr, l_opt);
@@ -304,7 +306,6 @@ int memtable_prefix_search_test() {
         };
         CHK_Z( mt.getRecordsByPrefix( NOT_INITIALIZED,
                                       SizedBuf(strlen(keybuf), keybuf),
-                                      nullptr,
                                       search_cb,
                                       false,
                                       false ) );
@@ -328,7 +329,6 @@ int memtable_prefix_search_test() {
         };
         CHK_Z( mt.getRecordsByPrefix( NOT_INITIALIZED,
                                       SizedBuf(strlen(keybuf), keybuf),
-                                      nullptr,
                                       search_cb,
                                       false,
                                       false ) );

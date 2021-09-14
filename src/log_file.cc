@@ -362,14 +362,13 @@ Status LogFile::getSN(const uint64_t seq_num, Record& rec_out) {
 
 Status LogFile::get(const uint64_t chk,
                     const SizedBuf& key,
-                    uint64_t* key_hash,
                     Record& rec_out,
                     bool allow_flushed_log,
                     bool allow_tombstone)
 {
     touch();
     Status s;
-    EP( mTable->getRecordByKey(chk, key, key_hash, rec_out,
+    EP( mTable->getRecordByKey(chk, key, rec_out,
                                allow_flushed_log, allow_tombstone) );
     return Status();
 }
@@ -391,14 +390,13 @@ Status LogFile::getNearest(const uint64_t chk,
 
 Status LogFile::getPrefix(const uint64_t chk,
                           const SizedBuf& prefix,
-                          uint64_t* prefix_hash,
                           SearchCbFunc cb_func,
                           bool allow_flushed_log,
                           bool allow_tombstone)
 {
     touch();
     Status s;
-    EP( mTable->getRecordsByPrefix(chk, prefix, prefix_hash, cb_func,
+    EP( mTable->getRecordsByPrefix(chk, prefix, cb_func,
                                    allow_flushed_log, allow_tombstone) );
     return Status();
 }

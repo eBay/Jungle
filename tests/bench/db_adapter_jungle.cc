@@ -132,7 +132,17 @@ int JungleAdapter::open(const std::string& db_file,
 
     jungle::DBConfig config;
     TEST_CUSTOM_DB_CONFIG(config);
-    _jint(config.keyLenLimitForHash, configObj, "key_len_limit_for_hash");
+
+    size_t suffix_len = 0;
+    _jint(suffix_len, configObj, "suffix_len_ruled_out_from_hash");
+    if (suffix_len) {
+        config.customLenForHash = [suffix_len]
+                                  (const jungle::HashKeyLenParams& params) -> size_t {
+            if (params.isPartialKey) return params.key.size;
+            if (params.key.size > suffix_len) return params.key.size - suffix_len;
+            return params.key.size;
+        };
+    }
 
     _jint(config.throttlingNumLogFilesSoft, configObj, "throttling_num_log_files_soft");
     _jint(config.throttlingNumLogFilesHard, configObj, "throttling_num_log_files_hard");

@@ -910,12 +910,9 @@ Status TableFile::setSingle(uint32_t key_hash_val,
     if (rec.isIns()) {
         // Set bloom filter if exists.
         if (bfByKey) {
-            size_t hash_size = rec.kv.key.size;
-            if ( db_config->keyLenLimitForHash &&
-                 hash_size > db_config->keyLenLimitForHash ) {
-                hash_size = db_config->keyLenLimitForHash;
-            }
-            bfByKey->set(rec.kv.key.data, hash_size);
+            uint64_t hash_pair[2];
+            get_hash_pair(db_config, rec.kv.key, false, hash_pair);
+            bfByKey->set(hash_pair);
         }
     }
     // Put into booster if exists.
@@ -1070,12 +1067,7 @@ Status TableFile::get(DB* snap_handle,
 {
     DB* parent_db = tableMgr->getParentDb();
     const DBConfig* db_config = tableMgr->getDbConfig();
-
-    SizedBuf data_to_hash = rec_io.kv.key;
-    if ( db_config->keyLenLimitForHash &&
-         data_to_hash.size > db_config->keyLenLimitForHash ) {
-        data_to_hash.size = db_config->keyLenLimitForHash;
-    }
+    SizedBuf data_to_hash = get_data_to_hash(db_config, rec_io.kv.key, false);
 
     // Search bloom filter first if exists.
     if ( bfByKey &&
@@ -1329,20 +1321,15 @@ Status TableFile::getPrefix(DB* snap_handle,
     DB* parent_db = tableMgr->getParentDb();
     const DBConfig* db_config = tableMgr->getDbConfig();
 
-    SizedBuf data_to_hash = prefix;
-    if ( db_config->keyLenLimitForHash &&
-         data_to_hash.size > db_config->keyLenLimitForHash ) {
-        data_to_hash.size = db_config->keyLenLimitForHash;
-    }
-
-    // Unlike point get, skip bloom filter if prefix size is
-    // shorter than hash limit.
     if ( bfByKey &&
-         db_config->useBloomFilterForGet &&
-         db_config->keyLenLimitForHash &&
-         prefix.size >= db_config->keyLenLimitForHash &&
-         !bfByKey->check(data_to_hash.data, data_to_hash.size) ) {
-        return Status::KEY_NOT_FOUND;
+         db_config->useBloomFilterForGet ) {
+        uint64_t hash_pair[2];
+        bool used_custom_hash = get_hash_pair(db_config, prefix, true, hash_pair);
+        if ( used_custom_hash &&
+             !bfByKey->check(hash_pair) ) {
+            // Unlike point get, use bloom filter only when custom hash is used.
+            return Status::KEY_NOT_FOUND;
+        }
     }
 
     fdb_status fs;

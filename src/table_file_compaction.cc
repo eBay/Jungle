@@ -175,12 +175,10 @@ Status TableFile::compactToManully(FdbHandle* compact_handle,
             total_dirty += ret_doc->keylen + ret_doc->metalen + ret_doc->bodylen;
 
             if (dst_bf) {
-                size_t hash_size = ret_doc->keylen;
-                if ( local_config.keyLenLimitForHash &&
-                     hash_size > local_config.keyLenLimitForHash ) {
-                    hash_size = local_config.keyLenLimitForHash;
-                }
-                dst_bf->set(ret_doc->key, hash_size);
+                uint64_t hash_pair[2];
+                SizedBuf ret_doc_key(ret_doc->keylen, ret_doc->key);
+                get_hash_pair(&local_config, ret_doc_key, false, hash_pair);
+                dst_bf->set(hash_pair);
             }
         }
 
@@ -414,17 +412,17 @@ Status TableFile::mergeCompactTo(const std::string& file_to_merge,
             }
         }
 
-        fdb_doc* doc_choosen = nullptr;
+        fdb_doc* doc_chosen = nullptr;
 
         uint64_t* cnt = &my_cnt;
         uint64_t* discards = &my_discards;
 
         if (cmp < 0) { // `my_doc < merge_doc`
-            doc_choosen = my_doc;
+            doc_chosen = my_doc;
             my_doc = nullptr;
 
         } else if (cmp > 0) { // `my_doc > merge_doc`
-            doc_choosen = merge_doc;
+            doc_chosen = merge_doc;
             merge_doc = nullptr;
             cnt = &merge_cnt;
             discards = &merge_discards;
@@ -433,13 +431,13 @@ Status TableFile::mergeCompactTo(const std::string& file_to_merge,
             // We should compare sequence number,
             // and pick fresher one only.
             if (my_doc->seqnum > merge_doc->seqnum) {
-                doc_choosen = my_doc;
+                doc_chosen = my_doc;
                 fdb_doc_free(merge_doc);
                 merge_cnt++;
 
             // WARNING: The same sequence number should be allowed.
             } else if (my_doc->seqnum <= merge_doc->seqnum) {
-                doc_choosen = merge_doc;
+                doc_chosen = merge_doc;
                 fdb_doc_free(my_doc);
                 cnt = &merge_cnt;
                 discards = &merge_discards;
@@ -453,7 +451,7 @@ Status TableFile::mergeCompactTo(const std::string& file_to_merge,
 
         bool is_tombstone_out = false;
         if (!options.preserveTombstone) {
-            is_tombstone_out = isFdbDocTombstone(doc_choosen);
+            is_tombstone_out = isFdbDocTombstone(doc_chosen);
         }
         if (is_tombstone_out) {
             // Tombstone.
@@ -461,21 +459,19 @@ Status TableFile::mergeCompactTo(const std::string& file_to_merge,
 
         } else {
             // WARNING: SHOULD KEEP THE SAME SEQUENCE NUMBER!
-            doc_choosen->flags = FDB_CUSTOM_SEQNUM;
-            fdb_set(dst_handle->db, doc_choosen);
+            doc_chosen->flags = FDB_CUSTOM_SEQNUM;
+            fdb_set(dst_handle->db, doc_chosen);
             (*cnt)++;
             final_cnt++;
 
             if (dst_bf) {
-                size_t hash_size = doc_choosen->keylen;
-                if ( db_config->keyLenLimitForHash &&
-                     hash_size > db_config->keyLenLimitForHash ) {
-                    hash_size = db_config->keyLenLimitForHash;
-                }
-                dst_bf->set(doc_choosen->key, hash_size);
+                uint64_t hash_pair[2];
+                SizedBuf chosen_key(doc_chosen->keylen, doc_chosen->key);
+                get_hash_pair(db_config, chosen_key, false, hash_pair);
+                dst_bf->set(hash_pair);
             }
         }
-        fdb_doc_free(doc_choosen);
+        fdb_doc_free(doc_chosen);
 
         // Move iterator of choosen doc.
         if (!my_doc) {
