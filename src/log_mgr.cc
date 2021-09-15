@@ -173,13 +173,12 @@ void LogMgr::logMgrSettings() {
 
     GlobalConfig* g_conf = mgr->getGlobalConfig();
 
-    _log_info(myLog,
-              "initialized log manager, memtable flush buffer %zu, "
-              "direct-IO %s, key length limit for hash %zu",
-              g_conf->memTableFlushBufferSize,
-              ( opt.dbConfig->directIoOpt.enabled
-                ? "ON" : "OFF" ),
-              opt.dbConfig->keyLenLimitForHash );
+    _log_info( myLog,
+               "initialized log manager, memtable flush buffer %zu, "
+               "direct-IO %s, custom hash length %s",
+               g_conf->memTableFlushBufferSize,
+               ( opt.dbConfig->directIoOpt.enabled ? "ON" : "OFF" ),
+               ( opt.dbConfig->customLenForHash ? "ON" : "OFF" ) );
 }
 
 Status LogMgr::rollback(uint64_t seq_upto) {
@@ -772,16 +771,7 @@ Status LogMgr::get(const uint64_t chk,
 {
     Status s;
     uint64_t min_log_num, max_log_num;
-
-    // NOTE: Calculate hash value in advance,
-    //       to avoid duplicate overhead.
-    uint64_t hash_values[2];
-    size_t size_to_hash = key.size;
-    if ( getDbConfig()->keyLenLimitForHash &&
-         getDbConfig()->keyLenLimitForHash < key.size ) {
-        size_to_hash = getDbConfig()->keyLenLimitForHash;
-    }
-    MurmurHash3_x64_128(key.data, size_to_hash, 0, hash_values);
+    const DBConfig* db_config = getDbConfig();
 
     if (parentDb) parentDb->p->updateOpHistory();
 
@@ -793,8 +783,7 @@ Status LogMgr::get(const uint64_t chk,
         auto entry = l_list->rbegin();
         while (entry != l_list->rend()) {
             LogFileInfo* l_info = *entry;
-            s = l_info->file->get(chk_local, key, hash_values, rec_out_local,
-                                  true, true);
+            s = l_info->file->get(chk_local, key, rec_out_local, true, true);
             if (s) {
                 rec_out_local.copyTo(rec_out);
                 return s;
@@ -806,13 +795,12 @@ Status LogMgr::get(const uint64_t chk,
         EP( mani->getLastFlushedLog(min_log_num) );
         EP( mani->getMaxLogFileNum(max_log_num) );
 
-        if (getDbConfig()->logSectionOnly) {
+        if (db_config->logSectionOnly) {
             // Log only mode: searching skiplist one-by-one.
             for (int64_t ii = max_log_num; ii >= (int64_t)min_log_num; --ii) {
                 LogFileInfoGuard li(mani->getLogFileInfoP(ii));
                 if (li.empty() || li.ptr->isRemoved()) continue;
-                s = li->file->get(chk_local, key, hash_values, rec_out_local,
-                                  false, true);
+                s = li->file->get(chk_local, key, rec_out_local, false, true);
                 if (s) {
                     rec_out_local.copyTo(rec_out);
                     return s;
@@ -842,8 +830,7 @@ Status LogMgr::get(const uint64_t chk,
                     chk_local = std::min(chk_local, visible_seq_barrier);
                 }
 
-                s = l_info->file->get(chk_local, key, hash_values, rec_out_local,
-                                      false, true);
+                s = l_info->file->get(chk_local, key, rec_out_local, false, true);
                 if (s) {
                     rec_out_local.copyTo(rec_out);
                     found = true;
@@ -1004,19 +991,7 @@ Status LogMgr::getPrefix(const uint64_t chk,
 {
     Status s;
     uint64_t min_log_num, max_log_num;
-
-    // NOTE: Calculate hash value in advance,
-    //       to avoid duplicate overhead.
-    // WARNING: Unlike point get, if prefix len is shorter than limit,
-    //          we can't use bloom filter.
-    uint64_t hash_values_arr[2];
-    uint64_t* hash_values = nullptr;
-    if ( getDbConfig()->keyLenLimitForHash &&
-         getDbConfig()->keyLenLimitForHash <= prefix.size ) {
-        size_t size_to_hash = getDbConfig()->keyLenLimitForHash;
-        MurmurHash3_x64_128(prefix.data, size_to_hash, 0, hash_values_arr);
-        hash_values = hash_values_arr;
-    }
+    const DBConfig* db_config = getDbConfig();
 
     if (parentDb) parentDb->p->updateOpHistory();
 
@@ -1027,8 +1002,7 @@ Status LogMgr::getPrefix(const uint64_t chk,
         auto entry = l_list->rbegin();
         while (entry != l_list->rend()) {
             LogFileInfo* l_info = *entry;
-            s = l_info->file->getPrefix( chk_local, prefix, hash_values, cb_func,
-                                         true, true );
+            s = l_info->file->getPrefix(chk_local, prefix, cb_func, true, true);
             if (s == Status::OPERATION_STOPPED) return s;
             entry++;
         }
@@ -1037,13 +1011,12 @@ Status LogMgr::getPrefix(const uint64_t chk,
         EP( mani->getLastFlushedLog(min_log_num) );
         EP( mani->getMaxLogFileNum(max_log_num) );
 
-        if (getDbConfig()->logSectionOnly) {
+        if (db_config->logSectionOnly) {
             // Log only mode: searching skiplist one-by-one.
             for (int64_t ii = max_log_num; ii >= (int64_t)min_log_num; --ii) {
                 LogFileInfoGuard li(mani->getLogFileInfoP(ii));
                 if (li.empty() || li.ptr->isRemoved()) continue;
-                s = li->file->getPrefix( chk_local, prefix, hash_values, cb_func,
-                                         false, true );
+                s = li->file->getPrefix(chk_local, prefix, cb_func, false, true);
                 if (s == Status::OPERATION_STOPPED) return s;
             }
 
@@ -1070,8 +1043,7 @@ Status LogMgr::getPrefix(const uint64_t chk,
                     chk_local = std::min(chk_local, visible_seq_barrier);
                 }
 
-                s = l_info->file->getPrefix( chk_local, prefix, hash_values, cb_func,
-                                             false, true );
+                s = l_info->file->getPrefix(chk_local, prefix, cb_func, false, true);
                 if (s == Status::OPERATION_STOPPED) {
                     stopped = true;
                     break;

@@ -2542,7 +2542,9 @@ int get_by_prefix_test(size_t hash_len) {
     jungle::DB* db;
 
     config.maxEntriesInLogFile = 20;
-    config.keyLenLimitForHash = hash_len;
+    config.customLenForHash = [hash_len](const jungle::HashKeyLenParams& p) -> size_t {
+        return hash_len;
+    };
     config.bloomFilterBitsPerUnit = 10;
     CHK_Z(jungle::DB::open(&db, filename, config));
 
@@ -3014,7 +3016,9 @@ int key_length_limit_for_hash_test(size_t hash_len) {
     jungle::DB* db;
 
     config.maxEntriesInLogFile = 1000;
-    config.keyLenLimitForHash = hash_len;
+    config.customLenForHash = [hash_len](const jungle::HashKeyLenParams& p) -> size_t {
+        return hash_len;
+    };
     config.bloomFilterBitsPerUnit = 10;
     config.minFileSizeToCompact = 65536;
     CHK_Z(jungle::DB::open(&db, filename, config));

@@ -76,7 +76,6 @@ public:
     // Returns pointer only.
     Status get(const uint64_t chk,
                const SizedBuf& key,
-               uint64_t* key_hash,
                Record& rec_out,
                bool allow_flushed_log,
                bool allow_tombstone);
@@ -90,7 +89,6 @@ public:
 
     Status getPrefix(const uint64_t chk,
                      const SizedBuf& prefix,
-                     uint64_t* prefix_hash,
                      SearchCbFunc cb_func,
                      bool allow_flushed_log,
                      bool allow_tombstone);

@@ -56,6 +56,12 @@ void BloomFilter::set(void* data, size_t len) {
     }
 }
 
+void BloomFilter::set(uint64_t* hash_pair) {
+    for (size_t ii=0; ii<hashCount; ++ii) {
+        bitmap.set( gen_hash(ii, hash_pair) % bitmap.size(), true );
+    }
+}
+
 bool BloomFilter::check(void* data, size_t len) {
     uint64_t hash_pair[2] = {0, 0};
     get_hash_pair(data, len, hash_pair);

@@ -38,6 +38,11 @@ public:
     void set(void* data, size_t len);
 
     /**
+     * Set the filter with the given pre-calculated hash pair.
+     */
+    void set(uint64_t* hash_pair);
+
+    /**
      * Check if the filter is positive with the given binary.
      */
     bool check(void* data, size_t len);

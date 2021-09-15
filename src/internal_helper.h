@@ -489,6 +489,43 @@ inline const char* getOnOffStr(bool cond) {
     else return "OFF";
 }
 
+inline SizedBuf get_data_to_hash( const DBConfig* db_config,
+                                  const SizedBuf& key,
+                                  bool is_partial_key,
+                                  bool* used_custom_hash_out = nullptr )
+{
+    size_t size_to_hash = key.size;
+    if (db_config && db_config->customLenForHash) {
+        HashKeyLenParams params;
+        params.key = key;
+        params.isPartialKey = is_partial_key;
+        size_to_hash = db_config->customLenForHash(params);
+        if (size_to_hash == 0 || size_to_hash > key.size) {
+            size_to_hash = key.size;
+            if (used_custom_hash_out) {
+                *used_custom_hash_out = false;
+            }
+        } else {
+            if (used_custom_hash_out) {
+                *used_custom_hash_out = true;
+            }
+        }
+    }
+    return SizedBuf(size_to_hash, key.data);
+}
+
+inline bool get_hash_pair( const DBConfig* db_config,
+                           const SizedBuf& key,
+                           bool is_partial_key,
+                           uint64_t* hash_pair_out )
+{
+    bool used_custom_hash = false;
+    SizedBuf data_to_hash = get_data_to_hash( db_config, key, is_partial_key,
+                                              &used_custom_hash );
+    MurmurHash3_x64_128(data_to_hash.data, data_to_hash.size, 0, hash_pair_out);
+    return used_custom_hash;
+}
+
 #define CMP_NULL_CHK(a, b) \
     if ( contains_null( (a), (b) ) ) return cmp_null_chk( (a), (b) );
 

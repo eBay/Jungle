@@ -248,7 +248,6 @@ MemTable::MemTable(const LogFile* log_file)
     // 1M bits (128KB) for 16384 entries.
     uint64_t bf_bitmap_size =
         logFile->logMgr->getDbConfig()->maxEntriesInLogFile * 64;
-    bfKeyLenLimit = logFile->logMgr->getDbConfig()->keyLenLimitForHash;
     bfByKey = new BloomFilter(bf_bitmap_size, 3);
 }
 
@@ -299,12 +298,6 @@ MemTable::~MemTable() {
         delete bfByKey;
         bfByKey = nullptr;
     }
-}
-
-size_t MemTable::getHashLen(size_t len) {
-    if (!bfKeyLenLimit) return len;
-    if (len < bfKeyLenLimit) return len;
-    return bfKeyLenLimit;
 }
 
 int MemTable::cmpKey(skiplist_node *a, skiplist_node *b, void *aux) {
@@ -426,7 +419,9 @@ void MemTable::addToByKeyIndex(Record* rec) {
 
     int ret = skiplist_insert_nodup(idxByKey, &rec_node->snode);
     if (ret == 0) {
-        bfByKey->set(rec->kv.key.data, getHashLen(rec->kv.key.size));
+        uint64_t hash_pair[2];
+        get_hash_pair(logFile->logMgr->getDbConfig(), rec->kv.key, false, hash_pair);
+        bfByKey->set(hash_pair);
         return;
     } else {
         // Already exist, re-find.
@@ -585,18 +580,15 @@ Status MemTable::findRecordBySeq(const uint64_t seq_num,
 
 Status MemTable::getRecordByKey(const uint64_t chk,
                                 const SizedBuf& key,
-                                uint64_t* key_hash,
                                 Record& rec_out,
                                 bool allow_flushed_log,
                                 bool allow_tombstone)
 {
     // Check bloom filter first for fast screening.
-    if (key_hash) {
-        if (!bfByKey->check(key_hash)) return Status::KEY_NOT_FOUND;
-    } else {
-        if (!bfByKey->check(key.data, getHashLen(key.size))) {
-            return Status::KEY_NOT_FOUND;
-        }
+    uint64_t hash_pair[2];
+    get_hash_pair(logFile->logMgr->getDbConfig(), key, false, hash_pair);
+    if (!bfByKey->check(hash_pair)) {
+        return Status::KEY_NOT_FOUND;
     }
 
     return getRecordByKeyInternal( chk, key, rec_out,
@@ -689,21 +681,17 @@ Status MemTable::getRecordByKeyInternal(const uint64_t chk,
 
 Status MemTable::getRecordsByPrefix(const uint64_t chk,
                                     const SizedBuf& prefix,
-                                    uint64_t* prefix_hash,
                                     SearchCbFunc cb_func,
                                     bool allow_flushed_log,
                                     bool allow_tombstone)
 {
-    // Check bloom filter first for fast screening.
-    if (prefix_hash) {
-        if (!bfByKey->check(prefix_hash)) return Status::KEY_NOT_FOUND;
-    } else {
-        // Unlike point get, if prefix size is smaller than hash limit
-        // (including the case hash limit is not given),
+    uint64_t hash_pair[2];
+    bool used_custom_hash = get_hash_pair( logFile->logMgr->getDbConfig(),
+                                           prefix, true, hash_pair );
+    if (used_custom_hash) {
+        // Unlike point get, if a custom hash is not given,
         // we can't use bloom filter.
-        if ( bfKeyLenLimit &&
-             prefix.size >= bfKeyLenLimit &&
-             !bfByKey->check(prefix.data, getHashLen(prefix.size)) ) {
+        if (!bfByKey->check(hash_pair)) {
             return Status::KEY_NOT_FOUND;
         }
     }

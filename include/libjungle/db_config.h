@@ -75,6 +75,28 @@ using SearchCbFunc =
     std::function< SearchCbDecision(const SearchCbParams&) >;
 
 
+/**
+ * Parameters for `HashKeyLenCbFunc`.
+ */
+struct HashKeyLenParams {
+    HashKeyLenParams(const SizedBuf& k = SizedBuf(), bool is_partial_key = false) {}
+
+    /**
+     * Key to calculate the hash value.
+     */
+    SizedBuf key;
+
+    /**
+     * `true` if the given `key` is the prefix of the original key.
+     */
+    bool isPartialKey;
+};
+
+/**
+ * Callback function to customize then length of prefix of a key for hash calculation.
+ */
+using HashKeyLenCbFunc = std::function< size_t(const HashKeyLenParams&) >;
+
 class DB;
 class DBConfig {
 public:
@@ -105,7 +127,7 @@ public:
         , numWritesToCompact(0)
         , useBloomFilterForGet(true)
         , bloomFilterBitsPerUnit(0.0)
-        , keyLenLimitForHash(0)
+        , customLenForHash(nullptr)
         , nextLevelExtension(true)
         , maxL0TableSize(1073741824)                // 1 GiB
         , maxL1TableSize(2684354560)                // 2.5 GiB
@@ -299,14 +321,15 @@ public:
     double bloomFilterBitsPerUnit;
 
     /**
-     * If
+     * If given, the return value of this callback function will be used for
+     * the hash number calculation for each key. If the return value is
      *   - zero: the entire key is used for hash calculation.
      *   - non-zero: the first given number of bytes are used for hash
      *               calculation if the key is longer than that.
      *               It will provide better performance for prefix search,
      *               but may cause skew if the length is too small.
      */
-    uint32_t keyLenLimitForHash;
+    HashKeyLenCbFunc customLenForHash;
 
     /**
      * Use range-partitioned L1+ for non-LSM mode.
