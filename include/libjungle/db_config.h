@@ -139,6 +139,7 @@ public:
         , numExpectedUserThreads(8)
         , purgeDeletedDocImmediately(true)
         , fastIndexScan(false)
+        , seqLoadingDelayFactor(0)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -533,6 +534,14 @@ public:
      * instead of iteration.
      */
     bool fastIndexScan;
+
+    /**
+     * Compaction tasks will be delayed while keys are being
+     * loaded in sequential order. If this value is non-zero,
+     * compactions will be triggered if the file size of an L0 table
+     * is greater than the max table size multiplied by this value.
+     */
+    uint32_t seqLoadingDelayFactor;
 };
 
 class GlobalConfig {

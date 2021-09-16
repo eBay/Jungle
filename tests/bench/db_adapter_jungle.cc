@@ -174,6 +174,8 @@ int JungleAdapter::open(const std::string& db_file,
     _jint(table_size_mb, configObj, "l1_table_size_mb");
     config.maxL1TableSize = table_size_mb * 1024 * 1024;
 
+    _jint(config.seqLoadingDelayFactor, configObj, "seq_loading_delay_factor");
+
     bool direct_io = false;
     _jbool(direct_io, configObj, "direct_io");
     config.directIoOpt.enabled = direct_io;

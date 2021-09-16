@@ -1106,7 +1106,7 @@ Status TableFile::get(DB* snap_handle,
         fdb_kvs_handle* kvs_db = g.handle->db;
 
         bool skip_normal_search = false;
-        uint32_t key_hash = getMurmurHash32(data_to_hash);
+        uint32_t key_hash = get_murmur_hash_32(data_to_hash);
         IF ( !meta_only && tlbByKey ) {
             // Search booster if exists.
             memset(&doc_by_offset, 0x0, sizeof(doc_by_offset));

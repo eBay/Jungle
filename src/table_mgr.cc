@@ -57,7 +57,7 @@ TableMgr::~TableMgr() {
 
 uint32_t TableMgr::getKeyHash(const SizedBuf& key) const {
     SizedBuf data_to_hash = get_data_to_hash(opt.dbConfig, key, false);
-    return getMurmurHash32(data_to_hash);
+    return get_murmur_hash_32(data_to_hash);
 }
 
 Status TableMgr::createNewTableFile( size_t level,
@@ -98,8 +98,7 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
                    db_config->maxBlockReuseCycle,
                    db_config->purgeDeletedDocImmediately
                    ? "purge immediately" : "keep until compaction",
-                   db_config->fastIndexScan
-                   ? "ON" : "OFF",
+                   get_on_off_str(db_config->fastIndexScan),
                    db_config->throttlingNumLogFilesSoft,
                    db_config->throttlingNumLogFilesHard );
     } else {
@@ -115,7 +114,7 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
     _log_info( myLog, "table lookup booster limit %zu %zu",
                getBoosterLimit(0), getBoosterLimit(1) );
     _log_info( myLog, "next level extension %s",
-               getOnOffStr(db_config->nextLevelExtension) );
+               get_on_off_str(db_config->nextLevelExtension) );
     _log_info( myLog, "bloom filter bits per unit: %.1f",
                db_config->bloomFilterBitsPerUnit );
     if (db_config->nextLevelExtension) {
@@ -133,6 +132,8 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
             ratio_str += std::to_string(dd) + " ";
         }
         _log_info( myLog, "ratio: %s", ratio_str.c_str() );
+        _log_info( myLog, "sequential loading delay limit factor: %u",
+                   db_config->seqLoadingDelayFactor );
     }
 
     _log_info( myLog, "pre flush condition %zu sec, %zu bytes",

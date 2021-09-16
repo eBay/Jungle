@@ -107,7 +107,7 @@ void DBMgr::initInternal(const GlobalConfig& config) {
               config.compactorSleepDuration_ms);
     _log_info(myLog, "auto sync by flusher: %s, "
               "min number of records to flush: %zu",
-              config.flusherAutoSync ? "ON" : "OFF",
+              get_on_off_str(config.flusherAutoSync),
               config.flusherMinRecordsToTrigger);
 
     {

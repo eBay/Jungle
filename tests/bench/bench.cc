@@ -42,10 +42,10 @@ namespace jungle_bench {
 static LatencyCollector global_lat;
 static bool force_use_existing = false;
 
-static char* ABT_ARRAY = (char*)"abcdefghijklmnopqrstuvwxyz";
-static size_t ABT_NUM = 26;
+static const std::string ABT_ARRAY = "abcdefghijklmnopqrstuvwxyz";
+static const size_t ABT_NUM = 26;
 
-void generate_snippt(uint64_t index, char* buf, size_t len) {
+void generate_random_string(uint64_t index, char* buf, size_t len) {
     uint64_t vv = index;
 #if 1
     uint32_t seed = 0;
@@ -63,6 +63,31 @@ void generate_snippt(uint64_t index, char* buf, size_t len) {
 #endif
 }
 
+void generate_ordered_string(uint64_t index, char* buf, size_t len) {
+    // At least 2 bytes
+    if (!len) len = 2;
+
+    uint64_t vv = index;
+    int ii = len - 1;
+    while (vv >= ABT_NUM) {
+        buf[ii--] = ABT_ARRAY[vv % ABT_NUM];
+        vv /= ABT_NUM;
+    }
+    buf[ii--] = ABT_ARRAY[vv];
+    for (int jj = ii; jj >= 0; --jj) {
+        buf[jj] = ABT_ARRAY[0];
+    }
+}
+
+inline size_t get_required_ordered_bytes(size_t fanout) {
+    size_t ret = 0;
+    while (fanout) {
+        ret++;
+        fanout /= ABT_NUM;
+    }
+    return std::max(ret, (size_t)2);
+}
+
 void generate_key(const BenchConfig& conf,
                   uint64_t index,
                   char* buf,
@@ -73,40 +98,38 @@ void generate_key(const BenchConfig& conf,
     // or in there?
     size_t buf_len = 0;
     char* key = buf;
-    for (size_t i = 0; i < conf.prefixLens.size(); ++i) {
-        const auto& prefix_len = conf.prefixLens[i];
-        auto fanout = conf.prefixFanout[i];
+    // Accumulated fanout.
+    size_t acc_fanout = 1;
+    for (size_t i = 0; i < conf.prefixLengths.size(); ++i) {
+        const DistDef& prefix_len = conf.prefixLengths[i];
+        size_t fanout = conf.prefixFanouts[i];
 
-        size_t hash = 0;
-        MurmurHash3_x86_32(&i, sizeof(i), hash, &hash);
-        size_t prefix_index = index % fanout + hash;
-        auto len = prefix_len.get(prefix_index);
-        generate_snippt(prefix_index, key, len);
+        uint64_t cur_mod = std::max((uint64_t)1, (conf.numKvPairs / acc_fanout));
+        acc_fanout *= fanout;
+
+        uint64_t prefix_index = (index % cur_mod) * fanout / cur_mod;
+
+        uint64_t len = prefix_len.get(prefix_index);
+
+        // First N bytes are ordered, and the others are random.
+        size_t ordered_len = get_required_ordered_bytes(fanout);
+        if (len < ordered_len) len = ordered_len;
+        generate_ordered_string(prefix_index, key, ordered_len);
+        generate_random_string(prefix_index, key + ordered_len, len - ordered_len);
+
         key[len++] = '|';
         key += len;
         buf_len += len;
     }
 
     size_t len = conf.keyLen.get(index);
-    // Minimum length: 8 bytes.
+
+    // First 8 bytes are ordered, and the others are random.
     if (len < 8) len = 8;
     buf_len += len;
+    generate_ordered_string(index, key, 8);
 
-    uint64_t vv = index;
-    int ii = 7;
-    while (vv >= ABT_NUM) {
-        key[ii--] = ABT_ARRAY[vv % ABT_NUM];
-        vv /= ABT_NUM;
-    }
-    key[ii--] = ABT_ARRAY[vv];
-    for (int jj=ii; jj>=0; --jj) {
-        key[jj] = ABT_ARRAY[0];
-    }
-
-    vv = index;
-    key += 8;
-    generate_snippt(vv, key, len - 8);
-
+    generate_random_string(index, key + 8, len - 8);
     buflen_inout = buf_len;
 }
 
@@ -302,11 +325,16 @@ int initial_load(const BenchConfig& conf,
     uint64_t cpu_ms = 0;
     uint64_t rss_amount = 0;
 
-    auto prefix_median_sum = std::accumulate(
-        conf.prefixLens.begin(),
-        conf.prefixLens.end(),
-        static_cast<uint64_t>(0),
-        [](uint64_t sum, const DistDef& dist_def) { return sum + dist_def.median; });
+    auto prefix_median_sum = std::accumulate( conf.prefixLengths.begin(),
+                                              conf.prefixLengths.end(),
+                                              static_cast<uint64_t>(0),
+                                              [](uint64_t sum, const DistDef& dist_def) {
+                                                  return sum + dist_def.median;
+                                              } );
+
+    //std::ofstream tmp_asdf;
+    //tmp_asdf.open("./key_list.txt", std::ofstream::out);
+
     char key_buf[MAX_KEYLEN];
     size_t key_len = 0;
     for (size_t ii = 0; ii < conf.numKvPairs; ++ii) {
@@ -317,6 +345,7 @@ int initial_load(const BenchConfig& conf,
         DbAdapter::KvElem elem;
         // TODO: Should be replaced with random generation.
         generate_key(conf, key_arr[ii], key_buf, key_len);
+        //tmp_asdf << std::string(key_buf, key_len) << std::endl;
         elem.key = DbAdapter::Buffer(key_buf, key_len);
 
         std::string value_str = generate_value(conf, key_arr[ii]);
@@ -653,11 +682,14 @@ int displayer(TestSuite::ThreadArgs* base_args) {
     TestSuite::Timer log_timer(5000);
     tt.resetSec(args->conf.durationSec);
 
-    auto prefix_median_sum = std::accumulate(
-        args->conf.prefixLens.begin(),
-        args->conf.prefixLens.end(),
-        static_cast<uint64_t>(0),
-        [](uint64_t sum, const DistDef& dist_def) { return sum + dist_def.median; });
+    auto prefix_median_sum =
+        std::accumulate( args->conf.prefixLengths.begin(),
+                         args->conf.prefixLengths.end(),
+                         static_cast<uint64_t>(0),
+                         [](uint64_t sum, const DistDef& dist_def) {
+                             return sum + dist_def.median;
+                         } );
+
     while (!tt.timeout() && !args->stopSignal.load()) {
         TestSuite::sleep_ms(80);
         uint64_t cur_us = tt.getTimeUs();
