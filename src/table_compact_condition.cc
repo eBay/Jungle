@@ -408,11 +408,6 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
     if ( db_config->nextLevelExtension &&
          numL1Compactions > 0 ) return false;
 
-    // If sequential loading, delay L0 -> L1 compaction.
-    // TODO: We cannot delay forever, should check disk free space.
-    if ( db_config->nextLevelExtension &&
-         parentDb->p->flags.seqLoading ) return false;
-
     Status s;
     std::list<TableInfo*> tables;
     s = mani->getL0Tables(hash_num, tables);
@@ -453,7 +448,11 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
                   (s_stats.workingSetSizeByte);
     }
 
+    // If `true`, compaction will be triggered.
     bool decision = false;
+    // `true` if the compaction is requested manually by user.
+    bool req_by_user = false;
+
     DBMgr* db_mgr = DBMgr::getWithoutInit();
     GlobalConfig* g_config = db_mgr->getGlobalConfig();
     DebugParams d_params = db_mgr->getDebugParams();
@@ -487,6 +486,7 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
         _log_info(myLog, "[URGENT COMPACTION] by size: %zu > %zu",
                   t_stats.totalSizeByte, d_params.urgentCompactionFilesize);
         decision = true;
+        req_by_user = true;
     }
 
     // Urgent compaction:
@@ -497,6 +497,7 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
         _log_info(myLog, "[URGENT COMPACTION] by table idx: %zu <= %zu",
                   target_table->number, urgentCompactionMaxTableIdx.load());
         decision = true;
+        req_by_user = true;
     }
 
     // Urgent compaction:
@@ -510,6 +511,7 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
          t_stats.totalSizeByte > db_config->minFileSizeToCompact &&
          ratio > d_params.urgentCompactionRatio ) {
         urgent_or_itc = 1;
+        req_by_user = true;
     }
 
     // Idle traffic compaction:
@@ -548,6 +550,28 @@ bool TableMgr::chkL0CompactCond(uint32_t hash_num) {
                       type_str.c_str(),
                       ratio, d_params.urgentCompactionRatio);
             decision = true;
+        }
+    }
+
+    // If sequential loading, delay L0 -> L1 compaction.
+    // If compaction decision was manually made by user,
+    // ignore the sequential loading flag.
+    if ( !(decision && req_by_user) &&
+         db_config->nextLevelExtension &&
+         parentDb->p->flags.seqLoading ) {
+        if ( db_config->seqLoadingDelayFactor &&
+             db_config->maxL0TableSize * db_config->seqLoadingDelayFactor <
+                 t_stats.totalSizeByte ) {
+            // Allow compaction.
+            _log_info( myLog, "sequential loading delay factor: %u, %lu bytes, "
+                       "file size: %lu, allow compaction",
+                       db_config->seqLoadingDelayFactor,
+                       db_config->maxL0TableSize * db_config->seqLoadingDelayFactor,
+                       t_stats.totalSizeByte );
+            decision = true;
+        } else {
+            for (TableInfo*& table: tables) table->done();
+            return false;
         }
     }
 

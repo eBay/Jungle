@@ -466,25 +466,25 @@ inline int cmp_null_chk(void* a, void *b) {
     return 0xff;
 }
 
-inline size_t getMurmurHash32(const SizedBuf& data) {
+inline size_t get_murmur_hash_32(const SizedBuf& data) {
     uint32_t output = 0;
     MurmurHash3_x86_32(data.data, data.size, 0, &output);
     return output;
 }
 
-inline size_t getMurmurHash(const SizedBuf& data, size_t limit) {
+inline size_t get_murmur_hash(const SizedBuf& data, size_t limit) {
     uint32_t output = 0;
     MurmurHash3_x86_32(data.data, data.size, 0, &output);
     return output % limit;
 }
 
-inline uint64_t getMurmurHash64(const SizedBuf& data) {
+inline uint64_t get_murmur_hash_64(const SizedBuf& data) {
     uint64_t output[2];
     MurmurHash3_x64_128(data.data, data.size, 0, output);
     return output[0];
 }
 
-inline const char* getOnOffStr(bool cond) {
+inline const char* get_on_off_str(bool cond) {
     if (cond) return "ON";
     else return "OFF";
 }

@@ -603,7 +603,7 @@ Status TableManifest::getTablesPoint(const size_t level,
         SizedBuf data_to_hash = get_data_to_hash(tableMgr->getDbConfig(), key, false);
         size_t num_partitions = tableMgr->getNumL0Partitions();
         size_t target_hash = num_partitions;
-        target_hash = getMurmurHash(data_to_hash, num_partitions);
+        target_hash = get_murmur_hash(data_to_hash, num_partitions);
         return getTablesByHash(l_info, target_hash, tables_out);
 
     } else {
@@ -779,7 +779,7 @@ Status TableManifest::getTablesPrefix(const size_t level,
         size_t num_partitions = tableMgr->getNumL0Partitions();
         size_t target_hash = num_partitions;
         if (used_custom_hash) {
-            target_hash = getMurmurHash(data_to_hash, num_partitions);
+            target_hash = get_murmur_hash(data_to_hash, num_partitions);
         }
         return getTablesByHash(l_info, target_hash, tables_out);
 

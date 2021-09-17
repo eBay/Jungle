@@ -96,7 +96,7 @@ struct TableInfo {
             _log_info(temp, "removed level %zu file %zu "
                       "ref count %zu -> %zu status %d mflag %s",
                       level, number, count, count-1, status.load(),
-                      (migration ? "ON" : "OFF") );
+                      get_on_off_str(migration) );
             if (count == 1) {
                 // NOTE: We should not remove file object if this
                 //       table is being migrated to next level, as

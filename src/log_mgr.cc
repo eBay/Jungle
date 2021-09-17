@@ -175,10 +175,10 @@ void LogMgr::logMgrSettings() {
 
     _log_info( myLog,
                "initialized log manager, memtable flush buffer %zu, "
-               "direct-IO %s, custom hash length %s",
+               "direct-IO %s, custom hash length function %s",
                g_conf->memTableFlushBufferSize,
-               ( opt.dbConfig->directIoOpt.enabled ? "ON" : "OFF" ),
-               ( opt.dbConfig->customLenForHash ? "ON" : "OFF" ) );
+               get_on_off_str(opt.dbConfig->directIoOpt.enabled),
+               get_on_off_str((bool)opt.dbConfig->customLenForHash) );
 }
 
 Status LogMgr::rollback(uint64_t seq_upto) {

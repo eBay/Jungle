@@ -1150,7 +1150,7 @@ static int corrupted_table_manifest_test() {
         rec.kv = KV(k_str, v_str);
         rec.meta = m_str;
         rec.seqNum = NUM * 2;
-        uint32_t key_hash_val = getMurmurHash32(rec.kv.key);;
+        uint32_t key_hash_val = get_murmur_hash_32(rec.kv.key);;
         CHK_Z( t1->file->setSingle(key_hash_val, rec, offset_out, false, true) );
     }
 
@@ -1163,7 +1163,7 @@ static int corrupted_table_manifest_test() {
         rec.kv = KV(k_str, v_str);
         rec.meta = m_str;
         rec.seqNum = NUM * 2 + 1;
-        uint32_t key_hash_val = getMurmurHash32(rec.kv.key);
+        uint32_t key_hash_val = get_murmur_hash_32(rec.kv.key);
         CHK_Z( t1->file->setSingle(key_hash_val, rec, offset_out, false, true) );
     }
 
@@ -1176,7 +1176,7 @@ static int corrupted_table_manifest_test() {
         rec.kv = KV(k_str, v_str);
         rec.meta = m_str;
         rec.seqNum = NUM * 2 + 2;
-        uint32_t key_hash_val = getMurmurHash32(rec.kv.key);
+        uint32_t key_hash_val = get_murmur_hash_32(rec.kv.key);
         CHK_Z( t2->file->setSingle(key_hash_val, rec, offset_out, false, true) );
     }
 
