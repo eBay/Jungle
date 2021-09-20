@@ -106,6 +106,9 @@ std::atomic<SimpleLoggerMgr*> SimpleLoggerMgr::instance(nullptr);
 std::mutex SimpleLoggerMgr::instanceLock;
 std::mutex SimpleLoggerMgr::displayLock;
 
+// Number of digits to represent thread IDs (Linux only).
+std::atomic<int> tid_digits(2);
+
 struct SimpleLoggerMgr::CompElem {
     CompElem(uint64_t num, SimpleLogger* logger)
         : fileNum(num), targetLogger(logger)
@@ -699,23 +702,43 @@ const std::string& SimpleLoggerMgr::getCriticalInfo() const {
 struct ThreadWrapper {
 #ifdef __linux__
     ThreadWrapper() {
-        myTid = (uint64_t)pthread_self();
+        mySelf = (uint64_t)pthread_self();
+        myTid = (uint32_t)syscall(SYS_gettid);
+
+        // Get the number of digits for alignment.
+        int num_digits = 0;
+        uint32_t tid = myTid;
+        while (tid) {
+            num_digits++;
+            tid /= 10;
+        }
+        int exp = tid_digits;
+        const size_t MAX_NUM_CMP = 10;
+        size_t count = 0;
+        while (exp < num_digits && count++ < MAX_NUM_CMP) {
+            if (tid_digits.compare_exchange_strong(exp, num_digits)) {
+                break;
+            }
+            exp = tid_digits;
+        }
+
         SimpleLoggerMgr* mgr = SimpleLoggerMgr::getWithoutInit();
         if (mgr) {
-            mgr->addThread(myTid);
+            mgr->addThread(mySelf);
         }
     }
     ~ThreadWrapper() {
         SimpleLoggerMgr* mgr = SimpleLoggerMgr::getWithoutInit();
         if (mgr) {
-            mgr->removeThread(myTid);
+            mgr->removeThread(mySelf);
         }
     }
 #else
     ThreadWrapper() : myTid(0) {}
     ~ThreadWrapper() {}
 #endif
-    uint64_t myTid;
+    uint64_t mySelf;
+    uint32_t myTid;
 };
 
 
@@ -723,9 +746,6 @@ struct ThreadWrapper {
 // ==========================================
 
 SimpleLogger::LogElem::LogElem() : len(0), status(CLEAN) {
-#ifdef SUPPRESS_TSAN_FALSE_ALARMS
-    std::lock_guard<std::mutex> l(ctxLock);
-#endif
     memset(ctx, 0x0, MSG_SIZE);
 }
 
@@ -743,33 +763,23 @@ bool SimpleLogger::LogElem::available() {
 int SimpleLogger::LogElem::write(size_t _len, char* msg) {
     Status exp = CLEAN;
     Status val = WRITING;
-    if (!status.compare_exchange_strong(exp, val, MOR)) return -1;
+    if (!status.compare_exchange_strong(exp, val)) return -1;
 
-    {
-#ifdef SUPPRESS_TSAN_FALSE_ALARMS
-        std::lock_guard<std::mutex> l(ctxLock);
-#endif
-        len = (_len > MSG_SIZE) ? MSG_SIZE : _len;
-        memcpy(ctx, msg, len);
-    }
+    len = (_len > MSG_SIZE) ? MSG_SIZE : _len;
+    memcpy(ctx, msg, len);
 
-    status.store(LogElem::DIRTY, MOR);
+    status.store(LogElem::DIRTY);
     return 0;
 }
 
 int SimpleLogger::LogElem::flush(std::ofstream& fs) {
     Status exp = DIRTY;
     Status val = FLUSHING;
-    if (!status.compare_exchange_strong(exp, val, MOR)) return -1;
+    if (!status.compare_exchange_strong(exp, val)) return -1;
 
-    {
-#ifdef SUPPRESS_TSAN_FALSE_ALARMS
-        std::lock_guard<std::mutex> l(ctxLock);
-#endif
-        fs.write(ctx, len);
-    }
+    fs.write(ctx, len);
 
-    status.store(LogElem::CLEAN, MOR);
+    status.store(LogElem::CLEAN);
     return 0;
 }
 
@@ -968,7 +978,7 @@ int SimpleLogger::start() {
     _log_sys(ll, "Start logger: %s (%zu MB per file, up to %zu files)",
              filePath.c_str(),
              maxLogFileSize / 1024 / 1024,
-             maxLogFiles);
+             maxLogFiles.load());
 
     const std::string& critical_info = mgr->getCriticalInfo();
     if (!critical_info.empty()) {
@@ -1010,6 +1020,12 @@ void SimpleLogger::setDispLevel(int level) {
     curDispLevel = level;
 }
 
+void SimpleLogger::setMaxLogFiles(size_t max_log_files) {
+    if (max_log_files == 0) return;
+
+    maxLogFiles = max_log_files;
+}
+
 #define _snprintf(msg, avail_len, cur_len, msg_len, ...)            \
     avail_len = (avail_len > cur_len) ? (avail_len - cur_len) : 0;  \
     msg_len = snprintf( msg + cur_len, avail_len, __VA_ARGS__ );    \
@@ -1034,9 +1050,14 @@ void SimpleLogger::put(int level,
                                       "FATL", "ERRO", "WARN",
                                       "INFO", "DEBG", "TRAC"};
     char msg[MSG_SIZE];
+    thread_local ThreadWrapper thread_wrapper;
+#ifdef __linux__
+    const int TID_DIGITS = tid_digits;
+    thread_local uint32_t tid_hash = thread_wrapper.myTid;
+#else
     thread_local std::thread::id tid = std::this_thread::get_id();
     thread_local uint32_t tid_hash = std::hash<std::thread::id>{}(tid) % 0x10000;
-    thread_local ThreadWrapper thread_wrapper;
+#endif
 
     // Print filename part only (excluding directory path).
     size_t last_slash = 0;
@@ -1053,6 +1074,17 @@ void SimpleLogger::put(int level,
     size_t avail_len = MSG_SIZE;
     size_t msg_len = 0;
 
+#ifdef __linux__
+    _snprintf( msg, avail_len, cur_len, msg_len,
+               "%04d-%02d-%02dT%02d:%02d:%02d.%03d_%03d%c%02d:%02d "
+               "[%*u] "
+               "[%s] ",
+               lt.year, lt.month, lt.day,
+               lt.hour, lt.min, lt.sec, lt.msec, lt.usec,
+               (tzGap >= 0)?'+':'-', tz_gap_abs / 60, tz_gap_abs % 60,
+               TID_DIGITS, tid_hash,
+               lv_names[level] );
+#else
     _snprintf( msg, avail_len, cur_len, msg_len,
                "%04d-%02d-%02dT%02d:%02d:%02d.%03d_%03d%c%02d:%02d "
                "[%04x] "
@@ -1062,6 +1094,7 @@ void SimpleLogger::put(int level,
                (tzGap >= 0)?'+':'-', tz_gap_abs / 60, tz_gap_abs % 60,
                tid_hash,
                lv_names[level] );
+#endif
 
     va_list args;
     va_start(args, format);
@@ -1110,6 +1143,16 @@ void SimpleLogger::put(int level,
 
     cur_len = 0;
     avail_len = MSG_SIZE;
+#ifdef __linux__
+    _snprintf( msg, avail_len, cur_len, msg_len,
+               " [" _CL_BROWN("%02d") ":" _CL_BROWN("%02d") ":" _CL_BROWN("%02d") "."
+               _CL_BROWN("%03d") " " _CL_BROWN("%03d")
+               "] [tid " _CL_B_BLUE("%*u") "] "
+               "[%s] ",
+               lt.hour, lt.min, lt.sec, lt.msec, lt.usec,
+               TID_DIGITS, tid_hash,
+               colored_lv_names[level] );
+#else
     _snprintf( msg, avail_len, cur_len, msg_len,
                " [" _CL_BROWN("%02d") ":" _CL_BROWN("%02d") ":" _CL_BROWN("%02d") "."
                _CL_BROWN("%03d") " " _CL_BROWN("%03d")
@@ -1118,6 +1161,7 @@ void SimpleLogger::put(int level,
                lt.hour, lt.min, lt.sec, lt.msec, lt.usec,
                tid_hash,
                colored_lv_names[level] );
+#endif
 
     if (source_file && func_name) {
         _snprintf( msg, avail_len, cur_len, msg_len,
@@ -1179,9 +1223,10 @@ void SimpleLogger::doCompression(size_t file_num) {
     cmd = "rm -f " + filename;
     execCmd(cmd);
 
+    size_t max_log_files = maxLogFiles.load();
     // Remove previous log files.
-    if (maxLogFiles && file_num >= maxLogFiles) {
-        for (size_t ii=minRevnum; ii<=file_num-maxLogFiles; ++ii) {
+    if (max_log_files && file_num >= max_log_files) {
+        for (size_t ii=minRevnum; ii<=file_num-max_log_files; ++ii) {
             filename = getLogFilePath(ii);
             std::string filename_tar = getLogFilePath(ii) + ".tar.gz";
             cmd = "rm -f " + filename + " " + filename_tar;
@@ -1218,7 +1263,6 @@ bool SimpleLogger::flush(size_t start_pos) {
         fs.open(getLogFilePath(curRevnum), std::ofstream::out | std::ofstream::app);
 
         // Compress it (tar gz). Register to the global queue.
-#ifndef SUPPRESS_TSAN_FALSE_ALARMS
         SimpleLoggerMgr* mgr = SimpleLoggerMgr::getWithoutInit();
         if (mgr) {
             numCompJobs.fetch_add(1);
@@ -1226,7 +1270,6 @@ bool SimpleLogger::flush(size_t start_pos) {
                 new SimpleLoggerMgr::CompElem(curRevnum-1, this);
             mgr->addCompElem(elem);
         }
-#endif
     }
 
     return true;
