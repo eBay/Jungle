@@ -104,7 +104,8 @@ void generate_key(const BenchConfig& conf,
         const DistDef& prefix_len = conf.prefixLengths[i];
         size_t fanout = conf.prefixFanouts[i];
 
-        uint64_t cur_mod = std::max((uint64_t)1, (conf.numKvPairs / acc_fanout));
+        uint64_t cur_mod = std::max( (uint64_t)1, 
+                                     (uint64_t)(conf.numKvPairs / acc_fanout) );
         acc_fanout *= fanout;
 
         uint64_t prefix_index = (index % cur_mod) * fanout / cur_mod;
