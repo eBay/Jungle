@@ -53,6 +53,9 @@ private:
     std::string hCompactUpto(DBWrap* target_dbw,
                              const std::vector<std::string>& tokens);
 
+    std::string hTableInfo(DBWrap* target_dbw,
+                           const std::vector<std::string>& tokens);
+
 };
 
 

@@ -316,6 +316,11 @@ public:
 
     uint32_t getKeyHash(const SizedBuf& key) const;
 
+    Status getTablesRange(const size_t level,
+                          const SizedBuf& min_key,
+                          const SizedBuf& max_key,
+                          std::list<TableInfo*>& tables_out);
+
     struct Iterator {
     public:
         Iterator();
