@@ -956,12 +956,5 @@ void TableMgr::autoClearUrgentCompactionTableIdx() {
     }
 }
 
-Status TableMgr::getTablesRange(const size_t level,
-                                const SizedBuf& min_key,
-                                const SizedBuf& max_key,
-                                std::list<TableInfo*>& tables_out) {
-    return mani->getTablesRange(level, min_key, max_key, tables_out);
-}
-
 } // namespace jungle
 

@@ -405,20 +405,31 @@ std::string CmdHandler::hTableInfo(DBWrap* target_dbw,
     } else {
         target_level = std::atoi(tokens[1].c_str());
         ss << "Target level: " << target_level << "\n";
+        if (target_level < 0) {
+            ss << "Wrong target level: "
+               << "Target level should not be smaller than 0\n";
+            return ss.str();
+        }
     }
 
     // Number of levels.
     size_t num_levels = target_dbw->db->p->tableMgr->getNumLevels();
     ss << "number of levels: " << num_levels
-       << "(bottommost level " << num_levels - 1 << ")\n";
+       << " (bottommost level " << num_levels - 1 << ")\n";
+
+    if (target_level >= (int)num_levels) {
+        ss << "Wrong target level: "
+           << "Target level should not be larger than bottommost level\n";
+        return ss.str();
+    }
 
     for (size_t ii=0; ii<num_levels; ++ii) {
         if (target_level >= 0 && target_level != (int)ii) continue;
 
         ss << "  level " << ii << ":\n";
         std::list<TableInfo*> tables;
-        target_dbw->db->p->tableMgr->getTablesRange
-                                         ( ii, SizedBuf(), SizedBuf(), tables );
+        target_dbw->db->p->tableMgr->mani->getTablesRange
+                                               ( ii, SizedBuf(), SizedBuf(), tables );
         for (auto& entry: tables) {
             TableInfo*& t_info = entry;
             TableStats t_stats;
