@@ -137,7 +137,8 @@ void CmdHandler::handleCmd(DBWrap* target_dbw) {
           { "getrecord", HANDLER_BINDER( &CmdHandler::hDumpKv ) },
           { "getmeta", HANDLER_BINDER( &CmdHandler::hDumpKv ) },
           { "dumpvalue2file", HANDLER_BINDER( &CmdHandler::hDumpKv ) },
-          { "compactupto", HANDLER_BINDER( &CmdHandler::hCompactUpto ) }
+          { "compactupto", HANDLER_BINDER( &CmdHandler::hCompactUpto ) },
+          { "tableinfo", HANDLER_BINDER( &CmdHandler::hTableInfo ) }
         } );
 
     auto entry = handlers.find(tokens[0]);
@@ -391,6 +392,88 @@ std::string CmdHandler::hCompactUpto(DBWrap* target_dbw,
     ss << "set urgent compaction table index upto " << table_idx_upto
        << ", expiry " << expiry_sec << " seconds"
        << std::endl;
+    return ss.str();
+}
+
+std::string CmdHandler::hTableInfo(DBWrap* target_dbw,
+                                   const std::vector<std::string>& tokens)
+{
+    std::stringstream ss;
+    int target_level = -1;
+    if (tokens.size() < 2) {
+        ss << "No target level specified. All levels will be shown\n";
+    } else {
+        target_level = std::atoi(tokens[1].c_str());
+        ss << "Target level: " << target_level << "\n";
+        if (target_level < 0) {
+            ss << "Wrong target level: "
+               << "Target level should not be smaller than 0\n";
+            return ss.str();
+        }
+    }
+
+    // Number of levels.
+    size_t num_levels = target_dbw->db->p->tableMgr->getNumLevels();
+    ss << "number of levels: " << num_levels
+       << " (bottommost level " << num_levels - 1 << ")\n";
+
+    if (target_level >= (int)num_levels) {
+        ss << "Wrong target level: "
+           << "Target level should not be larger than bottommost level\n";
+        return ss.str();
+    }
+
+    for (size_t ii=0; ii<num_levels; ++ii) {
+        if (target_level >= 0 && target_level != (int)ii) continue;
+
+        ss << "  level " << ii << ":\n";
+        std::list<TableInfo*> tables;
+        target_dbw->db->p->tableMgr->mani->getTablesRange
+                                               ( ii, SizedBuf(), SizedBuf(), tables );
+        for (auto& entry: tables) {
+            TableInfo*& t_info = entry;
+            TableStats t_stats;
+            t_info->file->getStats(t_stats);
+
+            ss << "    table " << t_info->number << ":\n";
+            if (ii == 0) {
+                // L0: hash partition.
+                ss << "      hash: " << t_info->hashNum << "\n";
+            } else {
+                ss << "      min key: " << HexDump::toString(t_info->minKey);
+
+                SizedBuf max_key_out;
+                SizedBuf::Holder h(max_key_out);
+                t_info->file->getMaxKey(max_key_out);
+                ss << "      max key: " << HexDump::toString(max_key_out);
+            }
+            ss << "      number of records: " << t_stats.numKvs << "\n";
+            ss << "      last sequence number: " << t_stats.lastSeqnum << "\n";
+            ss << "      space: " << t_stats.workingSetSizeByte
+               << " / " << t_stats.totalSizeByte
+               << ", " << Formatter::sizeToString(t_stats.workingSetSizeByte)
+               << " / " << Formatter::sizeToString(t_stats.totalSizeByte)
+               << "\n";
+
+            double space_perc = 0.0;
+            if (t_stats.workingSetSizeByte) {
+                space_perc = (double)t_stats.numIndexNodes * 4096 * 100;
+                space_perc /= (double)t_stats.workingSetSizeByte;
+            }
+            ss << "      space by index: " << t_stats.numIndexNodes << " nodes, "
+               << t_stats.numIndexNodes * 4096 << " / " << t_stats.workingSetSizeByte
+               << ", " << std::fixed << std::setprecision(1) << space_perc
+               << "%%\n";
+
+            ss << "      block reuse cycle: " << t_stats.blockReuseCycle << "\n";
+            ss << "      status: " << t_info->status.load() << "\n";
+
+            t_info->done();
+            ss << std::endl;
+        }
+        ss << std::endl;
+    }
+
     return ss.str();
 }
 

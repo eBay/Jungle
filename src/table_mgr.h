@@ -105,6 +105,7 @@ class TableMgr {
     friend class Compactor;
     friend class TableLockHolder;
     friend class LevelLockHolder;
+    friend class CmdHandler;
 
 private:
     struct LsmFlushResult {

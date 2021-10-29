@@ -50,6 +50,7 @@ class DB {
     friend class LogReclaimer;
     friend class MemTable;
     friend class TableMgr;
+    friend class CmdHandler;
 
 public:
     /**
