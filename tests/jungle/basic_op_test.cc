@@ -3082,6 +3082,95 @@ int key_length_limit_for_hash_test(size_t hash_len) {
     return 0;
 }
 
+int sample_key_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 1000;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    const size_t NUM = 10000;
+
+    auto insert_keys = [&]() {
+        // Shuffle (0 -- 99).
+        std::vector<size_t> idx_arr(NUM);
+        std::iota(idx_arr.begin(), idx_arr.end(), 0);
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            size_t jj = std::rand() % NUM;
+            std::swap(idx_arr[ii], idx_arr[jj]);
+        }
+
+        // Insert key-value pair.
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            size_t idx = idx_arr[ii];
+            std::string key_str = "key" + TestSuite::lzStr(5, idx);
+            std::string val_str = "val" + TestSuite::lzStr(5, idx);
+            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        }
+        return 0;
+    };
+    CHK_Z( insert_keys() );
+
+    // Get samples.
+    auto verify = [&](bool live_doc_only = false) {
+        std::list<jungle::SizedBuf> keys_out;
+        db->getSampleKeys(jungle::SamplingParams(100, live_doc_only), keys_out);
+
+        if (!live_doc_only) {
+            // If we exclude deleted keys, the number of samples may not match.
+            CHK_EQ(100, keys_out.size());
+        }
+
+        for (auto& entry: keys_out) entry.free();
+        return 0;
+    };
+    CHK_Z( verify() );
+
+    // Flush to L0 and verify.
+    CHK_Z( db->sync(false) );
+    CHK_Z( db->flushLogs() );
+    CHK_Z( verify() );
+
+    // Flush to L1 and verify.
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z( db->compactL0(jungle::CompactOptions(), ii) );
+    }
+    CHK_Z( verify() );
+
+    // Update existing keys.
+    CHK_Z( insert_keys() );
+    CHK_Z( verify() );
+
+    // Flush to L0 and verify.
+    CHK_Z( db->sync(false) );
+    CHK_Z( db->flushLogs() );
+    CHK_Z( verify() );
+
+    // Flush to L1 and verify.
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z( db->compactL0(jungle::CompactOptions(), ii) );
+    }
+    CHK_Z( verify() );
+
+    // Delete odd number keys.
+    for (size_t ii = 1; ii < NUM; ii += 2) {
+        std::string key_str = "key" + TestSuite::lzStr(5, ii);
+        CHK_Z( db->del( key_str ) );
+    }
+    CHK_Z( verify(true) );
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -3139,6 +3228,7 @@ int main(int argc, char** argv) {
               common_prefix_l1_flush_by_fast_scan_test);
     ts.doTest("key length limit for hash test",
               key_length_limit_for_hash_test, TestRange<size_t>( {24, 8, 7, 0} ));
+    ts.doTest("sample key test", sample_key_test);
 
     return 0;
 }

@@ -158,6 +158,7 @@ set(JUNGLE_CORE
     ${ROOT_SRC}/memtable.cc
     ${ROOT_SRC}/memtable_iterator.cc
     ${ROOT_SRC}/murmurhash3.cc
+    ${ROOT_SRC}/sampler.cc
     ${ROOT_SRC}/skiplist.cc
     ${ROOT_SRC}/table_append.cc
     ${ROOT_SRC}/table_compact_condition.cc
