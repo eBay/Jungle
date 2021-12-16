@@ -20,6 +20,7 @@ limitations under the License.
 #include "fileops_posix.h"
 #include "flusher.h"
 #include "internal_helper.h"
+#include "sampler.h"
 
 #include _MACRO_TO_STR(LOGGER_H)
 
@@ -878,6 +879,10 @@ Status DB::getStats(DBStats& stats_out) {
     stats_out.maxTableIndex = t_stats.maxTableIdx;
 
     return Status();
+}
+
+Status DB::getSampleKeys(const SamplingParams& params, std::list<SizedBuf> &keys_out) {
+    return Sampler::getSampleKeys(this, params, keys_out);
 }
 
 void DB::setLogLevel(int new_level) {

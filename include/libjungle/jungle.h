@@ -534,6 +534,19 @@ public:
     Status getStats(DBStats& stats_out);
 
     /**
+     * Extract sample keys.
+     *
+     * @param params Parameters for sampling.
+     * @param[out] keys_out List of sample keys in a random order without duplication.
+     *                      The caller is responsible for freeing these keys
+     *                      by calling `free()` API of `SizedBuf`.
+     *                      The number of keys in `keys_out` may be smaller than
+     *                      the requested number of samples.
+     * @return OK on success.
+     */
+    Status getSampleKeys(const SamplingParams& params, std::list<SizedBuf> &keys_out);
+
+    /**
      * Set debugging parameters.
      *
      * @param to New debugging parameters to set.

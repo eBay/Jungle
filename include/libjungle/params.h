@@ -161,6 +161,27 @@ private:
     Options value;
 };
 
+/**
+ * Sampling parameters for `getSampleKeys` API.
+ */
+struct SamplingParams {
+    SamplingParams(size_t num_samples = 100, bool live_keys_only = false)
+        : numSamples(num_samples)
+        , liveKeysOnly(live_keys_only)
+        {}
+
+    /**
+     * The number of sample keys to extract.
+     */
+    size_t numSamples;
+
+    /**
+     * If `false`, keys once existed but deleted can be included.
+     * If `true`, all returned keys are currently existing ones.
+     */
+    bool liveKeysOnly;
+};
+
 struct DebugParams {
     DebugParams()
         : compactionDelayUs(0)
