@@ -21,7 +21,8 @@ Status Sampler::getSampleKeys(DB* db,
     uint64_t min_seq = 1, max_seq = 0;
     db->getMaxSeqNum(max_seq);
     if (min_seq > max_seq) {
-        return Status::INVALID_SEQNUM;
+        // NOTE: This happens when the DB is empty, we should return OK with empty list.
+        return Status::OK;
     }
 
     uint64_t num_remaining = params.numSamples;
