@@ -3094,6 +3094,12 @@ int sample_key_test() {
     config.maxEntriesInLogFile = 1000;
     CHK_Z(jungle::DB::open(&db, filename, config));
 
+    {   // Sampling on an empty DB should be fine.
+        std::list<jungle::SizedBuf> keys_out;
+        CHK_Z( db->getSampleKeys(jungle::SamplingParams(100), keys_out) );
+        CHK_Z( keys_out.size() );
+    }
+
     const size_t NUM = 10000;
 
     auto insert_keys = [&]() {
