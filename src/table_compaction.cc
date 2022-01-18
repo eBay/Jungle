@@ -83,7 +83,11 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     SizedBuf max_key_victim;
     SizedBuf::Holder h_max_key_victim(max_key_victim);
     local_victim->file->getMaxKey(max_key_victim);
-    mani->getTablesRange(level+1, min_key_victim, max_key_victim, tables);
+
+    {   // WARNING: See the comment at `mani->removeTableFile` in `compactLevelItr`.
+        std::lock_guard<std::mutex> l(mani->getLock());
+        mani->getTablesRange(level+1, min_key_victim, max_key_victim, tables);
+    }
     _log_info( myLog, "victim table's min key %s max key %s, "
                "%zu overlapping table in level %zu",
                min_key_victim.toReadableString().c_str(),
@@ -499,6 +503,15 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
             TC( mani->addTableFile( level + 1, 0, rr.minKey, rr.tFile ) );
             rr.tFile = nullptr;
         }
+
+        // WARNING:
+        //   Other compaction threads may call `getTablesRange` right after
+        //   this API call. In such a case, if the min key of the current victim
+        //   is empty (the smallest table), the table list that other threads
+        //   get is incomplete and results in data corruption.
+        //
+        //   Hence, all threads who are going to write data to the same level
+        //   should hold `mani->getLock()`.
         mani->removeTableFile(level, local_victim);
 
         // NOTE:
@@ -506,9 +519,8 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
         //   create an empty table for the same range, to avoid unnecessary
         //   split in the future.
         //
-        //   This operation will be safe against the race with compaction
-        //   that tries to write some keys into this range, as long as we
-        //   hold lock for `local_victim`.
+        //   This operation is protected by `mani->getLock()`. Concurrent read
+        //   threads should be fine without the lock.
         if (level > 0 && !is_last_level) {
             size_t num_tables_lv = 0;
             // Only if the number of tables is not enough, if there are
@@ -583,7 +595,10 @@ Status TableMgr::migrateLevel(const CompactOptions& options,
 
     // List of overlapping tables (before compaction) in the next level.
     std::list<TableInfo*> tables;
-    mani->getTablesRange(level, empty_key, empty_key, tables);
+    {   // WARNING: See the comment at `mani->removeTableFile` in `compactLevelItr`.
+        std::lock_guard<std::mutex> l(mani->getLock());
+        mani->getTablesRange(level, empty_key, empty_key, tables);
+    }
     if (tables.empty()) return Status::INVALID_LEVEL;
 
    try {

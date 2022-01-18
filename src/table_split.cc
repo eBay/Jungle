@@ -389,7 +389,10 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
     // Find the target table (i.e., right before the victim).
     std::list<TableInfo*> tables;
     SizedBuf empty_key;
-    mani->getTablesRange(level, empty_key, empty_key, tables);
+    {   // WARNING: See the comment at `mani->removeTableFile` in `compactLevelItr`.
+        std::lock_guard<std::mutex> l(mani->getLock());
+        mani->getTablesRange(level, empty_key, empty_key, tables);
+    }
 
     TableInfo* target_table = nullptr;
     for (TableInfo* tt: tables) {
@@ -535,7 +538,10 @@ Status TableMgr::fixTable(const CompactOptions& options,
     // Find the target table (i.e., right before the victim).
     std::list<TableInfo*> tables;
     SizedBuf empty_key;
-    mani->getTablesRange(level, empty_key, empty_key, tables);
+    {   // WARNING: See the comment at `mani->removeTableFile` in `compactLevelItr`.
+        std::lock_guard<std::mutex> l(mani->getLock());
+        mani->getTablesRange(level, empty_key, empty_key, tables);
+    }
 
     TableInfo* target_table = nullptr;
     for (TableInfo* tt: tables) {
