@@ -269,7 +269,8 @@ public:
         if (mani) mani->setLogger(myLog);
     }
 
-    Status getStats(TableStats& aggr_stats_out);
+    Status getStats(TableStats& aggr_stats_out,
+                    TableHierarchy* th_out = nullptr);
 
     Status getLastSeqnum(uint64_t& seqnum_out);
 

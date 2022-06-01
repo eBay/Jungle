@@ -15,7 +15,6 @@ limitations under the License.
 **************************************************************************/
 
 #include "jungle_test_common.h"
-#include "libjungle/params.h"
 
 #include <numeric>
 #include <random>
@@ -1634,28 +1633,68 @@ int get_stat_test() {
     g_config.fdbCacheSize = 128*1024*1024;
     jungle::init(g_config);
 
+    config.maxEntriesInLogFile = 1000;
     CHK_Z(jungle::DB::open(&db, filename, config));
 
-    // Set KV pairs.
-    int n = 10;
-    std::vector<jungle::KV> kv(n);
-    CHK_Z(_init_kv_pairs(n, kv, "key", "value"));
-    CHK_Z(_set_byseq_kv_pairs(0, n, 0, db, kv));
+    const size_t NUM = 10000;
 
-    // Sync and async flush.
-    CHK_Z(db->sync());
-    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    auto insert_keys = [&]() {
+        // Shuffle (0 -- 99).
+        std::vector<size_t> idx_arr(NUM);
+        std::iota(idx_arr.begin(), idx_arr.end(), 0);
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            size_t jj = std::rand() % NUM;
+            std::swap(idx_arr[ii], idx_arr[jj]);
+        }
 
-    jungle::DBStats stats_out;
-    CHK_Z(db->getStats(stats_out));
-    CHK_EQ(n, stats_out.numKvs);
-    CHK_GT(stats_out.workingSetSizeByte, n*10);
-    CHK_EQ(stats_out.cacheSizeByte, g_config.fdbCacheSize);
-    CHK_GT(stats_out.cacheUsedByte, 0);
+        // Insert key-value pair.
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            size_t idx = idx_arr[ii];
+            std::string key_str = "key" + TestSuite::lzStr(5, idx);
+            std::string val_str = "val" + TestSuite::lzStr(5, idx);
+            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        }
+        return 0;
+    };
+    CHK_Z( insert_keys() );
+
+    // Flush to L0.
+    CHK_Z( db->sync(false) );
+    CHK_Z( db->flushLogs() );
+
+    // Flush to L1.
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z( db->compactL0(jungle::CompactOptions(), ii) );
+    }
+
+    // Update existing keys.
+    CHK_Z( insert_keys() );
+
+    // Flush to L0 and verify.
+    CHK_Z( db->sync(false) );
+    CHK_Z( db->flushLogs() );
+
+    // Get DB stats with hierarchy flag.
+    jungle::DBStatsOptions opt;
+    opt.getTableHierarchy = true;
+    jungle::DBStats stats;
+    CHK_Z(db->getStats(stats, opt));
+    CHK_GT(stats.numKvs, NUM);
+    CHK_GT(stats.workingSetSizeByte, NUM * 16);
+    CHK_EQ(stats.cacheSizeByte, g_config.fdbCacheSize);
+    CHK_GT(stats.cacheUsedByte, 0);
+
+    CHK_EQ(2, stats.tableHierarchy.size());
+    CHK_EQ(config.numL0Partitions, stats.tableHierarchy[0].size());
+    CHK_GT(stats.tableHierarchy[1].size(), config.numL0Partitions);
+
+    // Without hierarchy flag.
+    jungle::DBStats stats_wo;
+    CHK_Z(db->getStats(stats_wo));
+    CHK_EQ(0, stats_wo.tableHierarchy.size());
 
     CHK_Z(jungle::DB::close(db));
     CHK_Z(jungle::shutdown());
-    _free_kv_pairs(n, kv);
 
     TEST_SUITE_CLEANUP_PATH();
     return 0;

@@ -800,7 +800,8 @@ Status TableMgr::getAvailCheckpoints(std::list<uint64_t>& chk_out) {
     return Status();
 }
 
-Status TableMgr::getStats(TableStats& aggr_stats_out) {
+Status TableMgr::getStats(TableStats& aggr_stats_out,
+                          TableHierarchy* th_out) {
     Status s;
     aggr_stats_out.numKvs = 0;
 
@@ -824,6 +825,19 @@ Status TableMgr::getStats(TableStats& aggr_stats_out) {
 
         min_table_idx = std::min(cur_table->number, min_table_idx);
         max_table_idx = std::max(cur_table->number, max_table_idx);
+
+        if (th_out) {
+            TableHierarchyInfo thi;
+            thi.level = cur_table->level;
+            thi.tableIdx = cur_table->number;
+            if (thi.level == 0) {
+                thi.partitionIdx = cur_table->hashNum;
+            } else {
+                cur_table->minKey.copyTo(thi.minKey);
+            }
+
+            (*th_out)[thi.level].push_back( std::move(thi) );
+        }
 
         cur_table->done();
     }

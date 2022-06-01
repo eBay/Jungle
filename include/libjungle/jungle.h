@@ -531,7 +531,8 @@ public:
      * @param[out] stats_out Stats as a result of this API call.
      * @return OK on success.
      */
-    Status getStats(DBStats& stats_out);
+    Status getStats(DBStats& stats_out,
+                    const DBStatsOptions& opt = DBStatsOptions());
 
     /**
      * Extract sample keys.

@@ -832,7 +832,7 @@ Status DB::delRecord(const Record& rec) {
     return p->logMgr->setSN(rec_local);
 }
 
-Status DB::getStats(DBStats& stats_out) {
+Status DB::getStats(DBStats& stats_out, const DBStatsOptions& opt) {
     Status s;
     EP( p->checkHandleValidity() );
 
@@ -870,7 +870,12 @@ Status DB::getStats(DBStats& stats_out) {
     }
 
     TableStats t_stats;
-    if (p && p->tableMgr) p->tableMgr->getStats(t_stats);
+    if (p && p->tableMgr) {
+        p->tableMgr->getStats( t_stats,
+                               ( opt.getTableHierarchy
+                                 ? &stats_out.tableHierarchy
+                                 : nullptr ) );
+    }
     stats_out.numKvs = t_stats.numKvs + num_kvs_log;
     stats_out.workingSetSizeByte = t_stats.workingSetSizeByte;
     stats_out.numIndexNodes = t_stats.numIndexNodes;
