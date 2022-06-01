@@ -16,10 +16,85 @@ limitations under the License.
 
 #pragma once
 
+#include "sized_buf.h"
+
+#include <list>
+#include <map>
+
 #include <stddef.h>
 #include <stdint.h>
 
 namespace jungle {
+
+class DBStatsOptions {
+public:
+    DBStatsOptions() : getTableHierarchy(false) {}
+
+    /**
+     * If `true`, `DBStats` will include the info of all tables throughout all levels.
+     */
+    bool getTableHierarchy;
+};
+
+class TableHierarchyInfo {
+public:
+    TableHierarchyInfo()
+        : tableIdx(0)
+        , level(0)
+        , partitionIdx(0)
+        {}
+
+    TableHierarchyInfo(TableHierarchyInfo&& src)
+        : tableIdx(src.tableIdx)
+        , level(src.level)
+        , partitionIdx(src.partitionIdx)
+    {
+        src.minKey.moveTo(minKey);
+    }
+
+    TableHierarchyInfo& operator=(TableHierarchyInfo&& src) {
+        tableIdx = src.tableIdx;
+        level = src.level;
+        partitionIdx = src.partitionIdx;
+        src.minKey.moveTo(minKey);
+        return *this;
+    }
+
+    // No copy.
+    TableHierarchyInfo(const TableHierarchyInfo& src) = delete;
+    TableHierarchyInfo& operator=(const TableHierarchyInfo& src) = delete;
+
+    ~TableHierarchyInfo() {
+        minKey.free();
+    }
+
+    /**
+     * Table index number.
+     */
+    uint64_t tableIdx;
+
+    /**
+     * Level that this table belongs to.
+     */
+    uint32_t level;
+
+    /**
+     * Minimum key that this table has (only for L1+).
+     * This buffer will be freed when `TableHierarchyInfo` instnace is destroyed.
+     */
+    SizedBuf minKey;
+
+    /**
+     * Hash partition index (only for L0).
+     */
+    uint32_t partitionIdx;
+};
+
+/**
+ * Set of `TableHierarchyInfo` for each level.
+ * Key: level, value: list of `TableHierarchyInfo`.
+ */
+using TableHierarchy = std::map<uint32_t, std::list<TableHierarchyInfo>>;
 
 class DBStats {
 public:
@@ -110,7 +185,12 @@ public:
      */
     uint64_t maxLogIndex;
 
-
+    /**
+     * [Local]
+     * The details of all tables throughout all levels.
+     * The value will be returned only when the corresponding option is set.
+     */
+    TableHierarchy tableHierarchy;
 };
 
 } // namespace jungle
