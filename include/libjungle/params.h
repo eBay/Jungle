@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 
 namespace jungle {
@@ -77,13 +78,20 @@ class CompactOptions {
 public:
     CompactOptions()
         : preserveTombstone(false)
+        , ignoreThreshold(false)
         {}
 
     /**
-     * If true, deletion marker (i.e., tombstone) will be
+     * If `true`, deletion marker (i.e., tombstone) will be
      * alive even after compaction.
      */
     bool preserveTombstone;
+
+    /**
+     * If `true`, the victim table will be picked up in a round robin
+     * manner, even though it does not meet the compaction threshold.
+     */
+    bool ignoreThreshold;
 };
 
 /**
