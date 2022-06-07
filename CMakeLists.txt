@@ -220,5 +220,6 @@ if (CODE_COVERAGE GREATER 0)
                      table_lookup_booster_test
                      compression_test
                      atomic_batch_test
+                     builder_test
     )
 endif()

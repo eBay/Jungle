@@ -34,3 +34,4 @@ $VALGRIND ./tests/log_reclaim_test --abort-on-failure
 $VALGRIND ./tests/level_extension_test --abort-on-failure
 $VALGRIND ./tests/compression_test --abort-on-failure
 $VALGRIND ./tests/atomic_batch_test --abort-on-failure
+$VALGRIND ./tests/builder_test --abort-on-failure

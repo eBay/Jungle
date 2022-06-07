@@ -98,9 +98,11 @@ public:
     uint64_t numIndexNodes;
 };
 
+namespace builder { class Builder; }
 namespace checker { class Checker; }
 
 class TableMgr {
+    friend class builder::Builder;
     friend class checker::Checker;
     friend class Compactor;
     friend class TableLockHolder;

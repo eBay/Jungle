@@ -41,16 +41,45 @@ public:
         , fDirectOps(nullptr)
         , prefixNum(0)
         , dbConfig(nullptr)
+        , startSeqnum(1)
         {}
 
+    /**
+     * DB path.
+     */
     std::string path;
+
+    /**
+     * Filesystem operations.
+     */
     FileOps* fOps;
+
+    /**
+     * Filesystem operations if Direct IO is used.
+     */
     FileOps* fDirectOps;
-    // KVS ID.
+
+    /**
+     * KVStore ID.
+     */
     uint64_t prefixNum;
+
+    /**
+     * KVStore name.
+     */
     std::string kvsName;
-    // Pointer to the parent DB handle's config.
+
+    /**
+     * Pointer to the parent DB handle's config.
+     */
     const DBConfig* dbConfig;
+
+    /**
+     * Start sequence number if the DB is created for the first time.
+     * The first record will be assigned to this sequence number.
+     * If not given, sequence number starts from 1.
+     */
+    uint64_t startSeqnum;
 };
 
 // Semaphore that allows only one operation at a time.
@@ -92,11 +121,11 @@ class LogMgr {
     friend class GlobalBatchExecutor;
 
 public:
-    LogMgr(DB* parent_db, const LogMgrOptions& _options = LogMgrOptions());
+    LogMgr(DB* parent_db, const LogMgrOptions& lm_opt = LogMgrOptions());
 
     ~LogMgr();
 
-    Status init(const LogMgrOptions& _options);
+    Status init(const LogMgrOptions& lm_opt);
 
     void logMgrSettings();
 

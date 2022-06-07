@@ -52,6 +52,11 @@ add_executable(basic_op_test ${BASIC_OP_TEST})
 target_link_libraries(basic_op_test ${JUNGLE_TEST_DEPS})
 add_dependencies(basic_op_test static_lib)
 
+set(BUILDER_TEST ${TEST_DIR}/jungle/builder_test.cc)
+add_executable(builder_test ${BUILDER_TEST})
+target_link_libraries(builder_test ${JUNGLE_TEST_DEPS})
+add_dependencies(builder_test static_lib)
+
 set(SEQ_ITR_TEST ${TEST_DIR}/jungle/seq_itr_test.cc)
 add_executable(seq_itr_test ${SEQ_ITR_TEST})
 target_link_libraries(seq_itr_test ${JUNGLE_TEST_DEPS})

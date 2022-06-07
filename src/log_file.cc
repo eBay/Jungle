@@ -733,6 +733,13 @@ uint64_t LogFile::getSyncedSeqNum() const {
     }
 }
 
+Status LogFile::updateMaxSeqNum(uint64_t seq_num) {
+    if (!mTable) {
+        return Status::NOT_INITIALIZED;
+    }
+    return mTable->updateMaxSeqNum(seq_num);
+}
+
 uint64_t LogFile::getMaxSeqNum() const {
     if (mTable) {
         return mTable->maxSeqNum.load(MOR);
