@@ -183,6 +183,7 @@ public:
 
     Status extendLevel();
     Status issueTableNumber(uint64_t& new_table_number);
+    void adjustMaxTableNumber(uint64_t new_max);
     Status addTableFile(size_t level_num,
                         uint32_t hash_num,
                         SizedBuf min_key,
