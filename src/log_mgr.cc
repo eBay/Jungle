@@ -31,10 +31,10 @@ limitations under the License.
 
 namespace jungle {
 
-LogMgr::LogMgr(DB* parent_db, const LogMgrOptions& _options)
+LogMgr::LogMgr(DB* parent_db, const LogMgrOptions& lm_opt)
     : parentDb(parent_db)
     , initialized(false)
-    , opt(_options)
+    , opt(lm_opt)
     , mani(nullptr)
     , throttlingRate(0)
     , lastFlushIntervalMs(0)
@@ -52,10 +52,10 @@ LogMgr::~LogMgr() {
     delete mani;
 }
 
-Status LogMgr::init(const LogMgrOptions& _options) {
+Status LogMgr::init(const LogMgrOptions& lm_opt) {
     if (mani) return Status::ALREADY_INITIALIZED;
 
-    opt = _options;
+    opt = lm_opt;
     syncSema.enabled = true;
     flushSema.enabled = true;
     reclaimSema.enabled = true;
@@ -117,7 +117,14 @@ Status LogMgr::init(const LogMgrOptions& _options) {
                               && FileOps::supportDirectIO()
                           ? opt.fDirectOps : opt.fOps,
                           log_num,
-                          0));
+                          opt.startSeqnum - 1));
+        if (opt.startSeqnum > 1) {
+            // If start seqnum is given on the initialization,
+            // set sync/flush seqnum properly for the first log file.
+            l_file->updateMaxSeqNum(opt.startSeqnum - 1);
+            l_file->setFlushedSeqNum(opt.startSeqnum - 1);
+            l_file->setSyncedSeqNum(opt.startSeqnum - 1);
+        }
         TC(mani->addNewLogFile(log_num, l_file, 1));
 
        } catch (Status s) {
@@ -169,7 +176,9 @@ Status LogMgr::init(const LogMgrOptions& _options) {
 
 void LogMgr::logMgrSettings() {
     DBMgr* mgr = DBMgr::getWithoutInit();
-    assert(mgr);
+    // NOTE: `DBMgr` may not be initialized if `LogMgr` is being
+    //       used by external tool. We can just ignore it.
+    if (!mgr) return;
 
     GlobalConfig* g_conf = mgr->getGlobalConfig();
 

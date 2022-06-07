@@ -123,7 +123,10 @@ public:
     uint64_t getMinSeqNum() const;
     uint64_t getFlushedSeqNum() const;
     uint64_t getSyncedSeqNum() const;
+
+    Status updateMaxSeqNum(uint64_t seq_num);
     uint64_t getMaxSeqNum() const;
+
     uint64_t getLogFileNum() const { return logFileNum; }
 
     void setImmutable();

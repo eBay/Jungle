@@ -882,6 +882,10 @@ uint64_t TableMgr::getBoosterLimit(size_t level) const {
     // Invalid mode.
     if (!db_config->nextLevelExtension) return 0;
 
+    // NOTE: Manifest may not be initialized if Manager is being used by
+    //       external tool. We can just ignore it.
+    if (!mani) return 0;
+
     // Only for level 0 and 1.
     if ( level >= 2 ||
          level + 1 > db_config->lookupBoosterLimit_mb.size() ) {

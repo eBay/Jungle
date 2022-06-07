@@ -17,6 +17,7 @@ limitations under the License.
 #include "bloomfilter.h"
 #include "db_mgr.h"
 #include "fileops_posix.h"
+#include "mutable_table_mgr.h"
 #include "table_file.h"
 #include "table_mgr.h"
 #include "test_common.h"
@@ -33,13 +34,6 @@ limitations under the License.
 using namespace jungle;
 
 namespace bf_generator {
-
-class MutableTableMgr : public TableMgr {
-public:
-    MutableTableMgr(DB* parent_db) : TableMgr(parent_db) {}
-
-    void setOpt(const TableMgrOptions& to) { opt = to; }
-};
 
 enum BfMode {
     ORIGINAL = 0x0,
