@@ -447,6 +447,13 @@ Status TableManifest::issueTableNumber(uint64_t& new_table_number) {
     return Status();
 }
 
+void TableManifest::adjustMaxTableNumber(uint64_t new_max) {
+    uint64_t cur_max = maxTableNum;
+    do {
+        if (valid_number(cur_max) && cur_max >= new_max) break;
+    } while (!maxTableNum.compare_exchange_strong(cur_max, new_max));
+}
+
 Status TableManifest::addTableFile(size_t level,
                                    uint32_t hash_num,
                                    SizedBuf min_key,

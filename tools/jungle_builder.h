@@ -101,13 +101,13 @@ static Status buildFromTableFiles(const BuildParams& params) {
 
     // 1) Find the table with the smallest key.
     // 2) Find the biggest seq number.
-    uint64_t min_table_number = 0;
+    uint64_t minkey_table_number = 0;
     uint64_t max_seqnum = 0;
     std::string cur_min_key;
     for (auto& td: params.tables) {
         if (td.minKey < cur_min_key) {
             cur_min_key = td.minKey;
-            min_table_number = td.tableNumber;
+            minkey_table_number = td.tableNumber;
         }
         max_seqnum = std::max(td.maxSeqnum, max_seqnum);
     }
@@ -122,7 +122,7 @@ static Status buildFromTableFiles(const BuildParams& params) {
 
         // WARNING: If smallest table, put empty minkey.
         SizedBuf table_min_key;
-        if (min_table_number != td.tableNumber) {
+        if (minkey_table_number != td.tableNumber) {
             table_min_key = SizedBuf(td.minKey);
         }
         EP( t_mani.addTableFile(1, 0, table_min_key, t_file) );
@@ -140,6 +140,9 @@ static Status buildFromTableFiles(const BuildParams& params) {
         EP( t_file->create(0, table_number, t_filename, &f_ops, t_opt) );
         EP( t_mani.addTableFile(0, ii, SizedBuf(), t_file) );
     }
+
+    // Adjust max table number.
+    t_mani.adjustMaxTableNumber(max_table_num);
 
     // Flush manifest file.
     t_mani.store(true);
