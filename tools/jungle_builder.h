@@ -70,6 +70,7 @@ struct BuildParams {
 
     /**
      * List of tables.
+     * If this list is empty, an empty DB instance will be created.
      */
     std::list<TableData> tables;
 };
@@ -96,8 +97,10 @@ static Status buildFromTableFiles(const BuildParams& params) {
 
     t_mgr.mani = &t_mani;
 
-    // Make level 1.
-    EP( t_mani.extendLevel() );
+    // Make level 1 (only when `tables` is not empty).
+    if (!params.tables.empty()) {
+        EP( t_mani.extendLevel() );
+    }
 
     // 1) Find the table with the smallest key.
     // 2) Find the biggest seq number.
