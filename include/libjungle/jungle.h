@@ -133,6 +133,22 @@ public:
                         const uint64_t checkpoint = 0);
 
     /**
+     * [Experimental]
+     * Make a clone of manifest files, and write them in the given path.
+     * Other processes can open the current DB instance with the cloned
+     * manifest files, which works as a snapshot, while this process is
+     * still able to modify it.
+     *
+     * Currently support for log store mode only.
+     *
+     * @param target_path Output path where manifest files will be stored.
+     * @param snap_out Snapshot instance to avoid removing files.
+     * @return OK on success.
+     */
+    Status cloneManifest(const std::string& target_path,
+                         DB** snap_out);
+
+    /**
      * Rollback the given instance to the given sequence number.
      * Only supported in log section mode now.
      *

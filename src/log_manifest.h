@@ -229,6 +229,8 @@ public:
 
     Status store(bool call_fsync);
 
+    Status clone(const std::string& dst_path);
+
     static Status copyFile(FileOps* f_ops,
                            const std::string& src_file,
                            const std::string& dst_file);

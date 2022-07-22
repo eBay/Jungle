@@ -178,6 +178,7 @@ public:
     Status load(const std::string& path,
                 const uint64_t prefix_num,
                 const std::string& filename);
+    Status clone(const std::string& dst_path);
     Status store(bool call_fsync);
     Status storeTableStack(RwSerializer& ss, TableInfo* base_table);
 
@@ -242,32 +243,59 @@ private:
     void pushTablesInStack(TableInfo* t_info,
                            std::list<TableInfo*>& tables_out);
 
-    // Backward pointer to table manager.
+    /**
+     * Backward pointer to table manager.
+     */
     const TableMgr* tableMgr;
 
-    // File operations.
+    /**
+     * File operations.
+     */
     FileOps* fOps;
 
-    // Manifest file handle.
+    /**
+     * Manifest file handle.
+     */
     FileHandle* mFile;
 
-    // Path.
+    /**
+     * DB path.
+     */
     std::string dirPath;
 
-    // Manifest file name.
+    /**
+     * Manifest file name.
+     */
     std::string mFileName;
 
-    // Total LSM levels.
+    /**
+     * Lock for level info.
+     */
     std::mutex levelsLock;
+
+    /**
+     * Level info.
+     */
     std::vector<LevelInfo*> levels;
 
-    // Current greatest table number.
+    /**
+     * Current greatest table number.
+     */
     std::atomic<uint64_t> maxTableNum;
 
-    // To guarantee atomic update of manifest.
+    /**
+     * To guarantee atomic update of manifest.
+     */
     std::mutex tableUpdateLock;
 
-    // Logger.
+    /**
+     * Only one thread is allowed to write the manifest file.
+     */
+    std::mutex mFileWriteLock;
+
+    /**
+     * Logger.
+     */
     SimpleLogger* myLog;
 };
 

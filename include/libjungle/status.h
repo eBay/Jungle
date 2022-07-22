@@ -90,6 +90,7 @@ public:
         INVALID_CONFIG                  = -63,
         DECOMPRESSION_FAILED            = -64,
         OPERATION_STOPPED               = -65,
+        MANIFEST_NOT_EXIST              = -66,
 
         ERROR                           = -32768
     };
@@ -171,8 +172,9 @@ public:
                 "UNKNOWN_LOG_FLAG",
                 "EMPTY_BATCH",
                 "INVALID_CONFIG",
-                "DECOMPRESSION_FAILED"
-                "OPERATION_STOPPED"
+                "DECOMPRESSION_FAILED",
+                "OPERATION_STOPPED",
+                "MANIFEST_NOT_EXIST"
                 } );
         uint32_t index = -val;
         if (index < names.size()) {
