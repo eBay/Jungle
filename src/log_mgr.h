@@ -125,6 +125,8 @@ public:
 
     ~LogMgr();
 
+    std::string getManifestFilename() const;
+
     Status init(const LogMgrOptions& lm_opt);
 
     void logMgrSettings();
@@ -139,6 +141,11 @@ public:
                         const uint64_t checkpoint,
                         std::list<LogFileInfo*>*& log_file_list_out);
     Status closeSnapshot(DB* snap_handle);
+
+    Status cloneManifest(DB* snap_handle,
+                         const uint64_t checkpoint,
+                         const std::string& dst_path,
+                         std::list<LogFileInfo*>*& log_file_list_out);
 
     void lockWriteMutex();
 

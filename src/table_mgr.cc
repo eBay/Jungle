@@ -162,6 +162,12 @@ void TableMgr::logTableSettings(const DBConfig* db_config) {
               PrimeNumber::getUpper(db_config->numExpectedUserThreads));
 }
 
+std::string TableMgr::getManifestFilename() const {
+    char m_filename[256];
+    sprintf(m_filename, "table%04" PRIu64 "_manifest", opt.prefixNum);
+    return m_filename;
+}
+
 Status TableMgr::init(const TableMgrOptions& _options) {
     if (mani) return Status::ALREADY_INITIALIZED;
 
@@ -185,9 +191,15 @@ Status TableMgr::init(const TableMgrOptions& _options) {
     mani = new TableManifest(this, opt.fOps);
     mani->setLogger(myLog);
 
-    char p_num[16];
-    sprintf(p_num, "%04" PRIu64, opt.prefixNum);
-    std::string m_filename = opt.path + "/table" + p_num + "_manifest";
+    std::string m_filename;
+    if (opt.dbConfig->customManifestPath.empty()) {
+        // Normal open: manifest file in the same path.
+        m_filename = opt.path + "/" + getManifestFilename();
+    } else {
+        // Custom open: manifest file in the custom path.
+        m_filename = opt.dbConfig->customManifestPath + "/" + getManifestFilename();
+        _log_info(myLog, "open custom manifest: %s", m_filename.c_str());
+    }
 
    try {
     if (opt.fOps->exist(m_filename.c_str())) {
@@ -241,6 +253,12 @@ Status TableMgr::init(const TableMgrOptions& _options) {
 
     } else {
         // Not exist, initial setup phase.
+
+        // If `m_filename` is from custom path, should return error.
+        if (!opt.dbConfig->customManifestPath.empty()) {
+            _log_err(myLog, "custom manifest does not exist: %s", m_filename.c_str());
+            throw Status(Status::MANIFEST_NOT_EXIST);
+        }
 
         // Create manifest file.
         s = mani->create(opt.path, m_filename);
@@ -299,9 +317,7 @@ Status TableMgr::removeStaleFiles() {
     prefix += "_";
     size_t prefix_len = prefix.size();
 
-    std::string m_filename = "table";
-    m_filename += p_num;
-    m_filename += "_manifest";
+    std::string m_filename = getManifestFilename();
 
     std::set<uint64_t> table_numbers;
     mani->getTableNumbers(table_numbers);
@@ -330,6 +346,20 @@ Status TableMgr::shutdown() {
     if (fs != FDB_RESULT_SUCCESS) {
         return Status::ERROR;
     }
+    return Status();
+}
+
+Status TableMgr::cloneManifest(DB* snap_handle,
+                               const uint64_t checkpoint,
+                               const std::string& dst_path,
+                               std::list<TableInfo*>*& table_list_out)
+{
+    Status s;
+    EP( openSnapshot(snap_handle, checkpoint, table_list_out) );
+
+    // Clone manifest file only when opening snapshot succeeds.
+    EP( mani->clone(dst_path) );
+
     return Status();
 }
 

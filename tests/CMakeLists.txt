@@ -97,6 +97,11 @@ add_executable(log_reclaim_test ${LOG_RECLAIM_TEST})
 target_link_libraries(log_reclaim_test ${JUNGLE_TEST_DEPS})
 add_dependencies(log_reclaim_test static_lib)
 
+set(CUSTOM_MANI_VERIFIER ${TEST_DIR}/jungle/custom_mani_verifier.cc)
+add_executable(custom_mani_verifier ${CUSTOM_MANI_VERIFIER})
+target_link_libraries(custom_mani_verifier ${JUNGLE_TEST_DEPS})
+add_dependencies(custom_mani_verifier static_lib)
+
 set(COMPRESSION_TEST ${TEST_DIR}/jungle/compression_test.cc)
 add_executable(compression_test ${COMPRESSION_TEST})
 target_link_libraries(compression_test ${JUNGLE_TEST_DEPS})

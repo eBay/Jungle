@@ -66,6 +66,15 @@ Status DB::open(DB** ptr_out,
         return Status();
     }
 
+    if (!db_config.customManifestPath.empty()) {
+        // If custom manifest path is given,
+        // both log section mode and read only mode should be enabled.
+        if ( !db_config.logSectionOnly ||
+             !db_config.readOnly ) {
+            return Status::INVALID_CONFIG;
+        }
+    }
+
    try {
     db = new DB();
     db->p->path = path;
@@ -91,7 +100,12 @@ Status DB::open(DB** ptr_out,
     // Start logger if enabled.
     if ( db->p->dbConfig.allowLogging &&
          !db->p->myLog ) {
-        std::string logfile = db->p->path + "/system_logs.log";
+        std::string logfile;
+        if (db_config.customManifestPath.empty()) {
+            logfile = db->p->path + "/system_logs.log";
+        } else {
+            logfile = db_config.customManifestPath + "/system_logs.log";
+        }
         db->p->myLog = new SimpleLogger(logfile, 1024, 32*1024*1024, 4);
         db->p->myLog->setLogLevel(4);
         db->p->myLog->setDispLevel(-1);
@@ -293,6 +307,27 @@ Status DB::openSnapshot(DB** snap_out,
     *snap_out = snap;
 
     return Status();
+}
+
+Status DB::cloneManifest(const std::string& target_path,
+                         DB** snap_out)
+{
+    Status s;
+    EP( p->checkHandleValidity() );
+
+    uint64_t chk_local = 0;
+    p->logMgr->getMaxSeqNum(chk_local);
+
+    uint64_t last_flush_seq = 0;
+    p->logMgr->getLastFlushedSeqNum(last_flush_seq);
+
+    DB* snap = new DB(this, last_flush_seq, chk_local);
+
+    p->logMgr->cloneManifest(snap, chk_local, target_path, snap->sn->logList);
+    p->tableMgr->cloneManifest(snap, chk_local, target_path, snap->sn->tableList);
+    *snap_out = snap;
+
+    return s;
 }
 
 Status DB::rollback(uint64_t seqnum_upto)

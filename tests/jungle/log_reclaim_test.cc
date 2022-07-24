@@ -17,7 +17,9 @@ limitations under the License.
 #include "jungle_test_common.h"
 
 #include "internal_helper.h"
+#include "libjungle/params.h"
 
+#include <cstdlib>
 #include <fstream>
 #include <vector>
 
@@ -1350,9 +1352,81 @@ int get_log_file_info_byseq_race_test() {
     return 0;
 }
 
+static std::string exec_file_path;
+
+int manifest_clone_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    config.logSectionOnly = true;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    auto write_log = [&](size_t ii) -> int {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+        return 0;
+    };
+
+    for (size_t ii=1; ii<=95; ++ii) {
+        write_log(ii);
+    }
+    CHK_Z( db->sync(false) );
+
+    std::string clone_path = filename + "/cloned_manifest";
+    TestSuite::mkdir(clone_path);
+
+    jungle::DB* snap;
+    CHK_Z( db->cloneManifest(clone_path, &snap) );
+
+    // Assuming the mani verifier is in the same directory.
+    std::string cmd = exec_file_path + "/custom_mani_verifier " +
+                      filename + " " +
+                      clone_path + " 1 95";
+
+    CHK_Z( ::system(cmd.c_str()) );
+
+    // Put more logs.
+    for (size_t ii=96; ii<=105; ++ii) {
+        write_log(ii);
+    }
+    // Should have no problem with reading logs.
+    CHK_Z( ::system(cmd.c_str()) );
+
+    // Truncate log.
+    jungle::FlushOptions f_opt;
+    f_opt.purgeOnly = true;
+    CHK_Z( db->flushLogs(f_opt, 50) );
+
+    // The other process should be able to see the old logs.
+    CHK_Z( ::system(cmd.c_str()) );
+
+    jungle::DB::close(snap);
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
+    // Extract dir path from the executable file path.
+    std::string exec_file = argv[0];
+    size_t pos = exec_file.rfind("/");
+    if (pos == std::string::npos) {
+        exec_file_path = "./";
+    } else {
+        exec_file_path = exec_file.substr(0, pos);
+    }
+
     TestSuite ts(argc, argv);
 
     //ts.options.printTestMessage = true;
@@ -1411,6 +1485,9 @@ int main(int argc, char** argv) {
 
     ts.doTest("get log file info byseq race test",
               get_log_file_info_byseq_race_test);
+
+    ts.doTest("manifest clone test",
+              manifest_clone_test);
 
 
 #if 0

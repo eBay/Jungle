@@ -52,6 +52,12 @@ LogMgr::~LogMgr() {
     delete mani;
 }
 
+std::string LogMgr::getManifestFilename() const {
+    char m_filename[256];
+    sprintf(m_filename, "log%04" PRIu64 "_manifest", opt.prefixNum);
+    return m_filename;
+}
+
 Status LogMgr::init(const LogMgrOptions& lm_opt) {
     if (mani) return Status::ALREADY_INITIALIZED;
 
@@ -80,9 +86,15 @@ Status LogMgr::init(const LogMgrOptions& lm_opt) {
     }
 
    try {
-    char p_num[16];
-    sprintf(p_num, "%04" PRIu64, opt.prefixNum);
-    std::string m_filename = opt.path + "/log" + p_num + "_manifest";
+    std::string m_filename;
+    if (opt.dbConfig->customManifestPath.empty()) {
+        // Normal open: manifest file in the same path.
+        m_filename = opt.path + "/" + getManifestFilename();
+    } else {
+        // Custom open: manifest file in the custom path.
+        m_filename = opt.dbConfig->customManifestPath + "/" + getManifestFilename();
+        _log_info(myLog, "open custom manifest: %s", m_filename.c_str());
+    }
 
     if (opt.fOps->exist(m_filename.c_str())) {
         // Manifest file already exists, load it.
@@ -97,6 +109,12 @@ Status LogMgr::init(const LogMgrOptions& lm_opt) {
 
     } else {
         // Not exist, initial setup phase.
+
+        // If `m_filename` is from custom path, should return error.
+        if (!opt.dbConfig->customManifestPath.empty()) {
+            _log_err(myLog, "custom manifest does not exist: %s", m_filename.c_str());
+            throw Status(Status::MANIFEST_NOT_EXIST);
+        }
 
         // Create manifest file.
         TC(mani->create(opt.path, m_filename, opt.prefixNum));
@@ -310,9 +328,7 @@ Status LogMgr::removeStaleFiles() {
     prefix += "_";
     size_t prefix_len = prefix.size();
 
-    std::string m_filename = "log";
-    m_filename += p_num;
-    m_filename += "_manifest";
+    std::string m_filename = getManifestFilename();
 
     bool need_mani_sync = false;
     for (auto& entry: files) {
@@ -417,6 +433,20 @@ Status LogMgr::closeSnapshot(DB* snap_handle) {
         info->done();
     }
     delete l_list;
+    return Status();
+}
+
+Status LogMgr::cloneManifest(DB* snap_handle,
+                             const uint64_t checkpoint,
+                             const std::string& dst_path,
+                             std::list<LogFileInfo*>*& log_file_list_out)
+{
+    Status s;
+    EP( openSnapshot(snap_handle, checkpoint, log_file_list_out) );
+
+    // Clone manifest file only when opening snapshot succeeds.
+    EP( mani->clone(dst_path) );
+
     return Status();
 }
 

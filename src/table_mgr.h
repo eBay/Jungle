@@ -155,11 +155,18 @@ public:
         FIX = 0x6,
     };
 
+    std::string getManifestFilename() const;
+
     Status init(const TableMgrOptions& _options);
 
     Status removeStaleFiles();
 
     Status shutdown();
+
+    Status cloneManifest(DB* snap_handle,
+                         const uint64_t checkpoint,
+                         const std::string& dst_path,
+                         std::list<TableInfo*>*& table_list_out);
 
     Status openSnapshot(DB* snap_handle,
                         const uint64_t checkpoint,

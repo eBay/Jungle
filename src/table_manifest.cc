@@ -270,9 +270,19 @@ Status TableManifest::load(const std::string& path,
     return s;
    }
 }
+Status TableManifest::clone(const std::string& dst_path) {
+    if (mFileName.empty() || !fOps) return Status::NOT_INITIALIZED;
+
+    std::unique_lock<std::mutex> l(mFileWriteLock);
+    std::string src_file = mFileName;
+    std::string dst_file = dst_path + "/" + tableMgr->getManifestFilename();
+    return BackupRestore::copyFile(fOps, src_file, dst_file, true);
+}
 
 Status TableManifest::store(bool call_fsync) {
     if (mFileName.empty() || !fOps) return Status::NOT_INITIALIZED;
+
+    std::unique_lock<std::mutex> lg(mFileWriteLock);
 
     Status s;
 

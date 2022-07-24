@@ -216,6 +216,7 @@ if (CODE_COVERAGE GREATER 0)
                      compaction_test
                      mt_test
                      log_reclaim_test
+                     custom_mani_verifier
                      level_extension_test
                      table_lookup_booster_test
                      compression_test

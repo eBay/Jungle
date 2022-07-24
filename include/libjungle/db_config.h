@@ -542,6 +542,21 @@ public:
      * is greater than the max table size multiplied by this value.
      */
     uint32_t seqLoadingDelayFactor;
+
+    /**
+     * [EXPERIMENTAL]
+     * Only with read-only flag and log store mode.
+     * If given, Jungle will open the DB instance, but use the manifest
+     * files in the given path, instead of those in the original path.
+     *
+     * The main purpose of this is for opening a snapshot by separate
+     * processes. While a process is working on the DB, another process
+     * can open the same DB path in read-only mode, and sees the snapshot
+     * of it provided by the manifest files in the path.
+     *
+     * The custom manifest files should be created by `cloneManifest()` API.
+     */
+    std::string customManifestPath;
 };
 
 class GlobalConfig {
