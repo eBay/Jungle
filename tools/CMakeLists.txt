@@ -1,7 +1,7 @@
 set(TOOLS_DIR ${PROJECT_SOURCE_DIR}/tools)
 
 set(JUNGLE_TOOLS_DEPS
-    ${CMAKE_CURRENT_BINARY_DIR}/../libjungle.a
+    static_lib
     ${LIBSIMPLELOGGER}
     ${FDB_LIB_DIR}/libforestdb.a
     ${LIBSNAPPY}

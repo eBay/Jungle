@@ -4,7 +4,7 @@ set(JUNGLE_TEST_DIR ${TEST_DIR}/jungle)
 set(STRESS_TEST_DIR ${TEST_DIR}/stress)
 
 set(JUNGLE_TEST_DEPS
-    ${CMAKE_CURRENT_BINARY_DIR}/../libjungle.a
+    static_lib
     ${LIBSIMPLELOGGER}
     ${FDB_LIB_DIR}/libforestdb.a
     ${LIBSNAPPY}
