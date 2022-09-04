@@ -98,6 +98,12 @@ endif()
 
 if (TESTSUITE_NO_COLOR GREATER 0)
     add_definitions(-DTESTSUITE_NO_COLOR=1)
+    message(STATUS "---- MONOCOLOR TESTSUITE ----")
+endif()
+
+if (LOGGER_NO_BACKTRACE GREATER 0)
+    add_definitions(-DLOGGER_NO_BACKTRACE=1)
+    message(STATUS "---- NO BACKTRACE BY LOGGER ----")
 endif()
 
 file(COPY ${CMAKE_SOURCE_DIR}/scripts/runtests.sh
