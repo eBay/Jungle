@@ -268,7 +268,7 @@ static SIZE_T_UNUSED _stack_interpret_apple(void** stack_ptr,
                                             size_t output_buflen)
 {
     size_t cur_len = 0;
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(LOGGER_NO_BACKTRACE)
 
     size_t frame_num = 0;
     (void)frame_num;
