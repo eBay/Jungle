@@ -674,6 +674,21 @@ Status LogManifest::getLogFileInfo(const uint64_t log_num,
     return Status();
 }
 
+Status LogManifest::getLogFileInfoSnapshot(const uint64_t log_num,
+                                       LogFileInfo*& info_out)
+{
+    LogFileInfo query(log_num);
+    skiplist_node* cursor = skiplist_find(&logFiles, &query.snode);
+    if (!cursor) {
+        return Status::LOG_FILE_NOT_FOUND;
+    }
+    info_out = _get_entry(cursor, LogFileInfo, snode);
+    info_out->grabForSnapshot();
+
+    skiplist_release_node(cursor);
+    return Status();
+}
+
 Status LogManifest::getLogFileInfoRange(const uint64_t s_log_inc,
                                         const uint64_t e_log_inc,
                                         std::vector<LogFileInfo*>& info_out,

@@ -341,7 +341,7 @@ public:
                             bool goto_end = false);
         Status moveToLastValid();
 
-        void addLogFileItr(LogFileInfo* l_info);
+        void addLogFileItr(LogFileInfo* l_info, bool is_log_store_snapshot);
         inline int cmpSizedBuf(const SizedBuf& l, const SizedBuf& r);
         inline bool checkValidBySeq(ItrItem* item,
                                     const uint64_t cur_seq,

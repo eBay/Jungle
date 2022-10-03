@@ -391,19 +391,34 @@ Status LogMgr::openSnapshot(DB* snap_handle,
     EP( mani->getMinLogFileNum(l_num_min) );
     EP( mani->getLogFileNumBySeq(checkpoint, l_num_max) );
 
+    bool log_store_mode = getDbConfig()->logSectionOnly;
     bool retry_init = false;
     for (uint64_t ii = l_num_min; ii <= l_num_max; ++ii) {
         LogFileInfo* l_info = nullptr;
-        s = mani->getLogFileInfo(ii, l_info);
+        if (log_store_mode) {
+            s = mani->getLogFileInfoSnapshot(ii, l_info);
+        } else {
+            s = mani->getLogFileInfo(ii, l_info);
+        }
 
         if (!s || l_info->isRemoved()) {
             // `l_num_min` is invalid. Retry.
             // Free all resources.
             for (auto& entry: *l_list) {
                 LogFileInfo* item = entry;
-                item->done();
+                if (log_store_mode) {
+                    item->doneForSnapshot();
+                } else {
+                    item->done();
+                }
             }
-            if (s) l_info->done();
+            if (s) {
+                if (log_store_mode) {
+                    l_info->doneForSnapshot();
+                } else {
+                    l_info->done();
+                }
+            }
 
             retry_init = true;
             break;
@@ -420,6 +435,7 @@ Status LogMgr::openSnapshot(DB* snap_handle,
 
 Status LogMgr::closeSnapshot(DB* snap_handle) {
     Status s;
+    bool log_store_mode = getDbConfig()->logSectionOnly;
     LogFileList* l_list = nullptr;
     {   mGuard l(sMapLock);
         auto entry = sMap.find(snap_handle);
@@ -430,7 +446,11 @@ Status LogMgr::closeSnapshot(DB* snap_handle) {
 
     for (auto& entry: *l_list) {
         LogFileInfo* info = entry;
-        info->done();
+        if (log_store_mode) {
+            info->doneForSnapshot();
+        } else {
+            info->done();
+        }
     }
     delete l_list;
     return Status();

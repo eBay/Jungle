@@ -135,7 +135,8 @@ public:
                     const uint64_t seq_upto);
         Status initSN(const MemTable* m_table,
                       const uint64_t min_seq,
-                      const uint64_t max_seq);
+                      const uint64_t max_seq,
+                      bool is_log_store_snapshot);
         Status get(Record& rec_out);
         Status prev(bool allow_tombstone = false);
         Status next(bool allow_tombstone = false);

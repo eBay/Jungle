@@ -1415,6 +1415,189 @@ int manifest_clone_test() {
     return 0;
 }
 
+int log_reclaim_with_snapshot_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    jungle::GlobalConfig g_config;
+    g_config.logFileReclaimerSleep_sec = 1;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.numL0Partitions = 4;
+    config.maxEntriesInLogFile = 10;
+    config.logSectionOnly = true;
+    config.logFileTtl_sec = 1;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    size_t num = 1000;
+    _set_keys(db, 0, num, 1, "k%06zu", "v%06zu");
+
+    // Sync.
+    CHK_Z(db->sync(false));
+
+    // Open a snapshot.
+    jungle::DB* snap = nullptr;
+    CHK_Z(db->openSnapshot(&snap));
+
+    TestSuite::sleep_sec(3, "waiting for reclaiming");
+
+    // Purge.
+    CHK_Z( db->flushLogs(jungle::FlushOptions(), 500) );
+
+    // Get min seq number.
+    uint64_t min_seqnum = 0;
+    CHK_Z(db->getMinSeqNum(min_seqnum));
+    CHK_EQ(501, min_seqnum);
+
+    auto do_point_query =
+        [&](jungle::DB* target, size_t start, size_t end, size_t step) {
+        for (size_t ii=start; ii<=end; ii+=step) {
+            char key_str[256];
+            char val_str[256];
+            jungle::KV kv_out;
+            CHK_Z(target->getSN(ii, kv_out));
+
+            sprintf(key_str, "k%06zu", ii-1);
+            sprintf(val_str, "v%06zu", ii-1);
+            jungle::SizedBuf key(key_str);
+            jungle::SizedBuf val(val_str);
+            CHK_EQ(key, kv_out.key);
+            CHK_EQ(val, kv_out.value);
+            kv_out.free();
+        }
+        return 0;
+    };
+    // Point query something.
+    CHK_Z(do_point_query(db, 501, 1000, 171));
+
+    // Seq iterator.
+    auto do_seq_itr = [&](jungle::DB* target, size_t start, size_t end) {
+        jungle::Iterator itr;
+        CHK_Z( itr.initSN(target, start, end) );
+        size_t idx = start - 1;
+        do {
+            jungle::Record rec_out;
+            s = itr.get(rec_out);
+            if (!s) break;
+
+            char key_str[256];
+            char val_str[256];
+            sprintf(key_str, "k%06zu", idx);
+            sprintf(val_str, "v%06zu", idx);
+            jungle::SizedBuf key(key_str);
+            jungle::SizedBuf val(val_str);
+            CHK_EQ(key, rec_out.kv.key);
+            CHK_EQ(val, rec_out.kv.value);
+            rec_out.free();
+            idx++;
+        } while (itr.next().ok());
+        itr.close();
+        return 0;
+    };
+    CHK_Z(do_seq_itr(db, 751, 900));
+
+    TestSuite::sleep_sec(3, "waiting for reclaiming");
+
+    // Purge more.
+    CHK_Z( db->flushLogs(jungle::FlushOptions(), 700) );
+
+    // Get min seq number.
+    min_seqnum = 0;
+    CHK_Z(db->getMinSeqNum(min_seqnum));
+    CHK_EQ(701, min_seqnum);
+
+    // Snapshot should still be able to retrieve data.
+    CHK_Z(do_seq_itr(snap, 1, 1000));
+
+    CHK_Z(jungle::DB::close(snap));
+    CHK_Z(jungle::DB::close(db));
+
+    // Offline checking if it is log section mode.
+    CHK_TRUE( jungle::DB::isLogSectionMode(filename) );
+
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int snapshot_on_purged_memtable_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    jungle::GlobalConfig g_config;
+    g_config.logFileReclaimerSleep_sec = 1;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.numL0Partitions = 4;
+    config.maxEntriesInLogFile = 10;
+    config.logSectionOnly = true;
+    config.logFileTtl_sec = 1;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    size_t num = 1000;
+    _set_keys(db, 0, num, 1, "k%06zu", "v%06zu");
+
+    // Sync.
+    CHK_Z(db->sync(false));
+
+    TestSuite::sleep_sec(3, "waiting for reclaiming");
+
+    // Open a snapshot.
+    jungle::DB* snap = nullptr;
+    CHK_Z(db->openSnapshot(&snap));
+
+    // Seq iterator.
+    auto do_seq_itr = [&](jungle::DB* target, size_t start, size_t end) {
+        jungle::Iterator itr;
+        CHK_Z( itr.initSN(target, start, end) );
+        size_t idx = start - 1;
+        do {
+            jungle::Record rec_out;
+            s = itr.get(rec_out);
+            if (!s) break;
+
+            char key_str[256];
+            char val_str[256];
+            sprintf(key_str, "k%06zu", idx);
+            sprintf(val_str, "v%06zu", idx);
+            jungle::SizedBuf key(key_str);
+            jungle::SizedBuf val(val_str);
+            CHK_EQ(key, rec_out.kv.key);
+            CHK_EQ(val, rec_out.kv.value);
+            rec_out.free();
+            idx++;
+        } while (itr.next().ok());
+        itr.close();
+        return 0;
+    };
+    CHK_Z(do_seq_itr(snap, 901, 1000));
+
+    CHK_Z(jungle::DB::close(snap));
+    CHK_Z(jungle::DB::close(db));
+
+    // Offline checking if it is log section mode.
+    CHK_TRUE( jungle::DB::isLogSectionMode(filename) );
+
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
@@ -1488,6 +1671,12 @@ int main(int argc, char** argv) {
 
     ts.doTest("manifest clone test",
               manifest_clone_test);
+
+    ts.doTest("log reclaim with snapshot test",
+              log_reclaim_with_snapshot_test);
+
+    ts.doTest("snapshot on purged memtable test",
+              snapshot_on_purged_memtable_test);
 
 
 #if 0

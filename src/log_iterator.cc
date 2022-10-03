@@ -34,10 +34,10 @@ LogMgr::Iterator::~Iterator() {
     close();
 }
 
-void LogMgr::Iterator::addLogFileItr(LogFileInfo* l_info) {
+void LogMgr::Iterator::addLogFileItr(LogFileInfo* l_info, bool is_log_store_snapshot) {
     LogFile::Iterator* l_itr = new LogFile::Iterator();
     if (type == BY_SEQ) {
-        l_itr->initSN(l_info->file, minSeqSnap, maxSeqSnap);
+        l_itr->initSN(l_info->file, minSeqSnap, maxSeqSnap, is_log_store_snapshot);
     } else if (type == BY_KEY) {
         l_itr->init(l_info->file, startKey, endKey, maxSeqSnap);
     }
@@ -93,8 +93,6 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
     // No log yet.
     if (!s) return s;
 
-    if (valid_number(min_seq) && minSeqSnap < min_seq) minSeqSnap = min_seq;
-    if (valid_number(max_seq) && max_seq < maxSeqSnap) maxSeqSnap = max_seq;
     if (snap_handle) {
         assert(snap_handle->sn);
         if (maxSeqSnap > snap_handle->sn->chkNum) {
@@ -104,6 +102,8 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
             minSeqSnap = snap_handle->sn->lastFlush;
         }
     }
+    if (valid_number(min_seq) && minSeqSnap < min_seq) minSeqSnap = min_seq;
+    if (valid_number(max_seq) && max_seq < maxSeqSnap) maxSeqSnap = max_seq;
 
     // WARNING:
     //   The same as the comment in `LogMgr::get()`,
@@ -136,7 +136,14 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
         assert(snap_handle->sn->logList);
         for (auto& entry: *snap_handle->sn->logList) {
             LogFileInfo* l_info = entry;
-            addLogFileItr(l_info);
+            if (lMgr->getDbConfig()->logSectionOnly) {
+                if ( l_info->file->getMinSeqNum() > maxSeqSnap ||
+                     l_info->file->getMaxSeqNum() < minSeqSnap ) {
+                    continue;
+                }
+                l_info->grab(true);
+            }
+            addLogFileItr(l_info, lMgr->getDbConfig()->logSectionOnly);
         }
         snapLogList = snap_handle->sn->logList;
     }
@@ -190,7 +197,7 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
                 avl_init(&curWindow, curWindow.aux);
                 break;
             }
-            addLogFileItr(l_info);
+            addLogFileItr(l_info, false);
         }
 
         if (retry_init) continue;
@@ -593,8 +600,8 @@ Status LogMgr::Iterator::close() {
         ItrItem* ctx = entry;
         ctx->lItr->close();
         delete ctx->lItr;
-        if (!snapLogList) {
-            // Only when not a snapshot.
+        if (!snapLogList || lMgr->getDbConfig()->logSectionOnly) {
+            // When 1) not a snapshot, or 2) snapshot in log store mode.
             ctx->lInfo->done();
         }
         delete ctx;
