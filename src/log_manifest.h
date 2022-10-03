@@ -37,11 +37,12 @@ struct LogFileInfo {
     LogFileInfo() {
         LogFileInfo(0);
     }
-    LogFileInfo(uint64_t _log_file_num)
-        : logFileNum(_log_file_num)
+    LogFileInfo(uint64_t l_file_num)
+        : logFileNum(l_file_num)
         , startSeq(0)
         , file(nullptr)
         , refCount(0)
+        , snapCount(0)
         , removed(false)
         , evicted(false) {
         skiplist_init_node(&snodeBySeq);
@@ -107,8 +108,24 @@ struct LogFileInfo {
         }
     }
 
+    void grabForSnapshot() {
+        snapCount.fetch_add(1);
+    }
+
     void done() {
-        assert(refCount);
+        doneInternal(false);
+    }
+
+    void doneForSnapshot() {
+        doneInternal(true);
+    }
+
+    void doneInternal(bool snapshot = false) {
+        if (snapshot) {
+            assert(snapCount);
+        } else {
+            assert(refCount);
+        }
         // WARNING: MONSTOR-11561
         //   We should check `removed` or `evicted` flag first
         //   and then decrease `refCount`.
@@ -123,8 +140,20 @@ struct LogFileInfo {
         //       --- context switch ---
         //     T1: removed == true && count == 1, destroy the file.
         if (removed) {
-            uint64_t count = refCount.fetch_sub(1);
-            if (count == 1) {
+            uint64_t snap_count = 0;
+            uint64_t ref_count = 0;
+            bool destroy_file = false;
+            if (snapshot) {
+                snap_count = snapCount.fetch_sub(1);
+                ref_count = refCount;
+                destroy_file = (snap_count == 1 && ref_count == 0);
+            } else {
+                snap_count = snapCount;
+                ref_count = refCount.fetch_sub(1);
+                destroy_file = (snap_count == 0 && ref_count == 1);
+            }
+
+            if (destroy_file) {
                 // WARNING:
                 //   While reclaimer is evicting memtable below (in that case
                 //   refCount == 0 already), LogMgr::flush() may grab a file,
@@ -147,7 +176,7 @@ struct LogFileInfo {
             return;
         }
 
-        if (evicted) {
+        if (snapshot == false && evicted) {
             uint64_t count = refCount.fetch_sub(1);
             if (count == 1) {
                 std::lock_guard<std::mutex> l(evictionLock);
@@ -162,8 +191,13 @@ struct LogFileInfo {
         }
 
         // Normal case.
-        refCount.fetch_sub(1);
+        if (snapshot) {
+            snapCount.fetch_sub(1);
+        } else {
+            refCount.fetch_sub(1);
+        }
     }
+
     uint64_t getRefCount() const { return refCount.load(); }
     void setRemoved() { removed.store(true); }
     bool isRemoved() { return removed.load(); }
@@ -182,8 +216,11 @@ struct LogFileInfo {
 
     LogFile* file;
 
-    // Reference counter.
+    // Reference counter (accessing MemTable).
     std::atomic<uint64_t> refCount;
+
+    // Snapshot counter (blocking file removal).
+    std::atomic<uint64_t> snapCount;
 
     // Flag indicating whether or not this file is removed.
     std::atomic<bool> removed;
@@ -253,6 +290,10 @@ public:
     Status getLogFileInfo(uint64_t log_num,
                           LogFileInfo*& info_out,
                           bool force_not_load_memtable = false);
+
+    Status getLogFileInfoSnapshot(const uint64_t log_num,
+                              LogFileInfo*& info_out);
+
     Status getLogFileInfoRange(const uint64_t s_log_inc,
                                const uint64_t e_log_inc,
                                std::vector<LogFileInfo*>& info_out,

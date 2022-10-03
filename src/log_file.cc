@@ -807,11 +807,12 @@ Status LogFile::Iterator::init(LogFile* l_file,
 
 Status LogFile::Iterator::initSN(LogFile* l_file,
                                  const uint64_t min_seq,
-                                 const uint64_t max_seq)
+                                 const uint64_t max_seq,
+                                 bool is_log_store_snapshot)
 {
     lFile = l_file;
     lFile->touch();
-    return mItr.initSN(lFile->mTable, min_seq, max_seq);
+    return mItr.initSN(lFile->mTable, min_seq, max_seq, is_log_store_snapshot);
 }
 
 

@@ -79,7 +79,8 @@ Status MemTable::Iterator::init(const MemTable* m_table,
 
 Status MemTable::Iterator::initSN(const MemTable* m_table,
                                   const uint64_t min_seq,
-                                  const uint64_t max_seq)
+                                  const uint64_t max_seq,
+                                  bool is_log_store_snapshot)
 {
     mTable = m_table;
     type = BY_SEQ;
@@ -93,8 +94,9 @@ Status MemTable::Iterator::initSN(const MemTable* m_table,
         min_local < mTable->minSeqNum)
         min_local = mTable->minSeqNum;
 
-    if (mTable->flushedSeqNum != NOT_INITIALIZED &&
-        min_local < mTable->flushedSeqNum)
+    if ( !is_log_store_snapshot &&
+         mTable->flushedSeqNum != NOT_INITIALIZED &&
+         min_local < mTable->flushedSeqNum )
         min_local = mTable->flushedSeqNum;
 
     if (min_local > mTable->maxSeqNum)
