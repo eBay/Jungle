@@ -47,6 +47,7 @@ int build_from_table_files_test() {
     // Manually create 4 table files and put key value pairs.
     jungle::FileOpsPosix f_ops;
     jungle::DBConfig d_conf;
+    d_conf.maxEntriesInLogFile = 20;
 
     jungle::TableMgrOptions t_mgr_opt;
     t_mgr_opt.path = path;
@@ -108,6 +109,11 @@ int build_from_table_files_test() {
     jungle::DB* db;
     jungle::Status s;
     CHK_Z( jungle::DB::open(&db, path, d_conf) );
+
+    // Get max seqnum should work.
+    uint64_t max_seq_out = 0;
+    CHK_Z( db->getMaxSeqNum(max_seq_out) );
+    CHK_EQ( 400, max_seq_out );
 
     // Put a few key-value pairs.
     for (size_t ii = 400; ii < 500; ++ii) {
