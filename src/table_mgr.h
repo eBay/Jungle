@@ -514,7 +514,7 @@ protected:
     bool isLevelLocked(uint64_t l_number);
 
 // === VARIABLES
-    const size_t APPROX_META_SIZE;
+    static const size_t APPROX_META_SIZE;
 
     /**
      * Backward pointer to parent DB instance.

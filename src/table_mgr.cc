@@ -32,9 +32,10 @@ limitations under the License.
 
 namespace jungle {
 
+const size_t TableMgr::APPROX_META_SIZE = 96;
+
 TableMgr::TableMgr(DB* parent_db)
-    : APPROX_META_SIZE(96)
-    , parentDb(parent_db)
+    : parentDb(parent_db)
     , allowCompaction(false)
     , mani(nullptr)
     , numL0Partitions(1)

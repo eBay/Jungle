@@ -17,6 +17,7 @@ limitations under the License.
 #include "jungle_test_common.h"
 
 #include "jungle_builder.h"
+#include "libjungle/db_config.h"
 #include "libjungle/iterator.h"
 #include "libjungle/jungle.h"
 #include "libjungle/sized_buf.h"
@@ -273,12 +274,67 @@ int build_an_empty_db_test() {
     return 0;
 }
 
+int builder_api_test() {
+    std::string path;
+    TEST_SUITE_PREPARE_PATH(path);
+
+    TestSuite::mkdir(path);
+
+    jungle::builder::Builder bb;
+    jungle::DBConfig d_conf;
+    d_conf.maxL1TableSize = 256 * 1024;
+    CHK_Z( bb.init(path, d_conf) );
+
+    char key_buf[256];
+    jungle::SizedBuf val_buf;
+    jungle::SizedBuf::Holder h_val_buf(val_buf);
+    val_buf.alloc(1024);
+    memset(val_buf.data, 'x', 1023);
+    val_buf.data[1023] = 0;
+
+    const size_t NUM = 2048;
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        sprintf(key_buf, "key%05zu", ii);
+        sprintf((char*)val_buf.data, "val%05zu", ii);
+
+        jungle::Record rec;
+        rec.kv.key = key_buf;
+        rec.kv.value = val_buf;
+
+        CHK_Z( bb.set(rec) );
+    }
+
+    CHK_Z( bb.commit() );
+    CHK_Z( bb.close() );
+
+    jungle::DB* db = nullptr;
+    CHK_Z( jungle::DB::open(&db, path, d_conf) );
+
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        sprintf(key_buf, "key%05zu", ii);
+        sprintf((char*)val_buf.data, "val%05zu", ii);
+
+        jungle::SizedBuf value_out;
+        jungle::SizedBuf::Holder h_value_out(value_out);
+        CHK_Z( db->get(jungle::SizedBuf(strlen(key_buf), key_buf), value_out) );
+
+        CHK_EQ(val_buf.toString(), value_out.toString());
+    }
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace builder_test;
 
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
     ts.doTest("build from table files test", build_from_table_files_test);
     ts.doTest("build an empty db test", build_an_empty_db_test);
+    ts.doTest("builder api test", builder_api_test);
 
     return 0;
 }

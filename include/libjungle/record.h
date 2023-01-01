@@ -26,6 +26,8 @@ namespace jungle {
 
 class Record {
 public:
+    static const uint64_t NIL_SEQNUM = (uint64_t)-1;
+
     enum Type : uint8_t {
         /**
          * Insertion marker.
@@ -47,7 +49,7 @@ public:
      * Automatically free the memory of given Record.
      */
     struct Holder {
-        Holder(Record& _rec) : rec(_rec) {}
+        Holder(Record& r) : rec(r) {}
         ~Holder() { rec.free(); }
         Record& rec;
     };
@@ -56,7 +58,7 @@ public:
      * Create an empty Record.
      */
     Record()
-        : seqNum(-1)
+        : seqNum(NIL_SEQNUM)
         , type(INSERTION) {}
 
     /**
@@ -65,7 +67,7 @@ public:
      * @param t Type.
      */
     Record(Type t)
-        : seqNum(-1)
+        : seqNum(NIL_SEQNUM)
         , type(t) {}
 
     /**
@@ -152,7 +154,7 @@ public:
     void clear() {
         kv.clear();
         meta.clear();
-        seqNum = -1;
+        seqNum = NIL_SEQNUM;
         type = INSERTION;
     }
 
