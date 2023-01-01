@@ -33,6 +33,10 @@ class SimpleLogger;
 
 namespace jungle {
 
+namespace builder {
+    class Builder;
+}
+
 class TableFileOptions {
 public:
     TableFileOptions()
@@ -53,6 +57,8 @@ struct TableInfo;
 class TableMgr;
 class TableStats;
 class TableFile {
+    friend class builder::Builder;
+
     struct FdbHandle;
 
 public:
