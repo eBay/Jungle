@@ -17,16 +17,13 @@ limitations under the License.
 
 #pragma once
 
-#include "fileops_posix.h"
-#include "mutable_table_mgr.h"
-#include "table_manifest.h"
-#include "table_mgr.h"
-
 #include <libjungle/jungle.h>
-#include <third_party/forestdb/include/libforestdb/forestdb.h>
 
-#include <limits>
 #include <list>
+
+typedef struct _fdb_file_handle fdb_file_handle;
+
+typedef struct _fdb_kvs_handle fdb_kvs_handle;
 
 class SimpleLogger;
 
@@ -106,8 +103,6 @@ public:
 
 private:
     Status finalizeFile();
-
-    fdb_config getConfig();
 
     std::string dstPath;
     DBConfig dbConfig;
