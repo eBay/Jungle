@@ -156,7 +156,6 @@ Status Builder::set(const Record& rec) {
         _log_info(myLog, "opened %s", curFileName.c_str());
     }
 
-    // TODO: Compression.
     fdb_doc doc;
     memset(&doc, 0x0, sizeof(doc));
     doc.key = rec.kv.key.data;
@@ -168,6 +167,52 @@ Status Builder::set(const Record& rec) {
     SizedBuf::Holder h_raw_meta(raw_meta);
     TableFile::InternalMeta i_meta;
 
+    size_t original_value_size = rec.kv.value.size;
+    ssize_t comp_buf_size = 0; // Output buffer size.
+    ssize_t comp_size = 0; // Actual compressed size.
+
+    // Local compression buffer to avoid frequent memory allocation.
+    const ssize_t LOCAL_COMP_BUF_SIZE = 4096;
+    char local_comp_buf[LOCAL_COMP_BUF_SIZE];
+    SizedBuf comp_buf;
+    SizedBuf::Holder h_comp_buf(comp_buf);
+    // Refer to the local buffer by default.
+    comp_buf.referTo( SizedBuf(LOCAL_COMP_BUF_SIZE, local_comp_buf) );
+
+    if ( dbConfig.compOpt.cbCompress &&
+         dbConfig.compOpt.cbDecompress &&
+         dbConfig.compOpt.cbGetMaxSize ) {
+        // If compression is enabled, ask if we compress this record.
+        comp_buf_size = dbConfig.compOpt.cbGetMaxSize(nullptr, rec);
+        if (comp_buf_size > 0) {
+            if (comp_buf_size > LOCAL_COMP_BUF_SIZE) {
+                // Bigger than the local buffer size, allocate a new.
+                comp_buf.alloc(comp_buf_size);
+            }
+            // Do compression.
+            comp_size = dbConfig.compOpt.cbCompress(nullptr, rec, comp_buf);
+            if (comp_size > 0) {
+                // Compression succeeded, set the flag.
+                i_meta.isCompressed = true;
+                i_meta.originalValueLen = original_value_size;
+            } else if (comp_size < 0) {
+                _log_err( myLog, "compression failed: %zd, db %s, key %s",
+                          comp_size,
+                          dstPath.c_str(),
+                          rec.kv.key.toReadableString().c_str() );
+            }
+            // Otherwise: if `comp_size == 0`,
+            //            that implies cancelling compression.
+        }
+    }
+
+    if (i_meta.isCompressed) {
+        doc.body = comp_buf.data;
+        doc.bodylen = comp_size;
+    } else {
+        doc.body = rec.kv.value.data;
+        doc.bodylen = rec.kv.value.size;
+    }
     TableFile::userMetaToRawMeta(rec.meta, i_meta, raw_meta);
     doc.meta = raw_meta.data;
     doc.metalen = raw_meta.size;

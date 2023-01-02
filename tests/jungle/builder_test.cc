@@ -16,12 +16,10 @@ limitations under the License.
 
 #include "jungle_test_common.h"
 
+#include "dummy_compression.h"
 #include "jungle_builder.h"
-#include "libjungle/db_config.h"
-#include "libjungle/iterator.h"
-#include "libjungle/jungle.h"
-#include "libjungle/sized_buf.h"
 #include "table_file.h"
+
 #include <cstdio>
 
 namespace builder_test {
@@ -274,7 +272,7 @@ int build_an_empty_db_test() {
     return 0;
 }
 
-int builder_api_test() {
+int builder_api_test(bool compression) {
     std::string path;
     TEST_SUITE_PREPARE_PATH(path);
 
@@ -283,6 +281,13 @@ int builder_api_test() {
     jungle::builder::Builder bb;
     jungle::DBConfig d_conf;
     d_conf.maxL1TableSize = 256 * 1024;
+
+    if (compression) {
+        d_conf.compOpt.cbGetMaxSize = dummy_get_max_size;
+        d_conf.compOpt.cbCompress = dummy_compress;
+        d_conf.compOpt.cbDecompress = dummy_decompress;
+    }
+
     CHK_Z( bb.init(path, d_conf) );
 
     char key_buf[256];
@@ -290,6 +295,9 @@ int builder_api_test() {
     jungle::SizedBuf::Holder h_val_buf(val_buf);
     val_buf.alloc(1024);
     memset(val_buf.data, 'x', 1023);
+    for (size_t ii = 0; ii < 1023; ii += 3) {
+        memset(val_buf.data + ii, 'a' + (ii % ('z' - 'a')), 3);
+    }
     val_buf.data[1023] = 0;
 
     const size_t NUM = 2048;
@@ -334,7 +342,7 @@ int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
     ts.doTest("build from table files test", build_from_table_files_test);
     ts.doTest("build an empty db test", build_an_empty_db_test);
-    ts.doTest("builder api test", builder_api_test);
+    ts.doTest("builder api test", builder_api_test, TestRange<bool>({false, true}));
 
     return 0;
 }
