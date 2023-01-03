@@ -1,24 +1,37 @@
-#include "jungle_builder.h"
+#include <libjungle/jungle_builder.h>
 
 #include "db_internal.h"
+#include "fileops_posix.h"
 #include "internal_helper.h"
 #include "libjungle/sized_buf.h"
 #include "log_mgr.h"
 #include "mutable_table_mgr.h"
+#include "table_manifest.h"
+#include "table_mgr.h"
 
 namespace jungle {
 
 namespace builder {
 
+fdb_config get_fdb_config() {
+    fdb_config config = fdb_get_default_config();
+    config.seqtree_opt = FDB_SEQTREE_USE;
+    config.wal_flush_before_commit = false;
+    config.bulk_load_mode = true;
+    config.bottom_up_index_build = true;
+    config.do_not_cache_doc_blocks = true;
+    return config;
+}
+
 Status Builder::buildFromTableFiles(const BuildParams& params) {
     Status s;
 
-    FileOpsPosix f_ops;
+    std::unique_ptr<FileOpsPosix> f_ops(new FileOpsPosix());
     DBConfig db_config;
 
     TableMgrOptions t_mgr_opt;
     t_mgr_opt.path = params.path;
-    t_mgr_opt.fOps = &f_ops;
+    t_mgr_opt.fOps = f_ops.get();
     t_mgr_opt.dbConfig = &db_config;
 
     MutableTableMgr t_mgr(nullptr);
@@ -26,7 +39,7 @@ Status Builder::buildFromTableFiles(const BuildParams& params) {
 
     jungle::TableFileOptions t_opt;
 
-    TableManifest t_mani(&t_mgr, &f_ops);
+    TableManifest t_mani(&t_mgr, f_ops.get());
     std::string mani_filename = params.path + "/table0000_manifest";
     EP( t_mani.create(params.path, mani_filename) );
 
@@ -56,7 +69,7 @@ Status Builder::buildFromTableFiles(const BuildParams& params) {
         TableFile* t_file = new TableFile(&t_mgr);
         std::string t_filename =
             TableFile::getTableFileName(params.path, 0, td.tableNumber);
-        EP( t_file->load(1, td.tableNumber, t_filename, &f_ops, t_opt) );
+        EP( t_file->load(1, td.tableNumber, t_filename, f_ops.get(), t_opt) );
 
         // WARNING: If smallest table, put empty minkey.
         SizedBuf table_min_key;
@@ -75,7 +88,7 @@ Status Builder::buildFromTableFiles(const BuildParams& params) {
         std::string t_filename =
             TableFile::getTableFileName(params.path, 0, table_number);
 
-        EP( t_file->create(0, table_number, t_filename, &f_ops, t_opt) );
+        EP( t_file->create(0, table_number, t_filename, f_ops.get(), t_opt) );
         EP( t_mani.addTableFile(0, ii, SizedBuf(), t_file) );
     }
 
@@ -89,7 +102,7 @@ Status Builder::buildFromTableFiles(const BuildParams& params) {
     LogMgr l_mgr(nullptr);
     LogMgrOptions l_opt;
     l_opt.path = params.path;
-    l_opt.fOps = &f_ops;
+    l_opt.fOps = f_ops.get();
     l_opt.dbConfig = &db_config;
     l_opt.startSeqnum = max_seqnum + 1;
     l_mgr.init(l_opt);
@@ -142,7 +155,7 @@ Status Builder::set(const Record& rec) {
             }
         }
 
-        fdb_config f_conf = getConfig();
+        fdb_config f_conf = get_fdb_config();
         curTableIdx = tableIdxCounter++;
         curFileName = TableFile::getTableFileName(dstPath, 0, curTableIdx);
 
@@ -285,16 +298,6 @@ Status Builder::close() {
         curFhandle = nullptr;
     }
     return Status::OK;
-}
-
-fdb_config Builder::getConfig() {
-    fdb_config config = fdb_get_default_config();
-    config.seqtree_opt = FDB_SEQTREE_USE;
-    config.wal_flush_before_commit = false;
-    config.bulk_load_mode = true;
-    config.bottom_up_index_build = true;
-    config.do_not_cache_doc_blocks = true;
-    return config;
 }
 
 }

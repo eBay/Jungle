@@ -17,8 +17,12 @@ limitations under the License.
 #include "jungle_test_common.h"
 
 #include "dummy_compression.h"
-#include "jungle_builder.h"
+#include "fileops_posix.h"
+#include "mutable_table_mgr.h"
 #include "table_file.h"
+#include "table_mgr.h"
+
+#include <libjungle/jungle_builder.h>
 
 #include <cstdio>
 
