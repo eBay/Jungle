@@ -120,6 +120,7 @@ public:
         , numL0Partitions(4)
         , minNumTablesPerLevel(8)
         , minFileSizeToCompact(16777216)    // 16 MiB
+        , minWssToMerge(64 * 1024)          // 64 KiB
         , minBlockReuseCycleToCompact(0)
         , maxBlockReuseCycle(1)
         , compactionFactor(300)             // 300%
@@ -277,6 +278,13 @@ public:
      * Minimum file size that can be compacted.
      */
     uint64_t minFileSizeToCompact;
+
+    /**
+     * Working set size threshold for merge.
+     * If this value is non-zero, and if the size of active data of a table file
+     * is below this threshold, that file will be merged to the adjacent table file.
+     */
+    uint64_t minWssToMerge;
 
     /**
      * Minimum block re-use cycle to trigger compaction.
