@@ -1308,11 +1308,31 @@ Status LogMgr::flush(const FlushOptions& options,
 
     if (seq_num_local == NOT_INITIALIZED) {
         // Purge all synced (checkpointed) logs.
-        LogFileInfoGuard ll(mani->getLogFileInfoP(ln_to, true));
-        if (options.beyondLastSync) {
-            seq_num_local = ll->file->getMaxSeqNum();
-        } else {
-            seq_num_local = ll->file->getSyncedSeqNum();
+
+        // WARNING:
+        //   `seq_num_local` shouldn't be `NOT_INITIALIZED`.
+        //   Otherwise, `setSyncedSeqNum(seq_num_local)` may store
+        //   incorrect sequence number.
+        while (true) {
+            LogFileInfoGuard ll(mani->getLogFileInfoP(ln_to, true));
+            if (options.beyondLastSync) {
+                seq_num_local = ll->file->getMaxSeqNum();
+            } else {
+                seq_num_local = ll->file->getSyncedSeqNum();
+            }
+            if (seq_num_local == NOT_INITIALIZED) {
+                if (ln_to > ln_from) {
+                    _log_warn(myLog, "invalid seq_num_local, rewind ln_to from "
+                              "%lu to %lu", ln_to, ln_to - 1);
+                    ln_to--;
+                } else {
+                    _log_warn(myLog, "invalid seq_num_local, nothing to be flushed: "
+                              "ln_from %lu ln_to %lu", ln_from, ln_to);
+                    return Status::LOG_NOT_SYNCED;
+                }
+            } else {
+                break;
+            }
         }
 
     } else {
@@ -1386,6 +1406,15 @@ Status LogMgr::flush(const FlushOptions& options,
             // WARNING:
             //   Even if `records` is empty, we SHOULD proceed
             //   as we need to purge log files properly.
+        }
+
+        DBMgr* dbm = DBMgr::getWithoutInit();
+        if (dbm && dbm->isDebugCallbackEffective()) {
+            DebugParams dp = dbm->getDebugParams();
+            if (dp.logFlushCb) {
+                DebugParams::GenericCbParams p;
+                dp.logFlushCb(p);
+            }
         }
 
         // Set flush log & seq number.

@@ -204,6 +204,7 @@ struct DebugParams {
         , addNewLogFileCb(nullptr)
         , newLogBatchCb(nullptr)
         , getLogFileInfoBySeqCb(nullptr)
+        , logFlushCb(nullptr)
         , forceMerge(false)
         {}
 
@@ -290,6 +291,13 @@ struct DebugParams {
      * before checking the max sequence number of the file.
      */
     std::function< void(const GenericCbParams&) > getLogFileInfoBySeqCb;
+
+    /**
+     * Callback function that will be invoked right after the log
+     * flushing (reading from log files and writing into table files),
+     * before updating last synced sequence number of each log file.
+     */
+    std::function< void(const GenericCbParams&) > logFlushCb;
 
     /**
      * If true, merge will proceed the task even with the small number

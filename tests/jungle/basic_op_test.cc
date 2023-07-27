@@ -3216,6 +3216,91 @@ int sample_key_test() {
     return 0;
 }
 
+int log_flush_add_new_file_race_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    auto insert_keys = [&](size_t from, size_t to) {
+        for (size_t ii = from; ii < to; ++ii) {
+            std::string key_str = "key" + TestSuite::lzStr(5, ii);
+            std::string val_str = "val" + TestSuite::lzStr(5, ii);
+            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        }
+        return 0;
+    };
+
+    CHK_Z( insert_keys(0, 30) );
+
+    EventAwaiter ea_add_new_file;
+    EventAwaiter ea_main;
+    const size_t WAIT_TIME_MS = 3600 * 1000;
+
+    // Enable debugging hook for new log file and log flush.
+    jungle::DebugParams dp;
+    dp.addNewLogFileCb = [&](const jungle::DebugParams::GenericCbParams& pp) {
+        std::thread tt([&]() {
+            // Right after adding a new log file and right before
+            // pushing a new record to the new file, initiate log flushing.
+            jungle::FlushOptions f_opt;
+            f_opt.beyondLastSync = true;
+            db->flushLogs(f_opt);
+        });
+        tt.detach();
+        ea_add_new_file.wait_ms(WAIT_TIME_MS);
+    };
+    dp.logFlushCb = [&](const jungle::DebugParams::GenericCbParams& pp) {
+        // Right after log flushing, add a few more records.
+        ea_add_new_file.invoke();
+        insert_keys(31, 35);
+        ea_main.invoke();
+    };
+    jungle::DB::setDebugParams(dp);
+    jungle::DB::enableDebugCallbacks(true);
+
+    // Insert one more record, it will trigger above debug callbacks.
+    CHK_Z( insert_keys(30, 31) );
+
+    ea_main.wait_ms(WAIT_TIME_MS);
+
+    auto verify = [&](size_t upto) {
+        for (size_t ii = 0; ii < upto; ++ii) {
+            TestSuite::setInfo("ii=%zu", ii);
+            jungle::SizedBuf value_out;
+            jungle::SizedBuf::Holder h(value_out);
+            std::string key_str = "key" + TestSuite::lzStr(5, ii);
+            std::string val_str = "val" + TestSuite::lzStr(5, ii);
+            CHK_Z( db->get(jungle::SizedBuf(key_str), value_out) );
+            CHK_EQ(val_str, value_out.toString());
+        }
+        return 0;
+    };
+    CHK_Z( verify(35) );
+
+    // Flush to L0 and verify.
+    do {
+        s = db->sync(false);
+        if (s.ok()) break;
+        TestSuite::sleep_ms(100);
+    } while (s == jungle::Status::OPERATION_IN_PROGRESS);
+    CHK_Z( s );
+    CHK_Z( db->flushLogs() );
+    CHK_Z( verify(35) );
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -3274,6 +3359,7 @@ int main(int argc, char** argv) {
     ts.doTest("key length limit for hash test",
               key_length_limit_for_hash_test, TestRange<size_t>( {24, 8, 7, 0} ));
     ts.doTest("sample key test", sample_key_test);
+    ts.doTest("log flush add new file race test", log_flush_add_new_file_race_test);
 
     return 0;
 }
