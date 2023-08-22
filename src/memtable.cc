@@ -719,24 +719,32 @@ Status MemTable::getRecordsByPrefix(const uint64_t chk,
             skiplist_release_node(&node->snode);
             return Status::KEY_NOT_FOUND;
         }
-        if ( valid_number(flushedSeqNum) &&
-             rec_ret->seqNum <= flushedSeqNum ) {
-            // Already purged KV pair, go to table.
-            if (!allow_flushed_log) {
-                skiplist_release_node(&node->snode);
-                return Status::KEY_NOT_FOUND;
-            } // Tolerate if this is snapshot.
-        }
 
-        if ( !allow_tombstone && rec_ret->isDel() ) {
-            // Last operation is deletion.
-            skiplist_release_node(&node->snode);
-            return Status::KEY_NOT_FOUND;
-        }
-        SearchCbDecision dec = cb_func({*rec_ret});
-        if (dec == SearchCbDecision::STOP) {
-            skiplist_release_node(&node->snode);
-            return Status::OPERATION_STOPPED;
+        bool found = true;
+        // Dummy loop to use `break`.
+        do {
+            if ( valid_number(flushedSeqNum) &&
+                 rec_ret->seqNum <= flushedSeqNum ) {
+                // Already purged KV pair, go to the next matching key.
+                if (!allow_flushed_log) {
+                    found = false;
+                    break;
+                } // Tolerate if this is snapshot.
+            }
+
+            if ( !allow_tombstone && rec_ret->isDel() ) {
+                // Last operation is deletion, go to the next matching key.
+                found = false;
+                break;
+            }
+        } while (false);
+
+        if (found) {
+            SearchCbDecision dec = cb_func({*rec_ret});
+            if (dec == SearchCbDecision::STOP) {
+                skiplist_release_node(&node->snode);
+                return Status::OPERATION_STOPPED;
+            }
         }
 
         cursor = skiplist_next(idxByKey, &node->snode);
