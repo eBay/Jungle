@@ -215,6 +215,7 @@ if (CODE_COVERAGE GREATER 0)
                      fileops_directio_test
                      memtable_test
                      basic_op_test
+                     nearest_search_test
                      seq_itr_test
                      key_itr_test
                      snapshot_test
