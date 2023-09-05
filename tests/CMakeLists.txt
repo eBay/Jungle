@@ -30,6 +30,11 @@ add_executable(memtable_test ${MEMTABLE_TEST})
 target_link_libraries(memtable_test ${JUNGLE_TEST_DEPS})
 add_dependencies(memtable_test static_lib)
 
+set(TABLE_TEST ${TEST_DIR}/unit/table_test.cc)
+add_executable(table_test ${TABLE_TEST})
+target_link_libraries(table_test ${JUNGLE_TEST_DEPS})
+add_dependencies(table_test static_lib)
+
 set(CRC32_TEST ${TEST_DIR}/unit/crc32_test.cc)
 add_executable(crc32_test ${CRC32_TEST})
 target_link_libraries(crc32_test ${JUNGLE_TEST_DEPS})
