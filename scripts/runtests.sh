@@ -20,6 +20,7 @@ $VALGRIND ./tests/keyvalue_test --abort-on-failure
 $VALGRIND ./tests/fileops_test --abort-on-failure
 $VALGRIND ./tests/fileops_directio_test --abort-on-failure
 $VALGRIND ./tests/memtable_test --abort-on-failure
+$VALGRIND ./tests/table_test --abort-on-failure
 $VALGRIND ./tests/table_lookup_booster_test --abort-on-failure
 
 $VALGRIND ./tests/basic_op_test --abort-on-failure
