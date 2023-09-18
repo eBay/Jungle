@@ -166,7 +166,11 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
             uint64_t max_seq_log;
             s = lMgr->mani->getLogFileNumBySeq(maxSeqSnap, max_seq_log);
             if (s) {
-                l_num_max=  max_seq_log;
+                // WARNING:
+                //   `l_num_max` should always be equal to or greater than
+                //   `l_num_min`. The inversion can happen when there are
+                //   2 files, and `l_num_min` file contains nothing.
+                l_num_max = std::max(l_num_min, max_seq_log);
             }
         }
 
