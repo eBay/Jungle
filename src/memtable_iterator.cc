@@ -23,6 +23,7 @@ MemTable::Iterator::Iterator()
     , cursor(nullptr)
     , minSeq(NOT_INITIALIZED)
     , maxSeq(NOT_INITIALIZED)
+    , seqFrom(NOT_INITIALIZED)
     , seqUpto(NOT_INITIALIZED)
     {}
 
@@ -33,6 +34,7 @@ MemTable::Iterator::~Iterator() {
 Status MemTable::Iterator::init(const MemTable* m_table,
                                 const SizedBuf& start_key,
                                 const SizedBuf& end_key,
+                                const uint64_t seq_from,
                                 const uint64_t seq_upto)
 {
     mTable = m_table;
@@ -51,6 +53,7 @@ Status MemTable::Iterator::init(const MemTable* m_table,
 
     startKey.alloc(start_key);
     endKey.alloc(end_key);
+    seqFrom = seq_from;
     seqUpto = seq_upto;
 
     // Skip invalid keys.
@@ -64,7 +67,7 @@ Status MemTable::Iterator::init(const MemTable* m_table,
         }
 
         // Allow tombstone.
-        if ( !rn->validKeyExist(seqUpto, true) ) {
+        if ( !rn->validKeyExist(seqFrom, seqUpto, true) ) {
             // No record belongs to the current snapshot (iterator),
             // move further.
             cursor = skiplist_next(mTable->idxByKey, cursor);
@@ -132,7 +135,7 @@ Status MemTable::Iterator::get(Record& rec_out) {
     if (!cursor) return Status::KEY_NOT_FOUND;
     if (type == BY_KEY) {
         RecNode* node = _get_entry(cursor, RecNode, snode);
-        Record* rec = node->getLatestRecord(seqUpto);
+        Record* rec = node->getLatestRecord(seqFrom, seqUpto);
         assert(rec);
         rec_out = *rec;
 
@@ -163,7 +166,7 @@ Status MemTable::Iterator::prev(bool allow_tombstone) {
                 return Status::OUT_OF_RANGE;
             }
 
-            if ( !rn->validKeyExist(seqUpto, allow_tombstone) ) {
+            if ( !rn->validKeyExist(seqFrom, seqUpto, allow_tombstone) ) {
                 prev_node = skiplist_prev(mTable->idxByKey, prev_node);
                 skiplist_release_node(&rn->snode);
                 continue;
@@ -209,7 +212,7 @@ Status MemTable::Iterator::next(bool allow_tombstone) {
                 return Status::OUT_OF_RANGE;
             }
 
-            if ( !rn->validKeyExist(seqUpto, allow_tombstone) ) {
+            if ( !rn->validKeyExist(seqFrom, seqUpto, allow_tombstone) ) {
                 // No record belongs to the current snapshot (iterator),
                 // move further.
                 next_node = skiplist_next(mTable->idxByKey, next_node);
@@ -320,7 +323,7 @@ skiplist_node* MemTable::Iterator::findFirstValidNode(skiplist_node* seek_node,
                 return nullptr;
             }
 
-            if ( !rn->validKeyExist(seqUpto, true) ) {
+            if ( !rn->validKeyExist(seqFrom, seqUpto, true) ) {
                 // No record belongs to the current snapshot (iterator),
                 // move further.
                 seek_node = skiplist_next(mTable->idxByKey, seek_node);
@@ -340,7 +343,7 @@ skiplist_node* MemTable::Iterator::findFirstValidNode(skiplist_node* seek_node,
                 return nullptr;
             }
 
-            if ( !rn->validKeyExist(seqUpto, true) ) {
+            if ( !rn->validKeyExist(seqFrom, seqUpto, true) ) {
                 // No record belongs to the current snapshot (iterator),
                 // move further.
                 seek_node = skiplist_prev(mTable->idxByKey, seek_node);

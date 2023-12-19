@@ -66,7 +66,7 @@ int memtable_key_itr_test() {
     }
 
     MemTable::Iterator m_itr;
-    CHK_Z(m_itr.init(&mt, SizedBuf(), SizedBuf(), NOT_INITIALIZED));
+    CHK_Z(m_itr.init(&mt, SizedBuf(), SizedBuf(), NOT_INITIALIZED, NOT_INITIALIZED));
 
     size_t count = 0;
 
@@ -132,7 +132,7 @@ int memtable_key_itr_chk_test() {
 
     MemTable::Iterator m_itr;
     // Iterator on snapshot upto 2.
-    CHK_Z(m_itr.init(&mt, SizedBuf(), SizedBuf(), 2));
+    CHK_Z(m_itr.init(&mt, SizedBuf(), SizedBuf(), NOT_INITIALIZED, 2));
 
     size_t count = 0;
 
@@ -372,7 +372,7 @@ int memtable_itr_seek_beyond_seq_test() {
 
     MemTable::Iterator m_itr;
     // Iterator on snapshot upto 500.
-    CHK_Z(m_itr.init(&mt, SizedBuf(), SizedBuf(), 500));
+    CHK_Z(m_itr.init(&mt, SizedBuf(), SizedBuf(), NOT_INITIALIZED, 500));
 
     // Goto end.
     m_itr.gotoEnd();

@@ -132,6 +132,7 @@ public:
         Status init(const MemTable* m_table,
                     const SizedBuf& start_key,
                     const SizedBuf& end_key,
+                    const uint64_t seq_from,
                     const uint64_t seq_upto);
         Status initSN(const MemTable* m_table,
                       const uint64_t min_seq,
@@ -161,6 +162,11 @@ public:
         uint64_t maxSeq;
         SizedBuf startKey;
         SizedBuf endKey;
+
+        // (Key-iterator only) min allowed sequence number (inclusive).
+        uint64_t seqFrom;
+
+        // (Key-iterator only) max allowed sequence number (inclusive).
         uint64_t seqUpto;
     };
 
@@ -177,10 +183,11 @@ private:
         ~RecNode();
 
         static int cmp(skiplist_node *a, skiplist_node *b, void *aux);
-        Record* getLatestRecord(const uint64_t chk);
+        Record* getLatestRecord(const uint64_t seq_from, const uint64_t seq_upto);
         std::list<Record*> discardRecords(uint64_t seq_begin);
         uint64_t getMinSeq();
-        bool validKeyExist(const uint64_t chk,
+        bool validKeyExist(const uint64_t seq_from,
+                           const uint64_t seq_upto,
                            bool allow_tombstone = false);
 
         skiplist_node snode;
