@@ -798,11 +798,12 @@ LogFile::Iterator::~Iterator() {}
 Status LogFile::Iterator::init(LogFile* l_file,
                                const SizedBuf& start_key,
                                const SizedBuf& end_key,
+                               const uint64_t seq_from,
                                const uint64_t seq_upto)
 {
     lFile = l_file;
     lFile->touch();
-    return mItr.init(lFile->mTable, start_key, end_key, seq_upto);
+    return mItr.init(lFile->mTable, start_key, end_key, seq_from, seq_upto);
 }
 
 Status LogFile::Iterator::initSN(LogFile* l_file,

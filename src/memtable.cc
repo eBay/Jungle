@@ -66,14 +66,18 @@ int MemTable::RecNode::cmp(skiplist_node *a, skiplist_node *b, void *aux) {
     return SizedBuf::cmp(aa->key, bb->key);
 }
 
-Record* MemTable::RecNode::getLatestRecord(const uint64_t chk) {
+Record* MemTable::RecNode::getLatestRecord( const uint64_t seq_from,
+                                            const uint64_t seq_upto )
+{
     mGuard l(recListLock);
     Record* rec = nullptr;
     auto entry = recList->rbegin();
     while (entry != recList->rend()) {
         Record* tmp = *entry;
-        if (!valid_number(chk) || tmp->seqNum <= chk) {
-            rec = tmp;
+        if (!valid_number(seq_upto) || tmp->seqNum <= seq_upto) {
+            if (!valid_number(seq_from) || tmp->seqNum >= seq_from) {
+                rec = tmp;
+            }
             break;
         }
         entry++;
@@ -109,18 +113,19 @@ uint64_t MemTable::RecNode::getMinSeq() {
     return rec->seqNum;
 }
 
-bool MemTable::RecNode::validKeyExist( const uint64_t chk,
+bool MemTable::RecNode::validKeyExist( const uint64_t seq_from,
+                                       const uint64_t seq_upto,
                                        bool allow_tombstone )
 {
     bool valid_key_exist = true;
 
-    if (getMinSeq() > chk) {
+    if (getMinSeq() > seq_upto) {
         // No record belongs to the current snapshot (iterator),
         valid_key_exist = false;
     }
 
     if (valid_key_exist) {
-        Record* rec = getLatestRecord(chk);
+        Record* rec = getLatestRecord(seq_from, seq_upto);
         if (!rec) {
             // All records in the list may have
             // higher sequence number than given `chk`.
@@ -655,7 +660,7 @@ Status MemTable::getRecordByKeyInternal(const uint64_t chk,
         }
     }
 
-    Record* rec_ret = node->getLatestRecord(chk);
+    Record* rec_ret = node->getLatestRecord(NOT_INITIALIZED, chk);
     if (!rec_ret) {
         skiplist_release_node(&node->snode);
         return Status::KEY_NOT_FOUND;
@@ -714,7 +719,7 @@ Status MemTable::getRecordsByPrefix(const uint64_t chk,
     };
 
     while ( is_prefix_match(node->key) ) {
-        Record* rec_ret = node->getLatestRecord(chk);
+        Record* rec_ret = node->getLatestRecord(NOT_INITIALIZED, chk);
         if (!rec_ret) {
             skiplist_release_node(&node->snode);
             return Status::KEY_NOT_FOUND;

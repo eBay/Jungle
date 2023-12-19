@@ -988,11 +988,19 @@ int immediate_log_purging_test() {
     CHK_Z( db->flushLogs(jungle::FlushOptions(), 1000) );
 
     // Scan all logs which will cause burst memtable load.
-    for (size_t ii=1001; ii<NUM; ++ii) {
-        jungle::KV kv_out;
-        jungle::KV::Holder h(kv_out);
-        CHK_Z( db->getSN(ii+1, kv_out) );
-        TestSuite::sleep_ms(1);
+    {
+        TestSuite::WorkloadGenerator wg(1000);
+        for (size_t ii=1001; ii<NUM; ++ii) {
+            jungle::KV kv_out;
+            jungle::KV::Holder h(kv_out);
+            CHK_Z( db->getSN(ii+1, kv_out) );
+
+            size_t todo = wg.getNumOpsToDo();
+            if (!todo) {
+                TestSuite::sleep_ms(1);
+            }
+            wg.addNumOpsDone(1);
+        }
     }
 
     jungle::DBStats stats;
@@ -1007,11 +1015,19 @@ int immediate_log_purging_test() {
     CHK_Z( jungle::DB::open(&db, filename, config) );
 
     // Do the same thing.
-    for (size_t ii=1001; ii<NUM; ++ii) {
-        jungle::KV kv_out;
-        jungle::KV::Holder h(kv_out);
-        CHK_Z( db->getSN(ii+1, kv_out) );
-        TestSuite::sleep_ms(1);
+    {
+        TestSuite::WorkloadGenerator wg(1000);
+        for (size_t ii=1001; ii<NUM; ++ii) {
+            jungle::KV kv_out;
+            jungle::KV::Holder h(kv_out);
+            CHK_Z( db->getSN(ii+1, kv_out) );
+
+            size_t todo = wg.getNumOpsToDo();
+            if (!todo) {
+                TestSuite::sleep_ms(1);
+            }
+            wg.addNumOpsDone(1);
+        }
     }
 
     db->getStats(stats);

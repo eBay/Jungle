@@ -166,6 +166,7 @@ public:
         Status init(LogFile* l_file,
                     const SizedBuf& start_key,
                     const SizedBuf& end_key,
+                    const uint64_t seq_from,
                     const uint64_t seq_upto);
         Status initSN(LogFile* l_file,
                       const uint64_t min_seq,

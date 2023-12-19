@@ -39,7 +39,7 @@ void LogMgr::Iterator::addLogFileItr(LogFileInfo* l_info, bool is_log_store_snap
     if (type == BY_SEQ) {
         l_itr->initSN(l_info->file, minSeqSnap, maxSeqSnap, is_log_store_snapshot);
     } else if (type == BY_KEY) {
-        l_itr->init(l_info->file, startKey, endKey, maxSeqSnap);
+        l_itr->init(l_info->file, startKey, endKey, minSeqSnap, maxSeqSnap);
     }
 
     ItrItem* ctx = new ItrItem();

@@ -175,7 +175,7 @@ int itr_key_purge() {
     CHK_Z(db->flushLogs(jungle::FlushOptions()));
 
     // Update even number KV pairs.
-    int seq_count = n;
+    int seq_count = n + 1;
     std::vector<jungle::KV> kv2(n);
     CHK_Z(_init_kv_pairs(n, kv2, "key", "value2_"));
     for (int ii=0; ii<n; ii+=2) {
