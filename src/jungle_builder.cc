@@ -230,6 +230,7 @@ Status Builder::set(const Record& rec) {
     doc.meta = raw_meta.data;
     doc.metalen = raw_meta.size;
     doc.seqnum = (rec.seqNum == Record::NIL_SEQNUM) ? seqnumCounter++ : rec.seqNum;
+    doc.flags = FDB_CUSTOM_SEQNUM;
     curMaxSeqnum = std::max(curMaxSeqnum, doc.seqnum);
 
     if (curMinKey.empty()) {
