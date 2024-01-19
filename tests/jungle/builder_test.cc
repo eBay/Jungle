@@ -333,6 +333,23 @@ int builder_api_test(bool compression) {
         CHK_EQ(val_buf.toString(), value_out.toString());
     }
 
+    // Iteration from the middle of sequence number should work.
+    jungle::Status s;
+    jungle::Iterator itr;
+    CHK_Z( itr.initSN(db, NUM / 2) );
+    uint64_t seqnum_cnt = NUM / 2;
+    do {
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        s = itr.get(rec_out);
+        if (!s.ok()) break;
+
+        CHK_EQ(seqnum_cnt, rec_out.seqNum);
+        seqnum_cnt++;
+    } while (itr.next().ok());
+    CHK_Z( itr.close() );
+    CHK_EQ(NUM + 1, seqnum_cnt);
+
     CHK_Z( jungle::DB::close(db) );
     CHK_Z( jungle::shutdown() );
 
