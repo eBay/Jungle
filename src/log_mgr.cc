@@ -1841,6 +1841,10 @@ Status LogMgr::getLastSyncedSeqNum(uint64_t& seq_num_out) {
     LogFileInfoGuard li(mani->getLogFileInfoP(ln_sync, true));
     if (li.empty() || li.ptr->isRemoved()) continue;
     sync_seq = li->file->getSyncedSeqNum();
+
+    // NOTE: `sync_seq` can be INVALID, if the DB does not contain any data.
+    //       It is not a bug.
+#if 0
     if (!valid_number(sync_seq)) {
         // This should be a bug.
         _log_err( myLog, "log file %zu returned invalid seq number, "
@@ -1851,6 +1855,7 @@ Status LogMgr::getLastSyncedSeqNum(uint64_t& seq_num_out) {
                   li->file->isMemTablePurged() );
         assert(0);
     }
+#endif
     break;
    }
 
