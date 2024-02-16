@@ -46,11 +46,6 @@ int get_nearest_test(int flush_options) {
     // Shuffle (0 -- 99).
     std::vector<size_t> idx_arr(NUM);
     std::iota(idx_arr.begin(), idx_arr.end(), 0);
-    /*
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(idx_arr.begin(), idx_arr.end(), g);
-    */
     for (size_t ii = 0; ii < NUM; ++ii) {
         size_t jj = std::rand() % NUM;
         std::swap(idx_arr[ii], idx_arr[jj]);
@@ -137,6 +132,109 @@ int get_nearest_test(int flush_options) {
         } else  {
             CHK_NOT(s);
         }
+        return 0;
+    };
+
+    using jungle::SearchOptions;
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        for (bool exact_query: {true, false}) {
+            for (SearchOptions s_opt: { SearchOptions::GREATER_OR_EQUAL,
+                                        SearchOptions::GREATER,
+                                        SearchOptions::SMALLER_OR_EQUAL,
+                                        SearchOptions::SMALLER,
+                                        SearchOptions::EQUAL }) {
+                CHK_Z( verify_func(ii, s_opt, exact_query) );
+            }
+        }
+    }
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int get_nearest_on_deleted_keys_test(int flush_options) {
+    // flush_options:
+    //   0: all in the log.
+    //   1: 3/4 in the log and 1/4 in the table.
+    //   2: 1/2 in the log and 1/2 in the table.
+    //   3: 1/4 in the log and 3/4 in the table.
+    //   4: all in the table.
+
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxEntriesInLogFile = 20;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    const size_t NUM = 100;
+
+    // Shuffle (0 -- 99).
+    std::vector<size_t> idx_arr(NUM);
+    std::iota(idx_arr.begin(), idx_arr.end(), 0);
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        size_t jj = std::rand() % NUM;
+        std::swap(idx_arr[ii], idx_arr[jj]);
+    }
+
+    for (size_t kk = 0; kk < 2; ++kk) {
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            size_t idx = idx_arr[ii] * 10;
+            std::string key_str = "key" + TestSuite::lzStr(5, idx);
+            std::string val_str = "val" + TestSuite::lzStr(2, kk) +
+                                  "_" + TestSuite::lzStr(5, idx);
+
+            if (kk == 0) {
+                CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+            } else if (kk == 1) {
+                CHK_Z( db->del( key_str ) );
+            }
+
+            if ( (kk == 0 && ii == NUM/2 - 1 && flush_options == 1) ||
+                 (kk == 1 && ii == NUM/2 - 1 && flush_options == 3) ) {
+                CHK_Z( db->sync(false) );
+                CHK_Z( db->flushLogs() );
+            }
+        }
+        CHK_Z( db->sync(false) );
+        if (kk == 0 && flush_options == 2) {
+            CHK_Z( db->flushLogs() );
+        }
+    }
+    CHK_Z( db->sync(false) );
+    if (flush_options == 4) {
+        CHK_Z( db->flushLogs() );
+    }
+
+    auto verify_func = [&]( size_t ii,
+                            jungle::SearchOptions s_opt,
+                            bool exact_query ) -> int {
+        TestSuite::setInfo("ii %zu, s_opt %d, exact_query %d",
+                           ii, s_opt, exact_query);
+
+        int64_t idx = exact_query ? ii * 10 : ii * 10 + (s_opt.isGreater() ? 1 : -1);
+
+        std::string key_str;
+        if (idx >= 0) {
+            key_str = "key" + TestSuite::lzStr(5, idx);
+        } else {
+            key_str = "000";
+        }
+
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        s = db->getNearestRecordByKey(jungle::SizedBuf(key_str), rec_out, s_opt);
+        if (s.ok()) {
+            CHK_TRUE(rec_out.isDel());
+        }
+
         return 0;
     };
 
@@ -356,6 +454,9 @@ int main(int argc, char** argv) {
     //ts.options.printTestMessage = true;
     ts.doTest("get nearest test",
               get_nearest_test,
+              TestRange<int>(0, 4, 1, StepType::LINEAR));
+    ts.doTest("get nearest on deleted keys test",
+              get_nearest_on_deleted_keys_test,
               TestRange<int>(0, 4, 1, StepType::LINEAR));
     ts.doTest("get by prefix test",
               get_by_prefix_test, TestRange<size_t>( {0, 8, 16} ));
