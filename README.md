@@ -104,7 +104,7 @@ We welcome contributions. If you find any bugs, potential flaws and edge cases, 
 
 Contact
 -------
-* Jung-Sang Ahn <junahn@ebay.com>
+* Jung-Sang Ahn <jungsang.ahn@gmail.com>
 
 
 Coding Convention
@@ -162,7 +162,7 @@ int helper_function() {
 
 License Information
 --------------------
-Copyright 2017-2019 eBay Inc.
+Copyright 2017-present eBay Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
 
