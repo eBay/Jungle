@@ -295,7 +295,7 @@ Status TableMgr::Iterator::next() {
     cur_key.free();
     if (!windowCursor) {
         // Reached the end.
-        windowCursor = avl_last(&curWindow);
+        moveToLastValid();
         return Status::OUT_OF_RANGE;
     }
     return Status();
@@ -320,6 +320,39 @@ Status TableMgr::Iterator::gotoEnd() {
     return seekInternal(empty_key, 0, SMALLER, true);
 }
 
+Status TableMgr::Iterator::moveToLastValid() {
+    windowCursor = avl_last(&curWindow);
+    while (windowCursor) {
+        // Find *LAST* valid item (only for BY_KEY).
+        //
+        // e.g.)
+        //  ... Del K9 (seq 100), Ins K9 (seq 99)
+        //  We should pick up `Del K9`.
+        ItrItem* item = _get_entry(windowCursor, ItrItem, an);
+
+        if (type == BY_KEY) {
+            ItrItem* prev_item = nullptr;
+            avl_node* prev_cursor = avl_prev(windowCursor);
+            if (prev_cursor) prev_item = _get_entry(prev_cursor, ItrItem, an);
+
+            if (prev_item) {
+                int cmp = cmpSizedBuf( item->lastRec.kv.key,
+                                       prev_item->lastRec.kv.key );
+                if (cmp == 0) {
+                    // Same key, should take previous one.
+                    windowCursor = prev_cursor;
+                    continue;
+                }
+            }
+        }
+        break;
+#if 0
+        if (item->flags == ItrItem::none) break;
+        else windowCursor = avl_prev(windowCursor);
+#endif
+    }
+    return Status();
+}
 
 Status TableMgr::Iterator::seekInternal
        ( const SizedBuf& key,
@@ -405,14 +438,7 @@ Status TableMgr::Iterator::seekInternal
             else windowCursor = avl_next(windowCursor);
         }
     } else { // SMALLER
-        windowCursor = avl_last(&curWindow);
-        while (windowCursor) {
-            // Find *LAST* valid item (only for BY_KEY).
-            ItrItem* item = _get_entry(windowCursor, ItrItem, an);
-
-            if (item->flags == ItrItem::none) break;
-            else windowCursor = avl_prev(windowCursor);
-        }
+        moveToLastValid();
     }
 
     if (!windowCursor) {
