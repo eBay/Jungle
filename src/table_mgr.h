@@ -423,6 +423,7 @@ public:
                             const uint64_t seqnum,
                             SeekOption opt,
                             bool goto_end = false);
+        Status moveToLastValid();
         inline int cmpSizedBuf(const SizedBuf& l, const SizedBuf& r);
         bool checkValidBySeq(ItrItem* item,
                              const uint64_t cur_seq,

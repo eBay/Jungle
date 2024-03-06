@@ -17,6 +17,7 @@ limitations under the License.
 #include "jungle_test_common.h"
 
 #include "libjungle/jungle.h"
+#include "table_helper.h"
 
 #include <vector>
 
@@ -881,6 +882,103 @@ int itr_key_flush_and_delete_half_even(bool recreate = false) {
     return 0;
 }
 
+int different_version_and_level_test(bool deletion) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.maxL0TableSize = 1024 * 1024;
+    config.maxL1TableSize = 1024 * 1024;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    const size_t NUM = 2;
+
+    // Put older version to L1, and nwer version to L0.
+    // Key: `kkk`, value: `v0` and `v1`.
+    // If `deletion == true`, issue a delete operation.
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        std::string key_str = "kkk";
+        std::string val_str = "v" + TestSuite::lzStr(1, ii);
+        if (ii == 1 && deletion) {
+            CHK_Z(db->del(key_str));
+        } else {
+            CHK_Z(db->set(jungle::KV(key_str, val_str)));
+        }
+        CHK_Z(db->sync());
+        CHK_Z(db->flushLogs());
+
+        if (ii == 0) {
+            jungle::CompactOptions c_opt;
+            for (size_t jj = 0; jj < config.numL0Partitions; ++jj) {
+                CHK_Z(db->compactL0(c_opt, jj));
+            }
+        }
+    }
+
+    // Put a greater key to log.
+    // Key: `kkkk`, value: `v`.
+    std::string key_str = "kkkk";
+    std::string val_str = "v";
+    CHK_Z(db->set(jungle::KV(key_str, val_str)));
+    CHK_Z(db->sync());
+
+    // Reverse scan.
+    jungle::Iterator itr;
+    std::string s_key_str = "k";
+    std::string e_key_str = "l";
+    itr.init(db, s_key_str, e_key_str);
+    itr.gotoEnd();
+
+    size_t count = 0;
+    do {
+        jungle::Record rec_out;
+        jungle::Record::Holder h(rec_out);
+        s = itr.get(rec_out);
+        if (!s) break;
+
+        TestSuite::_msg("key: %s, value: %s\n",
+                        rec_out.kv.key.toString().c_str(),
+                        rec_out.kv.value.toString().c_str());
+
+        if (count == 0) {
+            CHK_EQ(jungle::SizedBuf("kkkk"), rec_out.kv.key);
+            CHK_EQ(jungle::SizedBuf("v"), rec_out.kv.value);
+
+        } else if (count == 1) {
+            if (deletion) {
+                return -1;
+            } else {
+                CHK_EQ(jungle::SizedBuf("kkk"), rec_out.kv.key);
+                CHK_EQ(jungle::SizedBuf("v1"), rec_out.kv.value);
+            }
+
+        } else {
+            return -1;
+        }
+
+        rec_out.free();
+        count++;
+    } while (itr.prev().ok());
+    itr.close();
+
+    if (deletion) {
+        CHK_EQ(1, count);
+    } else {
+        CHK_EQ(2, count);
+    }
+
+    CHK_Z(jungle::DB::close(db));
+
+    jungle::shutdown();
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -899,6 +997,9 @@ int main(int argc, char** argv) {
               TestRange<bool>({false, true}));
     ts.doTest("key itr flush and delete half even test",
               itr_key_flush_and_delete_half_even,
+              TestRange<bool>({false, true}));
+    ts.doTest("key itr different version and level test",
+              different_version_and_level_test,
               TestRange<bool>({false, true}));
 
     return 0;
