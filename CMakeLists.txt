@@ -106,7 +106,7 @@ if (LOGGER_NO_BACKTRACE GREATER 0)
     message(STATUS "---- NO BACKTRACE BY LOGGER ----")
 endif()
 
-file(COPY ${CMAKE_SOURCE_DIR}/scripts/runtests.sh
+file(COPY ${PROJECT_SOURCE_DIR}/scripts/runtests.sh
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 # === CUSTOM LOGGER ===
@@ -194,6 +194,7 @@ set(JUNGLE_DEPS
     ${LIBDL})
 
 add_library(static_lib ${JUNGLE_CORE})
+target_include_directories(static_lib PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(static_lib ${JUNGLE_DEPS})
 set_target_properties(static_lib PROPERTIES OUTPUT_NAME jungle
                       CLEAN_DIRECT_OUTPUT 1)
