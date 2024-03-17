@@ -1001,6 +1001,5 @@ int main(int argc, char** argv) {
     ts.doTest("key itr different version and level test",
               different_version_and_level_test,
               TestRange<bool>({false, true}));
-
     return 0;
 }
