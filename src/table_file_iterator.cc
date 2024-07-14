@@ -29,6 +29,7 @@ TableFile::Iterator::Iterator()
     , fdbItr(nullptr)
     , minSeq(NOT_INITIALIZED)
     , maxSeq(NOT_INITIALIZED)
+    , safeMode(false)
     {}
 
 TableFile::Iterator::~Iterator() {
@@ -41,6 +42,9 @@ Status TableFile::Iterator::init(DB* snap_handle,
                                  const SizedBuf& end_key)
 {
     tFile = t_file;
+    safeMode = (tFile && tFile->tableMgr)
+               ? tFile->tableMgr->getDbConfig()->safeMode : false;
+
     fdb_status fs;
     Status s;
 
@@ -167,10 +171,15 @@ Status TableFile::Iterator::get(Record& rec_out) {
     fdb_doc tmp_doc;
     memset(&tmp_doc, 0x0, sizeof(tmp_doc));
 
-    fdb_doc *doc = &tmp_doc;
+    fdb_doc *doc = safeMode ? nullptr : &tmp_doc;
     fs = fdb_iterator_get(fdbItr, &doc);
     if (fs != FDB_RESULT_SUCCESS) {
-        return Status::ERROR;
+        if (fs == FDB_RESULT_KEY_NOT_FOUND) {
+            return Status::KEY_NOT_FOUND;
+        }
+        // Otherwise, error.
+        _log_err(tFile->myLog, "fdb_iterator_get failed: %d", fs);
+        return toJungleStatus(fs);
     }
 
     rec_out.kv.key.set(doc->keylen, doc->key);
@@ -201,11 +210,17 @@ Status TableFile::Iterator::get(Record& rec_out) {
                    ? Record::DELETION
                    : Record::INSERTION;
 
+    if (safeMode && doc) {
+        free(doc);
+    }
     return Status();
 
    } catch (Status s) {
     rec_out.kv.free();
     rec_out.meta.free();
+    if (safeMode && doc) {
+        free(doc);
+    }
     return s;
    }
 }
@@ -221,10 +236,15 @@ Status TableFile::Iterator::getMeta(Record& rec_out,
     fdb_doc tmp_doc;
     memset(&tmp_doc, 0x0, sizeof(tmp_doc));
 
-    fdb_doc *doc = &tmp_doc;
+    fdb_doc *doc = safeMode ? nullptr : &tmp_doc;
     fs = fdb_iterator_get_metaonly(fdbItr, &doc);
     if (fs != FDB_RESULT_SUCCESS) {
-        return Status::ERROR;
+        if (fs == FDB_RESULT_KEY_NOT_FOUND) {
+            return Status::KEY_NOT_FOUND;
+        }
+        // Otherwise, error.
+        _log_err(tFile->myLog, "fdb_iterator_get failed: %d", fs);
+        return toJungleStatus(fs);
     }
 
     rec_out.kv.key.set(doc->keylen, doc->key);
@@ -247,6 +267,10 @@ Status TableFile::Iterator::getMeta(Record& rec_out,
     rec_out.type = (i_meta.isTombstone || doc->deleted)
                    ? Record::DELETION
                    : Record::INSERTION;
+
+    if (safeMode && doc) {
+        free(doc);
+    }
 
     return Status();
 }

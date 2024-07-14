@@ -731,12 +731,20 @@ Status DB::getNearestRecordByKey(const SizedBuf& key,
     Record::Holder h_rec_from_log(rec_from_log);
     uint64_t chknum = (sn)?(sn->chkNum):(NOT_INITIALIZED);
     std::list<LogFileInfo*>* l_list = (sn)?(sn->logList):(nullptr);
-    p->logMgr->getNearest(chknum, l_list, key, rec_from_log, opt);
+    Status ls = p->logMgr->getNearest(chknum, l_list, key, rec_from_log, opt);
+    if (!ls.ok() && ls != Status::KEY_NOT_FOUND) {
+        // Intolerable error.
+        return ls;
+    }
 
     Record rec_from_table;
     Record::Holder h_rec_from_table(rec_from_table);
     DB* snap_handle = (this->sn)?(this):(nullptr);
-    p->tableMgr->getNearest(snap_handle, key, rec_from_table, opt, meta_only);
+    Status ts = p->tableMgr->getNearest(snap_handle, key, rec_from_table, opt, meta_only);
+    if (!ts.ok() && ts != Status::KEY_NOT_FOUND) {
+        // Intolerable error.
+        return ts;
+    }
 
     if (rec_from_log.empty() && rec_from_table.empty()) {
         // Not found from both.
@@ -793,7 +801,7 @@ Status DB::getNearestRecordByKey(const SizedBuf& key,
         // Choose the one from table.
         rec_from_table.moveTo(rec_out);
     }
-    return s;
+    return Status::OK;
 }
 
 Status DB::getRecordsByPrefix(const SizedBuf& prefix,

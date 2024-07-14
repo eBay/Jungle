@@ -18,6 +18,7 @@ limitations under the License.
 
 #include "internal_helper.h"
 
+#include <csignal>
 #include <fstream>
 
 #include <stdio.h>
@@ -347,6 +348,125 @@ int log_manifest_corruption_across_file_test() {
     CHK_Z(jungle::shutdown());
     CHK_Z(_free_kv_pairs(kv_num, kv));
     CHK_Z(_free_kv_pairs(kv_num, kv_after));
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int table_file_corruption_test(size_t failing_idx) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+
+    // Without this flag, iterators will crash upon corruption.
+    config.safeMode = true;
+
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Write multiple log files.
+    const size_t NUM = 10000;
+    const std::string VALUE(1000, 'x');
+    for (size_t ii=0; ii<NUM; ++ii) {
+        CHK_Z(db->setSN(ii+1, jungle::KV("key" + TestSuite::lzStr(6, ii), VALUE)));
+    }
+    CHK_Z(db->sync(false));
+
+    // Flush into table.
+    CHK_Z( db->flushLogs() );
+
+    CHK_Z(jungle::DB::close(db));
+
+    // Corrupt the first table file (this is the value of `key000002`).
+    uint64_t offset = 0x0;
+    if (failing_idx == 2) offset = 0x9100;
+    if (failing_idx == 96) offset = 0x10070;
+    CHK_Z(inject_crc_error(filename + "/table0000_00000000", offset));
+
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Point get, key 2 should return checksum error, while all the others are ok.
+    auto verify = [&VALUE, failing_idx]
+        (jungle::Status s, size_t ii, const jungle::SizedBuf& value_out) {
+        if (ii == failing_idx) {
+            CHK_EQ(jungle::Status::CHECKSUM_ERROR, s.getValue());
+        } else {
+            CHK_Z(s);
+            CHK_EQ(jungle::SizedBuf(VALUE), value_out);
+        }
+        return 0;
+    };
+
+    // Point get, key=2 should fail.
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        TestSuite::setInfo("ii=%zu", ii);
+
+        jungle::SizedBuf value_out;
+        s = db->get(jungle::SizedBuf("key" + TestSuite::lzStr(6, ii)), value_out);
+        CHK_Z(verify(s, ii, value_out));
+        value_out.free();
+    }
+
+    {
+        // get nearest and prefix leverage iterator, it can return checksum error earlier.
+        jungle::Record rec_out;
+
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            s = db->getNearestRecordByKey(
+                jungle::SizedBuf("key" + TestSuite::lzStr(6, ii)), rec_out);
+            rec_out.free();
+            if (!s.ok()) break;
+        }
+        CHK_EQ(jungle::Status::CHECKSUM_ERROR, s.getValue());
+
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            s = db->getRecordsByPrefix(
+                jungle::SizedBuf("key" + TestSuite::lzStr(6, ii)),
+                [&rec_out](const jungle::SearchCbParams& p) {
+                    rec_out.free();
+                    p.rec.copyTo(rec_out);
+                    return jungle::SearchCbDecision::NEXT;
+                });
+            rec_out.free();
+            if (!s.ok()) break;
+        }
+        CHK_EQ(jungle::Status::CHECKSUM_ERROR, s.getValue());
+    }
+
+    // Iterator (without safe mode, it will crash).
+    jungle::Iterator itr;
+    s = itr.init(db, jungle::SizedBuf(), jungle::SizedBuf());
+    if (failing_idx == 2) {
+        CHK_EQ(jungle::Status::CHECKSUM_ERROR, s.getValue());
+    } else {
+        CHK_Z(s);
+
+        size_t count = 0;
+        do {
+            TestSuite::setInfo("count=%zu", count);
+            jungle::Record rec_out;
+            jungle::Record::Holder h(rec_out);
+            s = itr.get(rec_out);
+            if (!s.ok()) {
+                CHK_EQ(jungle::Status::CHECKSUM_ERROR, s.getValue());
+                break;
+            }
+
+            count++;
+        } while (itr.next().ok());
+        // Iteration should have been aborted in the middle.
+        CHK_SM(count, NUM);
+        CHK_Z(itr.close());
+    }
+
+    // Close.
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
 
     TEST_SUITE_CLEANUP_PATH();
     return 0;
@@ -1302,6 +1422,10 @@ int main(int argc, char** argv) {
 
     ts.doTest("log manifest corruption across multi log files test",
               log_manifest_corruption_across_file_test);
+
+    ts.doTest("table file corruption test",
+              table_file_corruption_test,
+              TestRange<size_t>({2, 96}));
 
     ts.doTest("incomplete log test",
               incomplete_log_test);
