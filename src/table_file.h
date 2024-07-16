@@ -86,6 +86,8 @@ public:
     static uint64_t getBfSizeByWss(const DBConfig* db_config,
                                    uint64_t wss);
 
+    static Status toJungleStatus(fdb_status fdb_s);
+
     FdbHandle* getIdleHandle();
 
     void returnHandle(FdbHandle* f_handle);
@@ -287,6 +289,8 @@ public:
         fdb_iterator* fdbItr;
         uint64_t minSeq;
         uint64_t maxSeq;
+
+        bool safeMode;
     };
 
     Status updateSnapshot();

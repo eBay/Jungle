@@ -63,6 +63,14 @@ Status Iterator::init(DB* dd,
                                    p->db->p->tableMgr,
                                    start_key,
                                    end_key );
+    if (s == Status::CHECKSUM_ERROR || s == Status::FILE_CORRUPTION) {
+        // Intolerable error.
+        DELETE(ctx_table->tableItr);
+        DELETE(ctx_table);
+        close();
+        return s;
+    }
+
     if (s) s = ctx_table->tableItr->get(ctx_table->lastRec);
     if (s) {
         avl_node* avl_ret =
@@ -144,6 +152,7 @@ Status Iterator::initSN(DB* db,
 }
 
 Status Iterator::get(Record& rec_out) {
+    if (!p->fatalError.ok()) return p->fatalError;
     if (!p || !p->db) return Status::NOT_INITIALIZED;
     if (!p->windowCursor) return Status::KEY_NOT_FOUND;
     if (p && p->db) p->db->p->updateOpHistory();
@@ -160,6 +169,7 @@ Status Iterator::get(Record& rec_out) {
 }
 
 Status Iterator::prev() {
+    if (!p->fatalError.ok()) return p->fatalError;
     if (!p || !p->db) return Status::NOT_INITIALIZED;
     if (!p->windowCursor) return Status::OUT_OF_RANGE;
     if (p && p->db) p->db->p->updateOpHistory();
@@ -196,12 +206,22 @@ Status Iterator::prev() {
             if (item->tableItr) {
                 s = item->tableItr->get(item->lastRec);
             }
-            assert(s);
 
             avl_cmp_func* cmp_func = (p->type == ItrInt::BY_SEQ)
                                      ? (ItrInt::ItrItem::cmpSeq)
                                      : (ItrInt::ItrItem::cmpKey);
             avl_node* avl_ret = avl_insert(&p->curWindow, &item->an, cmp_func);
+
+            if (s == Status::CHECKSUM_ERROR || s == Status::FILE_CORRUPTION) {
+                // Intolerable error.
+                p->fatalError = s;
+                cur_key.free();
+
+                // To make next `get()` call return error,
+                // return this function without error.
+                return Status();
+            }
+
             assert(avl_ret == &item->an);
             (void)avl_ret;
             cursor = avl_last(&p->curWindow);
@@ -257,6 +277,7 @@ Status Iterator::prev() {
 }
 
 Status Iterator::next() {
+    if (!p->fatalError.ok()) return p->fatalError;
     if (!p || !p->db) return Status::NOT_INITIALIZED;
     if (!p->windowCursor) return Status::OUT_OF_RANGE;
     if (p && p->db) p->db->p->updateOpHistory();
@@ -293,12 +314,22 @@ Status Iterator::next() {
             if (item->tableItr) {
                 s = item->tableItr->get(item->lastRec);
             }
-            assert(s);
 
             avl_cmp_func* cmp_func = (p->type == ItrInt::BY_SEQ)
                                      ? (ItrInt::ItrItem::cmpSeq)
                                      : (ItrInt::ItrItem::cmpKey);
             avl_node* avl_ret = avl_insert(&p->curWindow, &item->an, cmp_func);
+
+            if (s == Status::CHECKSUM_ERROR || s == Status::FILE_CORRUPTION) {
+                // Intolerable error.
+                p->fatalError = s;
+                cur_key.free();
+
+                // To make next `get()` call return error,
+                // return this function without error.
+                return Status();
+            }
+
             assert(avl_ret == &item->an);
             (void)avl_ret;
             cursor = avl_first(&p->curWindow);

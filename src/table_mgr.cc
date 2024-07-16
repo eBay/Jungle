@@ -452,12 +452,22 @@ Status TableMgr::get(DB* snap_handle,
                     new_rec.moveTo(latest_rec);
                     for (TableInfo* tt: tables) tt->done();
                     break;
+                } else if (s != Status::KEY_NOT_FOUND) {
+                    // This is intolerable error.
+                    for (TableInfo* tt: tables) tt->done();
+                    return s;
                 }
             }
             // Smallest table doesn't exist or exists but doesn't have the key.
         }
 
+        bool found_intolerable_error = false;
         for (TableInfo* table: tables) {
+            if (found_intolerable_error) {
+                table->done();
+                continue;
+            }
+
             if (sm_table && table == sm_table) {
                 // We already searched smallest normal table, skip.
                 sm_table->done();
@@ -480,9 +490,21 @@ Status TableMgr::get(DB* snap_handle,
                 // `latest_rec` is newer.
                 new_rec.kv.key.clear();
                 new_rec.free();
+
+                if (s != Status::KEY_NOT_FOUND) {
+                    // This is intolerable error.
+                    found_intolerable_error = true;
+                }
             }
             table->done();
         }
+
+        if (found_intolerable_error) {
+            latest_rec.kv.key.clear();
+            latest_rec.free();
+            return s;
+        }
+
         if (!latest_rec.empty()) break;
     }
     if (latest_rec.empty()) return Status::KEY_NOT_FOUND;
@@ -554,7 +576,13 @@ Status TableMgr::getNearest(DB* snap_handle,
         s = mani->getTablesNearest(ii, key, tables, s_opt);
         if (!s) continue;
 
+        bool found_intolerable_error = false;
         for (TableInfo* table: tables) {
+            if (found_intolerable_error) {
+                table->done();
+                continue;
+            }
+
             Record returned_rec;
             // WARNING: SHOULD NOT free `key` here
             //          as it is given by caller.
@@ -565,8 +593,16 @@ Status TableMgr::getNearest(DB* snap_handle,
                                          meta_only );
             if (s) {
                 update_cur_nearest(returned_rec);
+            } else if (s != Status::KEY_NOT_FOUND) {
+                // This is intolerable error.
+                found_intolerable_error = true;
             }
             table->done();
+        }
+
+        if (found_intolerable_error) {
+            cur_nearest.free();
+            return s;
         }
     }
     if (cur_nearest.empty()) return Status::KEY_NOT_FOUND;
@@ -591,12 +627,19 @@ Status TableMgr::getPrefix(DB* snap_handle,
         if (!s) continue;
 
         bool stopped = false;
+        bool found_intolerable_error = false;
         for (TableInfo* table: tables) {
-            if (!stopped) {
+            if (!stopped && !found_intolerable_error) {
                 s = table->file->getPrefix(snap_handle, prefix, cb_func);
             }
             table->done();
             if (s == Status::OPERATION_STOPPED) stopped = true;
+            if (!s.ok() && s != Status::KEY_NOT_FOUND) {
+                found_intolerable_error = true;
+            }
+        }
+        if (found_intolerable_error) {
+            return s;
         }
         if (stopped) break;
     }

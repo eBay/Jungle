@@ -411,7 +411,7 @@ public:
             Record lastRec;
         };
 
-        void addTableItr(DB* snap_handle, TableInfo* t_info);
+        Status addTableItr(DB* snap_handle, TableInfo* t_info);
         Status initInternal(DB* snap_handle,
                             TableMgr* table_mgr,
                             uint64_t min_seq,
@@ -442,6 +442,9 @@ public:
         SizedBuf endKey;
         avl_tree curWindow;
         avl_node* windowCursor;
+
+        // Intolerable error detected. If set, we cannot proceed iteration.
+        Status fatalError;
     };
 
 protected:

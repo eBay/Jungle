@@ -17,6 +17,7 @@ limitations under the License.
 #pragma once
 
 #include "record.h"
+#include "status.h"
 
 #include <functional>
 #include <vector>
@@ -141,6 +142,7 @@ public:
         , purgeDeletedDocImmediately(true)
         , fastIndexScan(false)
         , seqLoadingDelayFactor(0)
+        , safeMode(false)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -565,6 +567,14 @@ public:
      * The custom manifest files should be created by `cloneManifest()` API.
      */
     std::string customManifestPath;
+
+    /**
+     * If DB files are corrupted, Jungle will try to avoid the process crash
+     * as much as possible.
+     * This mode will slow down operations, thus should not be used in
+     * real production environment.
+     */
+    bool safeMode;
 };
 
 class GlobalConfig {
