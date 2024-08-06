@@ -106,7 +106,6 @@ void Flusher::work(WorkerOptions* opt_base) {
 
     DB* target_db = nullptr;
 
-    // assuming the flusherQueue is only used for log store
     FlusherQueueElem* elem = nullptr;
     if (handleAsyncReqs) {
         elem = dbm->flusherQueue()->pop();
