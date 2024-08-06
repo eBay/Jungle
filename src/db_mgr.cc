@@ -21,8 +21,9 @@ limitations under the License.
 #include "db_internal.h"
 #include "flusher.h"
 #include "internal_helper.h"
-#include "libjungle/db_config.h"
 #include "log_reclaimer.h"
+
+#include "libjungle/db_config.h"
 
 #include <set>
 
