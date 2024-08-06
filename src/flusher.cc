@@ -87,7 +87,7 @@ Flusher::Flusher(const std::string& _w_name,
 {
     workerName = _w_name;
     gConfig = _config;
-    handleSyncOnly = true;
+    handleAsyncReqs = true;
     FlusherOptions options;
     options.sleepDuration_ms = gConfig.flusherSleepDuration_ms;
     options.worker = this;
@@ -108,7 +108,7 @@ void Flusher::work(WorkerOptions* opt_base) {
 
     // assuming the flusherQueue is only used for log store
     FlusherQueueElem* elem = nullptr;
-    if (handleSyncOnly) {
+    if (handleAsyncReqs) {
         elem = dbm->flusherQueue()->pop();
     }
 

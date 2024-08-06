@@ -83,7 +83,7 @@ public:
 
     GlobalConfig gConfig;
     size_t lastCheckedFileIndex;
-    bool handleSyncOnly;
+    bool handleAsyncReqs;
 };
 
 

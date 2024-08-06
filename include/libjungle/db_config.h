@@ -582,7 +582,7 @@ public:
     GlobalConfig()
         : globalLogPath("./")
         , numFlusherThreads(1)
-        , dedicatedSyncOnlyFlusher(false)
+        , dedicatedFlusherForAsyncReqs(false)
         , flusherSleepDuration_ms(500)
         , flusherMinRecordsToTrigger(65536)
         , flusherMinLogFilesToTrigger(16)
@@ -606,11 +606,10 @@ public:
     size_t numFlusherThreads;
 
     /**
-     * Create a dedicated flusher for log store sync when log store and
-     * normal data store are used. Only effective when
+     * Create a dedicated flusher for async request. Only effective when
      * `numFlusherThreads` >= 2.
      */
-    bool dedicatedSyncOnlyFlusher;
+    bool dedicatedFlusherForAsyncReqs;
 
     /**
      * Fluhser thread sleep time in ms.
