@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include "internal_helper.h"
 #include "worker_mgr.h"
 
 #include <libjungle/jungle.h>
@@ -82,6 +83,7 @@ public:
 
     GlobalConfig gConfig;
     size_t lastCheckedFileIndex;
+    bool handleSyncOnly;
 };
 
 

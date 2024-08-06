@@ -89,6 +89,9 @@ void DBMgr::initInternal(const GlobalConfig& config) {
     for (size_t ii=0; ii<config.numFlusherThreads; ++ii) {
         std::string t_name = "flusher_" + std::to_string(ii);
         Flusher* flusher = new Flusher(t_name, config);
+        if (gConfig.dedicatedSyncOnlyFlusher && ii > 0) {
+            flusher->handleSyncOnly = false;
+        }
         wMgr->addWorker(flusher);
         flusher->run();
     }

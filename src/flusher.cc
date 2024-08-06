@@ -87,6 +87,7 @@ Flusher::Flusher(const std::string& _w_name,
 {
     workerName = _w_name;
     gConfig = _config;
+    handleSyncOnly = true;
     FlusherOptions options;
     options.sleepDuration_ms = gConfig.flusherSleepDuration_ms;
     options.worker = this;
@@ -105,7 +106,12 @@ void Flusher::work(WorkerOptions* opt_base) {
 
     DB* target_db = nullptr;
 
-    FlusherQueueElem* elem = dbm->flusherQueue()->pop();
+    // assuming the flusherQueue is only used for log store
+    FlusherQueueElem* elem = nullptr;
+    if (handleSyncOnly) {
+        elem = dbm->flusherQueue()->pop();
+    }
+
     if (elem) {
         // User assigned work check if it is already closed.
         std::lock_guard<std::mutex> l(dbm->dbMapLock);
