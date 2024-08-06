@@ -582,7 +582,7 @@ public:
     GlobalConfig()
         : globalLogPath("./")
         , numFlusherThreads(1)
-        , dedicatedFlusherForAsyncReqs(false)
+        , numDedicatedFlusherForAsyncReqs(0)
         , flusherSleepDuration_ms(500)
         , flusherMinRecordsToTrigger(65536)
         , flusherMinLogFilesToTrigger(16)
@@ -606,10 +606,10 @@ public:
     size_t numFlusherThreads;
 
     /**
-     * Create a dedicated flusher for async request. Only effective when
-     * `numFlusherThreads` >= 2.
+     * Create dedicated flushers for async request. Only effective when it is
+     * not 0 and `numFlusherThreads` > `numDedicatedFlusherForAsyncReqs`.
      */
-    bool dedicatedFlusherForAsyncReqs;
+    size_t numDedicatedFlusherForAsyncReqs;
 
     /**
      * Fluhser thread sleep time in ms.

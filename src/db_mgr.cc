@@ -21,6 +21,7 @@ limitations under the License.
 #include "db_internal.h"
 #include "flusher.h"
 #include "internal_helper.h"
+#include "libjungle/db_config.h"
 #include "log_reclaimer.h"
 
 #include <set>
@@ -86,10 +87,15 @@ void DBMgr::initInternal(const GlobalConfig& config) {
 
     printGlobalConfig();
 
+    bool dedicated_async_flusher =
+        gConfig.numDedicatedFlusherForAsyncReqs
+        && gConfig.numFlusherThreads > gConfig.numDedicatedFlusherForAsyncReqs;
     for (size_t ii=0; ii<config.numFlusherThreads; ++ii) {
         std::string t_name = "flusher_" + std::to_string(ii);
         Flusher* flusher = new Flusher(t_name, config);
-        if (gConfig.dedicatedFlusherForAsyncReqs && ii > 0) {
+        // If dedicated flusher is enabled, only the first
+        // `numDedicatedFlusherForAsyncReqs` flushers will handle async reqs.
+        if (dedicated_async_flusher && ii >= config.numDedicatedFlusherForAsyncReqs) {
             flusher->handleAsyncReqs = false;
         }
         wMgr->addWorker(flusher);
