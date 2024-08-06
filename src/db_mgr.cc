@@ -88,8 +88,8 @@ void DBMgr::initInternal(const GlobalConfig& config) {
     printGlobalConfig();
 
     bool dedicated_async_flusher =
-        gConfig.numDedicatedFlusherForAsyncReqs
-        && gConfig.numFlusherThreads > gConfig.numDedicatedFlusherForAsyncReqs;
+        config.numDedicatedFlusherForAsyncReqs
+        && config.numFlusherThreads > config.numDedicatedFlusherForAsyncReqs;
     for (size_t ii=0; ii<config.numFlusherThreads; ++ii) {
         std::string t_name = "flusher_" + std::to_string(ii);
         Flusher* flusher = new Flusher(t_name, config);
