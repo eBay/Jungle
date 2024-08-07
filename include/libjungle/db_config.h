@@ -582,6 +582,7 @@ public:
     GlobalConfig()
         : globalLogPath("./")
         , numFlusherThreads(1)
+        , numDedicatedFlusherForAsyncReqs(0)
         , flusherSleepDuration_ms(500)
         , flusherMinRecordsToTrigger(65536)
         , flusherMinLogFilesToTrigger(16)
@@ -592,8 +593,7 @@ public:
         , fdbCacheSize(0)
         , numTableWriters(8)
         , memTableFlushBufferSize(32768)
-        , shutdownLogger(true)
-        {}
+        , shutdownLogger(true) {}
 
     /**
      * Path where Jungle's global log will be located.
@@ -604,6 +604,12 @@ public:
      * Max number of flusher threads.
      */
     size_t numFlusherThreads;
+
+    /**
+     * Create dedicated flushers for async request. Only effective when it is
+     * not 0 and `numFlusherThreads` > `numDedicatedFlusherForAsyncReqs`.
+     */
+    size_t numDedicatedFlusherForAsyncReqs;
 
     /**
      * Fluhser thread sleep time in ms.
