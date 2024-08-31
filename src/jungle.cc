@@ -501,6 +501,12 @@ Status DB::flushLogsAsync(const FlushOptions& options,
         new FlusherQueueElem(this, local_options, seq_num, handler, ctx);
     db_mgr->flusherQueue()->push(elem);
 
+    // If dedicated workers are enabled, invoke those workers only.
+    const std::string WORKER_PREFIX =
+        db_mgr->getGlobalConfig()->numDedicatedFlusherForAsyncReqs
+        ? "flusher_ded"
+        : "flusher";
+
     if (options.execDelayUs) {
         // Delay is given.
         std::lock_guard<std::mutex> l(p->asyncFlushJobLock);
@@ -508,10 +514,11 @@ Status DB::flushLogsAsync(const FlushOptions& options,
              p->asyncFlushJob->isDone() ) {
             // Schedule a new timer.
             p->asyncFlushJob = db_mgr->getTpMgr()->addTask(
-                [db_mgr, lv, this](const simple_thread_pool::TaskResult& ret) {
+                [db_mgr, lv, this, WORKER_PREFIX]
+                (const simple_thread_pool::TaskResult& ret) {
                     if (!ret.ok()) return;
                     _log_(lv, p->myLog, "delayed flushing wakes up");
-                    db_mgr->workerMgr()->invokeWorker("flusher");
+                    db_mgr->workerMgr()->invokeWorker(WORKER_PREFIX);
                 },
                 local_options.execDelayUs );
             _log_(lv, p->myLog, "scheduled delayed flushing %p, %zu us",
@@ -521,7 +528,7 @@ Status DB::flushLogsAsync(const FlushOptions& options,
     } else {
         // Immediately invoke.
         _log_(lv, p->myLog, "invoke flush worker");
-        db_mgr->workerMgr()->invokeWorker("flusher");
+        db_mgr->workerMgr()->invokeWorker(WORKER_PREFIX);
     }
 
     return Status();

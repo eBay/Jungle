@@ -1613,6 +1613,53 @@ int snapshot_on_purged_memtable_test() {
     return 0;
 }
 
+int dedicated_flusher_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    jungle::GlobalConfig g_config;
+    g_config.numDedicatedFlusherForAsyncReqs = 1;
+    g_config.numFlusherThreads = 2;
+    g_config.logFileReclaimerSleep_sec = 1;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.numL0Partitions = 4;
+    config.maxEntriesInLogFile = 10;
+    config.logSectionOnly = true;
+    config.logFileTtl_sec = 1;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    const size_t NUM = 10;
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z(db->setSN(ii + 1, jungle::KV(key_str, val_str)));
+        jungle::FlushOptions f_opt;
+        f_opt.callFsync = true;
+        f_opt.syncOnly = true;
+        EventAwaiter awaiter;
+        TestSuite::Timer tt;
+        CHK_Z(db->flushLogsAsync(f_opt,
+                                 [&](jungle::Status s, void* c) { awaiter.invoke(); },
+                                 nullptr));
+        awaiter.wait();
+        TestSuite::_msg("%lu us elapsed\n", tt.getTimeUs());
+    }
+
+    CHK_Z(jungle::DB::close(db));
+
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 
 } using namespace log_reclaim_test;
 
@@ -1694,6 +1741,9 @@ int main(int argc, char** argv) {
     ts.doTest("snapshot on purged memtable test",
               snapshot_on_purged_memtable_test);
 
+
+    ts.doTest("dedicated flusher test",
+              dedicated_flusher_test);
 
 #if 0
     ts.doTest("reload empty files test",
