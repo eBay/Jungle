@@ -98,16 +98,24 @@ void DBMgr::initInternal(const GlobalConfig& config) {
         Flusher::FlusherType flusher_type = Flusher::FlusherType::GENERIC;
         if (dedicated_async_flusher) {
             if (ii < config.numDedicatedFlusherForAsyncReqs) {
-                flusher_type = Flusher::FlusherType::ONLY_HANDLE_ASYNC;
+                flusher_type = Flusher::FlusherType::FLUSH_ON_DEMAND;
             } else {
-                flusher_type = Flusher::FlusherType::ONLY_HANDLE_SYNC;
+                flusher_type = Flusher::FlusherType::FLUSH_ON_CONDITION;
             }
         }
-        std::string t_name = flusher_type == Flusher::FlusherType::ONLY_HANDLE_ASYNC
-                                 ? "flusher_async_" + std::to_string(ii)
-                                 : (flusher_type == Flusher::FlusherType::ONLY_HANDLE_SYNC
-                                        ? "flusher_sync_" + std::to_string(ii)
-                                        : "flusher_generic_" + std::to_string(ii));
+        std::string t_name;
+        switch (flusher_type) {
+        case Flusher::FlusherType::FLUSH_ON_DEMAND:
+            t_name = "flusher_od_" + std::to_string(ii);
+            break;
+        case Flusher::FlusherType::FLUSH_ON_CONDITION:
+            t_name = "flusher_oc_" + std::to_string(ii);
+            break;
+        default:
+            t_name = "flusher_" + std::to_string(ii);
+            break;
+        }
+
         Flusher* flusher = new Flusher(t_name, config, flusher_type);
         wMgr->addWorker(flusher);
         flusher->run();

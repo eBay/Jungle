@@ -507,7 +507,7 @@ Status DB::flushLogsAsync(const FlushOptions& options,
         && db_mgr->getGlobalConfig()->numFlusherThreads
                > db_mgr->getGlobalConfig()->numDedicatedFlusherForAsyncReqs;
     const std::string WORKER_PREFIX =
-        dedicated_async_flusher ? "flusher_async" : "flusher_generic";
+        dedicated_async_flusher ? "flusher_od" : "flusher";
 
     if (options.execDelayUs) {
         // Delay is given.
