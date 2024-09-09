@@ -112,7 +112,7 @@ void DBMgr::initInternal(const GlobalConfig& config) {
             t_name = "flusher_oc_" + std::to_string(ii);
             break;
         default:
-            t_name = "flusher_" + std::to_string(ii);
+            t_name = "flusher_gen_" + std::to_string(ii);
             break;
         }
 
