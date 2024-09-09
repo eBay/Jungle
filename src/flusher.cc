@@ -127,8 +127,8 @@ void Flusher::work(WorkerOptions* opt_base) {
         }
         if (cursor) skiplist_release_node(cursor);
 
-    } else {
-        // Otherwise: check DB map.
+    } else if (!handleAsyncReqs) {
+        // Otherwise: check DB map, only when it is not the dedicated flusher.
         std::lock_guard<std::mutex> l(dbm->dbMapLock);
 
         // NOTE:
