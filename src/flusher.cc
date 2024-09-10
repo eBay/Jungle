@@ -80,14 +80,13 @@ size_t FlusherQueue::size() const {
     return queue.size();
 }
 
-
-Flusher::Flusher(const std::string& _w_name,
-                 const GlobalConfig& _config)
+Flusher::Flusher(const std::string& w_name,
+                 const GlobalConfig& g_config,
+                 FlusherType f_type)
     : lastCheckedFileIndex(0xffff) // Any big number to start from 0.
-{
-    workerName = _w_name;
-    gConfig = _config;
-    handleAsyncReqs = true;
+    , type(f_type) {
+    workerName = w_name;
+    gConfig = g_config;
     FlusherOptions options;
     options.sleepDuration_ms = gConfig.flusherSleepDuration_ms;
     options.worker = this;
@@ -107,7 +106,7 @@ void Flusher::work(WorkerOptions* opt_base) {
     DB* target_db = nullptr;
 
     FlusherQueueElem* elem = nullptr;
-    if (handleAsyncReqs) {
+    if (type != FlusherType::FLUSH_ON_CONDITION) {
         elem = dbm->flusherQueue()->pop();
     }
 
@@ -127,7 +126,7 @@ void Flusher::work(WorkerOptions* opt_base) {
         }
         if (cursor) skiplist_release_node(cursor);
 
-    } else if (!handleAsyncReqs) {
+    } else if (type != FlusherType::FLUSH_ON_DEMAND) {
         // Otherwise: check DB map, only when it is not the dedicated flusher.
         std::lock_guard<std::mutex> l(dbm->dbMapLock);
 
@@ -242,7 +241,8 @@ void Flusher::work(WorkerOptions* opt_base) {
         target_db->p->decBgTask();
     }
 
-    if ( dbm->flusherQueue()->size() &&
+    if ( type != FlusherType::FLUSH_ON_CONDITION &&
+         dbm->flusherQueue()->size() &&
          !delayed_task ) {
         doNotSleepNextTime = true;
     }
