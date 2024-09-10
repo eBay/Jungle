@@ -95,14 +95,20 @@ void DBMgr::initInternal(const GlobalConfig& config) {
     for (size_t ii=0; ii<config.numFlusherThreads; ++ii) {
         // If dedicated flusher is enabled, only the first
         // `numDedicatedFlusherForAsyncReqs` flushers will handle async reqs.
-        bool handle_async_reqs =
-            !(dedicated_async_flusher && ii >= config.numDedicatedFlusherForAsyncReqs);
-        std::string t_name =
-            handle_async_reqs
-            ? "flusher_ded_" + std::to_string(ii)
-            : "flusher_" + std::to_string(ii);
-        Flusher* flusher = new Flusher(t_name, config);
-        flusher->handleAsyncReqs = handle_async_reqs;
+        Flusher::FlusherType flusher_type = Flusher::FlusherType::GENERIC;
+        if (dedicated_async_flusher) {
+            if (ii < config.numDedicatedFlusherForAsyncReqs) {
+                flusher_type = Flusher::FlusherType::ONLY_HANDLE_ASYNC;
+            } else {
+                flusher_type = Flusher::FlusherType::ONLY_HANDLE_SYNC;
+            }
+        }
+        std::string t_name = flusher_type == Flusher::FlusherType::ONLY_HANDLE_ASYNC
+                                 ? "flusher_async_" + std::to_string(ii)
+                                 : (flusher_type == Flusher::FlusherType::ONLY_HANDLE_SYNC
+                                        ? "flusher_sync_" + std::to_string(ii)
+                                        : "flusher_generic_" + std::to_string(ii));
+        Flusher* flusher = new Flusher(t_name, config, flusher_type);
         wMgr->addWorker(flusher);
         flusher->run();
     }

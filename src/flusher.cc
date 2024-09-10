@@ -80,14 +80,13 @@ size_t FlusherQueue::size() const {
     return queue.size();
 }
 
-
 Flusher::Flusher(const std::string& _w_name,
-                 const GlobalConfig& _config)
+                 const GlobalConfig& _config,
+                 FlusherType _type)
     : lastCheckedFileIndex(0xffff) // Any big number to start from 0.
-{
+    , type(_type) {
     workerName = _w_name;
     gConfig = _config;
-    handleAsyncReqs = true;
     FlusherOptions options;
     options.sleepDuration_ms = gConfig.flusherSleepDuration_ms;
     options.worker = this;
@@ -107,7 +106,7 @@ void Flusher::work(WorkerOptions* opt_base) {
     DB* target_db = nullptr;
 
     FlusherQueueElem* elem = nullptr;
-    if (handleAsyncReqs) {
+    if (type != FlusherType::ONLY_HANDLE_SYNC) {
         elem = dbm->flusherQueue()->pop();
     }
 
@@ -127,7 +126,7 @@ void Flusher::work(WorkerOptions* opt_base) {
         }
         if (cursor) skiplist_release_node(cursor);
 
-    } else if (!handleAsyncReqs) {
+    } else if (type != FlusherType::ONLY_HANDLE_ASYNC) {
         // Otherwise: check DB map, only when it is not the dedicated flusher.
         std::lock_guard<std::mutex> l(dbm->dbMapLock);
 
@@ -160,6 +159,9 @@ void Flusher::work(WorkerOptions* opt_base) {
                 break;
             }
         }
+    } else {
+        // FlusherType::ONLY_HANDLE_ASYNC but FlusherQueue is empty, early return.
+        return;
     }
 
     if (target_db) {

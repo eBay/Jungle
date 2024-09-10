@@ -502,10 +502,12 @@ Status DB::flushLogsAsync(const FlushOptions& options,
     db_mgr->flusherQueue()->push(elem);
 
     // If dedicated workers are enabled, invoke those workers only.
-    const std::string WORKER_PREFIX =
+    bool dedicated_async_flusher =
         db_mgr->getGlobalConfig()->numDedicatedFlusherForAsyncReqs
-        ? "flusher_ded"
-        : "flusher";
+        && db_mgr->getGlobalConfig()->numFlusherThreads
+               > db_mgr->getGlobalConfig()->numDedicatedFlusherForAsyncReqs;
+    const std::string WORKER_PREFIX =
+        dedicated_async_flusher ? "flusher_async" : "flusher_generic";
 
     if (options.execDelayUs) {
         // Delay is given.

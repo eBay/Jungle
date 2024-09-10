@@ -73,17 +73,20 @@ private:
 
 class Flusher : public WorkerBase {
 public:
+    enum FlusherType { GENERIC = 0x0, ONLY_HANDLE_ASYNC = 0x1, ONLY_HANDLE_SYNC = 0x2 };
+
     struct FlusherOptions : public WorkerOptions {
     };
 
     Flusher(const std::string& _w_name,
-            const GlobalConfig& _config);
+            const GlobalConfig& _config,
+            FlusherType _type = FlusherType::GENERIC);
     ~Flusher();
     void work(WorkerOptions* opt_base);
 
     GlobalConfig gConfig;
     size_t lastCheckedFileIndex;
-    bool handleAsyncReqs;
+    FlusherType type;
 };
 
 
