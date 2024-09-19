@@ -353,6 +353,97 @@ int log_manifest_corruption_across_file_test() {
     return 0;
 }
 
+int restore_from_backup_log_manifest() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.logSectionOnly = true;
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Write something.
+    size_t num = 12;
+    size_t kv_num = 100;
+    std::vector<jungle::KV> kv(kv_num);
+    CHK_Z(_init_kv_pairs(kv_num, kv, "key", "value"));
+
+    for (size_t ii=0; ii<num/2; ++ii) {
+        CHK_Z(db->setSN(ii+1, kv[ii]));
+    }
+    CHK_Z(db->sync(false));
+
+    // Remove backup file
+    TestSuite::remove(filename + "/log0000_manifest.bak");
+
+    for (size_t ii=num/2; ii<num; ++ii) {
+        CHK_Z(db->setSN(ii+1, kv[ii]));
+    }
+
+    // Directly sync to generate new backup file
+    db->sync();
+    CHK_Z(jungle::DB::close(db));
+
+    // Corrupt manifest file.
+    CHK_Z(inject_crc_error(filename + "/log0000_manifest"));
+
+    // Restore from a backup file.
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Get last seq num.
+    uint64_t last_seqnum;
+    CHK_Z(db->getMaxSeqNum(last_seqnum));
+
+    // Get check.
+    for (size_t ii=1; ii<=last_seqnum; ++ii) {
+        TestSuite::setInfo("ii=%zu", ii);
+        jungle::KV kv_out;
+        CHK_Z(db->getSN(ii, kv_out));
+        kv_out.free();
+        TestSuite::clearInfo();
+    }
+
+    // Set more, it will overwrite previous log files.
+    std::vector<jungle::KV> kv_after(kv_num);
+    CHK_Z(_init_kv_pairs(kv_num, kv_after, "key", "value_after_crash"));
+    for (size_t ii=last_seqnum+1; ii<=last_seqnum+5; ++ii) {
+        CHK_Z(db->setSN(ii, kv_after[ii-1]));
+    }
+
+    // Close & reopen.
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Get check.
+    for (size_t ii=1; ii<=last_seqnum+5; ++ii) {
+        TestSuite::setInfo("ii=%zu", ii);
+        jungle::KV kv_out;
+        CHK_Z(db->getSN(ii, kv_out));
+        if (ii <= last_seqnum) {
+            CHK_EQ(kv[ii-1].key, kv_out.key);
+            CHK_EQ(kv[ii-1].value, kv_out.value);
+        } else {
+            CHK_EQ(kv_after[ii-1].key, kv_out.key);
+            CHK_EQ(kv_after[ii-1].value, kv_out.value);
+        }
+        kv_out.free();
+        TestSuite::clearInfo();
+    }
+    CHK_Z(jungle::DB::close(db));
+
+    CHK_Z(jungle::shutdown());
+    CHK_Z(_free_kv_pairs(kv_num, kv));
+    CHK_Z(_free_kv_pairs(kv_num, kv_after));
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int table_file_corruption_test(size_t failing_idx) {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1422,6 +1513,9 @@ int main(int argc, char** argv) {
 
     ts.doTest("log manifest corruption across multi log files test",
               log_manifest_corruption_across_file_test);
+
+    ts.doTest("restore from backup log manifest",
+              restore_from_backup_log_manifest);
 
     ts.doTest("table file corruption test",
               table_file_corruption_test,

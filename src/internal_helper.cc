@@ -356,6 +356,55 @@ Status BackupRestore::backup(FileOps* f_ops,
    }
 }
 
+Status BackupRestore::backup(FileOps* f_ops,
+                             FileHandle** file,
+                             const std::string& filename,
+                             const SizedBuf& ctx,
+                             size_t length,
+                             size_t bytes_to_skip,
+                             bool call_fsync)
+{
+    Status s;
+    std::string dst_file = filename + ".bak";
+
+    try {
+        if (!f_ops->exist(dst_file)) {
+            if (*file) {
+                f_ops->close(*file);
+                delete *file;
+                *file = nullptr;
+            }
+        }
+
+        if (!(*file)) {
+            TC( f_ops->open(file, dst_file) );
+        }
+
+        size_t file_size = f_ops->eof(*file);
+        if (length > bytes_to_skip) {
+            TC( f_ops->pwrite( *file,
+                            ctx.data + bytes_to_skip,
+                            length - bytes_to_skip,
+                            bytes_to_skip ) );
+        }
+        if (file_size > length) {
+            f_ops->ftruncate(*file, length);
+        }
+
+        if (call_fsync) {
+            f_ops->fsync(*file);
+        }
+        return s;
+   } catch (Status s) {
+        if (*file) {
+            f_ops->close(*file);
+            delete *file;
+            *file = nullptr;
+        }
+        return s;
+   }
+}
+
 Status BackupRestore::restore(FileOps* f_ops,
                               const std::string& filename)
 {

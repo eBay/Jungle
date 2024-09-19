@@ -131,6 +131,13 @@ public:
                          size_t length,
                          size_t bytes_to_skip,
                          bool call_fsync);
+    static Status backup(FileOps* f_ops,
+                         FileHandle** file,
+                         const std::string& filename,
+                         const SizedBuf& ctx,
+                         size_t length,
+                         size_t bytes_to_skip,
+                         bool call_fsync);
     static Status restore(FileOps* f_ops,
                           const std::string& filename);
 };
