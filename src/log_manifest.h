@@ -338,6 +338,7 @@ private:
     FileOps* fOps;
     FileOps* fLogOps;
     FileHandle* mFile;
+    FileHandle* mBackupFile;
     std::string dirPath;
     std::string mFileName;
     uint64_t prefixNum;
