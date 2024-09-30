@@ -402,8 +402,8 @@ public:
     struct DirectIoOptions{
         DirectIoOptions()
             : enabled(false)
-            , bufferSize(16384)
-            , alignSize(512)
+            , bufferSize(4096)
+            , alignSize(4096)
             , readaheadSize(65536)
             {}
 
