@@ -45,6 +45,11 @@ public:
         std::string path;
 
         /**
+         * DBConfig for the DB instance to be created.
+         */
+        const DBConfig* dbConfig;
+
+        /**
          * Detailed table info.
          */
         struct TableData {
