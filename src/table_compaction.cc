@@ -28,8 +28,8 @@ namespace jungle {
 //
 Status TableMgr::compactLevelItr(const CompactOptions& options,
                                  TableInfo* victim_table,
-                                 size_t level)
-{
+                                 size_t level,
+                                 bool adjusting_num_l0) {
     if (level >= mani->getNumLevels()) return Status::INVALID_LEVEL;
 
     Status s;
@@ -376,7 +376,7 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
         //   1) number of files after split, and
         //   2) min keys for each new file.
         do {
-            if (!isCompactionAllowed()) {
+            if (!isCompactionAllowed() && !adjusting_num_l0) {
                 throw Status(Status::COMPACTION_CANCELLED);
             }
 
@@ -445,6 +445,7 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
                                       ? &twh.leasedWriters[worker_idx]->writerArgs
                                       : &local_args;
             w_args->callerAwaiter.reset();
+            w_args->adjustingNumL0 = adjusting_num_l0;
 
             uint64_t count = (jj + 1 == num_new_tables)
                              ? offsets.size() - new_tables[jj]->index
@@ -482,7 +483,7 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
             }
         }
 
-        if (!isCompactionAllowed()) {
+        if (!isCompactionAllowed() && !adjusting_num_l0) {
             // NOTE: keys will be freed below.
             for (LsmFlushResult& rr: results) delete rr.tFile;
             throw Status(Status::COMPACTION_CANCELLED);

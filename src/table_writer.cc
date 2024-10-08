@@ -28,6 +28,7 @@ TableWriterArgs::TableWriterArgs()
     : writerId(0)
     , stopSignal(false)
     , myLog(nullptr)
+    , adjustingNumL0(false)
     {}
 
 void TableWriterArgs::invoke() {
@@ -170,7 +171,8 @@ void TableWriterMgr::doTableWrite(TableWriterArgs* args) {
               args->payload.targetTableFile,
               *args->payload.offsets,
               args->payload.startIdx,
-              args->payload.count );
+              args->payload.count, 
+              args->adjustingNumL0.load() );
     }
 }
 
