@@ -47,7 +47,7 @@ public:
         /**
          * DBConfig for the DB instance to be created.
          */
-        const DBConfig* dbConfig;
+        DBConfig dbConfig;
 
         /**
          * Detailed table info.
