@@ -114,7 +114,7 @@ file(COPY ${PROJECT_SOURCE_DIR}/scripts/runtests.sh
 if (LOGGER_PATH)
     set(LOGGER_CC_FILE "${LOGGER_PATH}/logger.cc")
     set(LOGGER_HEADER_FILE "${LOGGER_PATH}/logger.h")
-else ()
+elseif (NOT LOGGER_CC_FILE)
     set(LOGGER_CC_FILE "${ROOT_SRC}/logger.cc")
     set(LOGGER_HEADER_FILE "${ROOT_SRC}/logger.h")
 endif ()
