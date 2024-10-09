@@ -27,12 +27,11 @@ Status Builder::buildFromTableFiles(const BuildParams& params) {
     Status s;
 
     std::unique_ptr<FileOpsPosix> f_ops(new FileOpsPosix());
-    DBConfig db_config;
 
     TableMgrOptions t_mgr_opt;
     t_mgr_opt.path = params.path;
     t_mgr_opt.fOps = f_ops.get();
-    t_mgr_opt.dbConfig = &db_config;
+    t_mgr_opt.dbConfig = &params.dbConfig;
 
     MutableTableMgr t_mgr(nullptr);
     t_mgr.setOpt(t_mgr_opt);
@@ -82,7 +81,7 @@ Status Builder::buildFromTableFiles(const BuildParams& params) {
     }
 
     // Create and add empty L0 tables.
-    for (size_t ii = 0; ii < db_config.numL0Partitions; ++ii) {
+    for (size_t ii = 0; ii < params.dbConfig.numL0Partitions; ++ii) {
         TableFile* t_file = new TableFile(&t_mgr);
         uint64_t table_number = ++max_table_num;
         std::string t_filename =
@@ -103,7 +102,7 @@ Status Builder::buildFromTableFiles(const BuildParams& params) {
     LogMgrOptions l_opt;
     l_opt.path = params.path;
     l_opt.fOps = f_ops.get();
-    l_opt.dbConfig = &db_config;
+    l_opt.dbConfig = &params.dbConfig;
     l_opt.startSeqnum = max_seqnum + 1;
     l_mgr.init(l_opt);
     l_mgr.sync(false);
@@ -122,6 +121,7 @@ Status Builder::init(const std::string& path,
     dbConfig = db_config;
     fOps = new FileOpsPosix();
     buildParams.path = path;
+    buildParams.dbConfig = dbConfig;
 
     if (!fOps->exist(dstPath)) {
         // Create the directory.

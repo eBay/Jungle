@@ -98,6 +98,7 @@ int build_from_table_files_test() {
     // Build from table files.
     jungle::builder::Builder::BuildParams params;
     params.path = path;
+    params.dbConfig = d_conf;
     for (size_t ii = 0; ii < 4; ++ii) {
         jungle::builder::Builder::BuildParams::TableData td;
         td.tableNumber = ii;
@@ -194,6 +195,8 @@ int build_an_empty_db_test() {
 
     fdb_set_log_callback_ex_global(dummy_fdb_log_cb, nullptr);
 
+    jungle::DBConfig d_conf;
+
     // Build from table files.
     jungle::builder::Builder::BuildParams params;
     params.path = path;
@@ -203,7 +206,6 @@ int build_an_empty_db_test() {
     jungle::DB* db;
     jungle::Status s;
 
-    jungle::DBConfig d_conf;
     CHK_Z( jungle::DB::open(&db, path, d_conf) );
 
     // Put a few key-value pairs.
