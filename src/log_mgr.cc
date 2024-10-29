@@ -1200,8 +1200,12 @@ Status LogMgr::syncInternal(bool call_fsync) {
 
     // Sync up manifest file next
     mani->setLastSyncedLog(last_synced_log);
-    EP( mani->store(call_fsync) );
-    _log_(log_level, myLog, "updated log manifest file.");
+    s = mani->store(call_fsync);
+    if (call_fsync || s != Status::OPERATION_IN_PROGRESS) {
+        EP( s );
+    }
+    _log_(log_level, myLog, "updated log manifest file, status = %s",
+          s.toString().c_str());
 
     return Status();
 }
