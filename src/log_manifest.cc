@@ -480,8 +480,9 @@ Status LogManifest::clone(const std::string& dst_path) {
 Status LogManifest::store(bool call_fsync) {
     if (mFileName.empty() || !fOps) return Status::NOT_INITIALIZED;
 
-    if (call_fsync) {
-        // `fsync` is required: calls by multiple threads should be serialized.
+    if (call_fsync || logMgr->getDbConfig()->serializeMultiThreadedLogFlush) {
+        // `fsync` is required, or serialize option is on:
+        // calls by multiple threads should be serialized.
         std::unique_lock<std::mutex> l(mFileWriteLock);
         return storeInternal(call_fsync);
     } else {
@@ -600,7 +601,7 @@ Status LogManifest::storeInternal(bool call_fsync) {
     if (need_truncate) {
         fOps->ftruncate(mFile, ss.pos());
     }
-    
+
     bool backup_done = false;
     if (call_fsync) {
         s = fOps->fsync(mFile);

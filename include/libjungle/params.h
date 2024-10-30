@@ -205,6 +205,7 @@ struct DebugParams {
         , newLogBatchCb(nullptr)
         , getLogFileInfoBySeqCb(nullptr)
         , logFlushCb(nullptr)
+        , syncCb(nullptr)
         , forceMerge(false)
         {}
 
@@ -298,6 +299,12 @@ struct DebugParams {
      * before updating last synced sequence number of each log file.
      */
     std::function< void(const GenericCbParams&) > logFlushCb;
+
+    /**
+     * Callback function that will be invoked at the beginning log sync
+     * (reading memtable data and writing them into log files).
+     */
+    std::function< void(const GenericCbParams&) > syncCb;
 
     /**
      * If true, merge will proceed the task even with the small number

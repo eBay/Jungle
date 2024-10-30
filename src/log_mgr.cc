@@ -202,10 +202,12 @@ void LogMgr::logMgrSettings() {
 
     _log_info( myLog,
                "initialized log manager, memtable flush buffer %zu, "
-               "direct-IO %s, custom hash length function %s",
+               "direct-IO %s, custom hash length function %s, "
+               "sync multi-threaded log flush %s",
                g_conf->memTableFlushBufferSize,
                get_on_off_str(opt.dbConfig->directIoOpt.enabled),
-               get_on_off_str((bool)opt.dbConfig->customLenForHash) );
+               get_on_off_str((bool)opt.dbConfig->customLenForHash),
+               opt.dbConfig->serializeMultiThreadedLogFlush ? "ON" : "OFF" );
 }
 
 Status LogMgr::rollback(uint64_t seq_upto) {
@@ -215,7 +217,8 @@ Status LogMgr::rollback(uint64_t seq_upto) {
     DebugParams d_params = mgr->getDebugParams();
 
     // Return error in read-only mode.
-    if (getDbConfig()->readOnly) return Status::WRITE_VIOLATION;
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->readOnly) return Status::WRITE_VIOLATION;
 
     // WARNING:
     //   Both syncing (memtable -> log) and flushing (log -> table)
@@ -225,7 +228,7 @@ Status LogMgr::rollback(uint64_t seq_upto) {
     const size_t MAX_RETRY_MS = 1000; // 1 second.
     tt.setDurationMs(MAX_RETRY_MS);
 
-    OpSemaWrapper ow_sync(&syncSema);
+    OpSemaWrapper ow_sync(&syncSema, db_config->serializeMultiThreadedLogFlush);
     while (!ow_sync.acquire()) {
         if (tt.timeout()) {
             _log_err(myLog, "rollback timeout due to sync");
@@ -233,9 +236,9 @@ Status LogMgr::rollback(uint64_t seq_upto) {
         }
         Timer::sleepMs(10);
     }
-    assert(ow_sync.op_sema->enabled);
+    assert(ow_sync.opSema->enabled);
 
-    OpSemaWrapper ow_flush(&flushSema);
+    OpSemaWrapper ow_flush(&flushSema, db_config->serializeMultiThreadedLogFlush);
     while (!ow_flush.acquire()) {
         if (tt.timeout()) {
             _log_err(myLog, "rollback timeout due to flush");
@@ -243,9 +246,9 @@ Status LogMgr::rollback(uint64_t seq_upto) {
         }
         Timer::sleepMs(10);
     }
-    assert(ow_flush.op_sema->enabled);
+    assert(ow_flush.opSema->enabled);
 
-    OpSemaWrapper ow_reclaim(&reclaimSema);
+    OpSemaWrapper ow_reclaim(&reclaimSema, db_config->serializeMultiThreadedLogFlush);
     while (!ow_reclaim.acquire()) {
         if (tt.timeout()) {
             _log_err(myLog, "rollback timeout due to reclaim");
@@ -253,7 +256,7 @@ Status LogMgr::rollback(uint64_t seq_upto) {
         }
         Timer::sleepMs(10);
     }
-    assert(ow_reclaim.op_sema->enabled);
+    assert(ow_reclaim.opSema->enabled);
 
     _log_info(myLog, "[ROLLBACK] upto %zu", seq_upto);
 
@@ -1124,21 +1127,32 @@ Status LogMgr::sync(bool call_fsync) {
 
 Status LogMgr::syncNoWait(bool call_fsync) {
     // Return error in read-only mode.
-    if (getDbConfig()->readOnly) return Status::WRITE_VIOLATION;
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->readOnly) return Status::WRITE_VIOLATION;
 
     // Only one sync operation at a time.
-    OpSemaWrapper ow(&syncSema);
+    OpSemaWrapper ow(&syncSema, db_config->serializeMultiThreadedLogFlush);
     if (!ow.acquire()) {
         _log_debug(myLog, "Sync failed. Other thread is working on it.");
         return Status::OPERATION_IN_PROGRESS;
     }
-    assert(ow.op_sema->enabled);
+    assert(ow.opSema->enabled);
     return syncInternal(call_fsync);
 }
 
 Status LogMgr::syncInternal(bool call_fsync) {
     Status s;
     uint64_t ln_from, ln_to;
+
+    DBMgr* dbm = DBMgr::getWithoutInit();
+    if (dbm && dbm->isDebugCallbackEffective()) {
+        DebugParams dp = dbm->getDebugParams();
+        if (dp.syncCb) {
+            DebugParams::GenericCbParams p;
+            dp.syncCb(p);
+        }
+    }
+
     s = mani->getMaxLogFileNum(ln_to);
     if (!s) {
         // No log, do nothing.
@@ -1208,15 +1222,16 @@ Status LogMgr::syncInternal(bool call_fsync) {
 
 Status LogMgr::discardDirty(uint64_t seq_begin) {
     // Return error in read-only mode.
-    if (getDbConfig()->readOnly) return Status::WRITE_VIOLATION;
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->readOnly) return Status::WRITE_VIOLATION;
 
     // Should not race with sync.
-    OpSemaWrapper ow(&syncSema);
+    OpSemaWrapper ow(&syncSema, db_config->serializeMultiThreadedLogFlush);
     if (!ow.acquire()) {
         _log_debug(myLog, "discard failed. Other thread is working on it.");
         return Status::OPERATION_IN_PROGRESS;
     }
-    assert(ow.op_sema->enabled);
+    assert(ow.opSema->enabled);
 
     Status s;
     uint64_t ln_from, ln_to;
@@ -1263,12 +1278,13 @@ Status LogMgr::flush(const FlushOptions& options,
         return Status::INVALID_SEQNUM;
     }
 
-    OpSemaWrapper ow(&flushSema);
+    const DBConfig* db_config = getDbConfig();
+    OpSemaWrapper ow(&flushSema, db_config->serializeMultiThreadedLogFlush);
     if (!ow.acquire()) {
         _log_debug(myLog, "Flush skipped. Other thread is working on it.");
         return Status::OPERATION_IN_PROGRESS;
     }
-    assert(ow.op_sema->enabled);
+    assert(ow.opSema->enabled);
 
     Status s;
     Timer tt;
@@ -1599,12 +1615,13 @@ void LogMgr::adjustThrottlingExtreme() {
 }
 
 Status LogMgr::doLogReclaim() {
-    OpSemaWrapper ow(&reclaimSema);
+    const DBConfig* db_config = getDbConfig();
+    OpSemaWrapper ow(&reclaimSema, db_config->serializeMultiThreadedLogFlush);
     if (!ow.acquire()) {
         _log_debug(myLog, "Reclaim skipped. Other thread is working on it.");
         return Status::OPERATION_IN_PROGRESS;
     }
-    assert(ow.op_sema->enabled);
+    assert(ow.opSema->enabled);
 
     mani->reclaimExpiredLogFiles();
     return Status();
@@ -1926,7 +1943,8 @@ Status LogMgr::close() {
 
     // If sync() or flush() is running,
     // wait until they finish their jobs.
-    OpSemaWrapper op_sync(&syncSema);
+    const DBConfig* db_config = getDbConfig();
+    OpSemaWrapper op_sync(&syncSema, db_config->serializeMultiThreadedLogFlush);
     _log_info(myLog, "Wait for on-going sync operation.");
 
     uint64_t ticks = 0;
@@ -1937,7 +1955,7 @@ Status LogMgr::close() {
     syncSema.enabled = false;
     _log_info(myLog, "Disabled syncing for %p, %zu ticks", this, ticks);
 
-    if (!getDbConfig()->readOnly) {
+    if (!db_config->readOnly) {
         // Last sync before close (not in read-only mode).
         syncInternal(false);
         _log_info(myLog, "Last sync done");
@@ -1945,7 +1963,7 @@ Status LogMgr::close() {
         _log_info(myLog, "read-only mode: skip the last sync");
     }
 
-    OpSemaWrapper op_flush(&flushSema);
+    OpSemaWrapper op_flush(&flushSema, db_config->serializeMultiThreadedLogFlush);
     _log_info(myLog, "Wait for on-going flush operation.");
     ticks = 0;
     while (!op_flush.acquire()) {
@@ -1956,7 +1974,7 @@ Status LogMgr::close() {
     flushSema.enabled = false;
     _log_info(myLog, "Disabled flushing for %p, %zu ticks", this, ticks);
 
-    OpSemaWrapper op_reclaim(&reclaimSema);
+    OpSemaWrapper op_reclaim(&reclaimSema, db_config->serializeMultiThreadedLogFlush);
     _log_info(myLog, "Wait for on-going log reclaim operation.");
     ticks = 0;
     while (!op_reclaim.acquire()) {

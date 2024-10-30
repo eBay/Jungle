@@ -2955,7 +2955,7 @@ int log_flush_add_new_file_race_test() {
 
     EventAwaiter ea_add_new_file;
     EventAwaiter ea_main;
-    const size_t WAIT_TIME_MS = 3600 * 1000;
+    const size_t WAIT_TIME_MS = 10 * 1000;
 
     // Enable debugging hook for new log file and log flush.
     jungle::DebugParams dp;
@@ -3015,6 +3015,105 @@ int log_flush_add_new_file_race_test() {
     return 0;
 }
 
+int serialized_sync_and_flush_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db;
+
+    config.serializeMultiThreadedLogFlush = true;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    auto insert_keys = [&](size_t from, size_t to) {
+        for (size_t ii = from; ii < to; ++ii) {
+            std::string key_str = "key" + TestSuite::lzStr(5, ii);
+            std::string val_str = "val" + TestSuite::lzStr(5, ii);
+            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        }
+        return 0;
+    };
+
+    CHK_Z( insert_keys(0, 10) );
+
+    const size_t WAIT_TIME_MS = 3600 * 1000;
+    EventAwaiter ea_main;
+
+    // Enable debugging hook for new log file and log flush.
+    jungle::DebugParams dp;
+    std::thread* t1(nullptr);
+    std::thread* t2(nullptr);
+    jungle::Status t1_res(jungle::Status::ERROR), t2_res(jungle::Status::ERROR);
+    std::atomic<bool> sync_cb_invoked(false), flush_cb_invoked(false);
+
+    dp.syncCb = [&](const jungle::DebugParams::GenericCbParams& pp) {
+        bool exp = false;
+        bool des = true;
+        // This CB is executed only once, so only 2 threads are racing.
+        if (sync_cb_invoked.compare_exchange_strong(exp, des)) {
+            t1 = new std::thread([&]() {
+                // Let another thread sync simultaneously.
+                // This thread should be blocked by the main thread.
+                t1_res = db->sync(false);
+
+                // Once it's done, resume the main thread flow.
+                ea_main.invoke();
+            });
+        }
+    };
+
+    dp.logFlushCb = [&](const jungle::DebugParams::GenericCbParams& pp) {
+        bool exp = false;
+        bool des = true;
+        // This CB is executed only once, so only 2 threads are racing.
+        if (flush_cb_invoked.compare_exchange_strong(exp, des)) {
+            t2 = new std::thread([&]() {
+                // Let another thread flush simultaneously.
+                // This thread should be blocked by the main thread.
+                jungle::FlushOptions f_opt;
+                t2_res = db->flushLogs(f_opt);
+
+                // Once it's done, resume the main thread flow.
+                ea_main.invoke();
+            });
+        }
+    };
+    jungle::DB::setDebugParams(dp);
+    jungle::DB::enableDebugCallbacks(true);
+
+    // Do sync.
+    CHK_Z(db->sync(false));
+    ea_main.wait_ms(WAIT_TIME_MS);
+    ea_main.reset();
+    // Both thread should succeed without `OPERATION_IN_PROGRESS`.
+    CHK_Z(t1_res);
+
+    // Do flush.
+    jungle::FlushOptions f_opt;
+    CHK_Z(db->flushLogs(f_opt));
+    ea_main.wait_ms(WAIT_TIME_MS);
+    ea_main.reset();
+    // Both thread should succeed without `OPERATION_IN_PROGRESS`.
+    CHK_Z(t2_res.getValue());
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    if (t1->joinable()) {
+        t1->join();
+    }
+    delete t1;
+    if (t2->joinable()) {
+        t2->join();
+    }
+    delete t2;
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -3069,6 +3168,7 @@ int main(int argc, char** argv) {
               key_length_limit_for_hash_test, TestRange<size_t>( {24, 8, 7, 0} ));
     ts.doTest("sample key test", sample_key_test);
     ts.doTest("log flush add new file race test", log_flush_add_new_file_race_test);
+    ts.doTest("serialized sync and flush test", serialized_sync_and_flush_test);
 
     return 0;
 }
