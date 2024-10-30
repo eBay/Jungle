@@ -143,6 +143,7 @@ public:
         , fastIndexScan(false)
         , seqLoadingDelayFactor(0)
         , safeMode(false)
+        , serializeMultiThreadedLogFlush(false)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -575,6 +576,14 @@ public:
      * real production environment.
      */
     bool safeMode;
+
+    /**
+     * If `true`, `sync` and `flushLogs` calls by multiple threads will be serialized,
+     * and executed one by one.
+     * If `false`, only one thread will execute `sync` and `flushLogs` calls, while
+     * the other concurrent threads will get `OPERATION_IN_PROGRESS` status.
+     */
+    bool serializeMultiThreadedLogFlush;
 };
 
 class GlobalConfig {
