@@ -206,12 +206,14 @@ void LogMgr::logMgrSettings() {
                "initialized log manager, memtable flush buffer %zu, "
                "direct-IO %s, custom hash length function %s, "
                "sync multi-threaded log flush %s, "
-               "skip manifest sync %s",
+               "skip manifest sync %s, "
+               "auto log flush %s",
                g_conf->memTableFlushBufferSize,
                get_on_off_str(opt.dbConfig->directIoOpt.enabled),
                get_on_off_str((bool)opt.dbConfig->customLenForHash),
                get_on_off_str(opt.dbConfig->serializeMultiThreadedLogFlush),
-               get_on_off_str(opt.dbConfig->skipManifestSync) );
+               get_on_off_str(opt.dbConfig->skipManifestSync),
+               get_on_off_str(opt.dbConfig->autoLogFlush) );
 }
 
 Status LogMgr::rollback(uint64_t seq_upto) {
