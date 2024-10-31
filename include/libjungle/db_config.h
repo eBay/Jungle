@@ -104,6 +104,7 @@ public:
     DBConfig()
         : allowOverwriteSeqNum(false)
         , logSectionOnly(false)
+        , autoLogFlush(true)
         , truncateInconsecutiveLogs(true)
         , logFileTtl_sec(0)
         , maxKeepingMemtables(0)
@@ -179,10 +180,20 @@ public:
      */
     bool allowOverwriteSeqNum;
 
-    /*
+    /**
      * Disable table section and use logging part only.
      */
     bool logSectionOnly;
+
+    /**
+     * If it is normal DB instance (`readOnly = false` and `logSectionOnly = false`),
+     * background flusher thread will automatically flush logs to L0 tables.
+     *
+     * WARNING:
+     *   If it is set to `false`, users should manually call `flushLogs()`.
+     *   The more unflushed logs, the more memory consumption.
+     */
+    bool autoLogFlush;
 
     /*
      * (Only when `logSectionOnly == true`)

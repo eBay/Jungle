@@ -3114,6 +3114,57 @@ int serialized_sync_and_flush_test() {
     return 0;
 }
 
+int disabling_auto_flush_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db1 = nullptr;
+    jungle::DB* db2 = nullptr;
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 1;
+    g_config.flusherMinRecordsToTrigger = 100;
+    jungle::init(g_config);
+
+    config.maxEntriesInLogFile = 100;
+    std::string db1_file = filename + "_db1";
+    CHK_Z(jungle::DB::open(&db1, db1_file, config));
+
+    config.autoLogFlush = false;
+    std::string db2_file = filename + "_db2";
+    CHK_Z(jungle::DB::open(&db2, db2_file, config));
+
+    auto insert_keys = [&](size_t from, size_t to) {
+        for (size_t ii = from; ii < to; ++ii) {
+            std::string key_str = "key" + TestSuite::lzStr(5, ii);
+            std::string val_str = "val" + TestSuite::lzStr(5, ii);
+            CHK_Z( db1->set( jungle::KV(key_str, val_str) ) );
+            CHK_Z( db2->set( jungle::KV(key_str, val_str) ) );
+        }
+        return 0;
+    };
+
+    CHK_Z( insert_keys(0, 200) );
+
+    // Wait longer than flusher sleep time.
+    TestSuite::sleep_ms(g_config.flusherSleepDuration_ms * 2, "wait for flusher..");
+
+    uint64_t db1_flushed_seqnum = 0, db2_flushed_seqnum = 0;
+    CHK_Z(db1->getLastFlushedSeqNum(db1_flushed_seqnum));
+    CHK_EQ(jungle::Status::INVALID_SEQNUM,
+           db2->getLastFlushedSeqNum(db2_flushed_seqnum).getValue());
+
+    CHK_Z(jungle::DB::close(db1));
+    CHK_Z(jungle::DB::close(db2));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -3169,6 +3220,7 @@ int main(int argc, char** argv) {
     ts.doTest("sample key test", sample_key_test);
     ts.doTest("log flush add new file race test", log_flush_add_new_file_race_test);
     ts.doTest("serialized sync and flush test", serialized_sync_and_flush_test);
+    ts.doTest("disabling auto flush test", disabling_auto_flush_test);
 
     return 0;
 }

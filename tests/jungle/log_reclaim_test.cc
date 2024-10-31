@@ -1660,7 +1660,6 @@ int dedicated_flusher_test() {
     return 0;
 }
 
-
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
@@ -1740,7 +1739,6 @@ int main(int argc, char** argv) {
 
     ts.doTest("snapshot on purged memtable test",
               snapshot_on_purged_memtable_test);
-
 
     ts.doTest("dedicated flusher test",
               dedicated_flusher_test);
