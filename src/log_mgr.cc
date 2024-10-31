@@ -1884,7 +1884,6 @@ Status LogMgr::getLastSyncedSeqNum(uint64_t& seq_num_out) {
     return Status();
 }
 
-
 bool LogMgr::checkTimeToFlush(const GlobalConfig& config) {
     Status s;
     uint64_t l_last_flush = 0;
@@ -1892,10 +1891,12 @@ bool LogMgr::checkTimeToFlush(const GlobalConfig& config) {
     uint64_t seq_last_flush = NOT_INITIALIZED;
     uint64_t seq_max = NOT_INITIALIZED;
 
-    if (getDbConfig()->readOnly) return false;
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->readOnly) return false;
     if (syncSema.grabbed) return false;
     if (flushSema.grabbed) return false;
-    if (getDbConfig()->logSectionOnly) return false;
+    if (db_config->logSectionOnly) return false;
+    if (!db_config->autoLogFlush) return false;
 
     const size_t MAX_TRY = 10;
     size_t num_try = 0;
