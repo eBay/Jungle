@@ -43,6 +43,7 @@ LogMgr::LogMgr(DB* parent_db, const LogMgrOptions& lm_opt)
     , fwdVisibleSeqBarrier(0)
     , globalBatchStatus(nullptr)
     , numMemtables(0)
+    , needSkippedManiSync(false)
     , myLog(nullptr)
     , vlSync(VERBOSE_LOG_SUPPRESS_MS)
     {}
@@ -182,6 +183,7 @@ Status LogMgr::init(const LogMgrOptions& lm_opt) {
        }
     }
 
+    needSkippedManiSync = false;
     initialized = true;
     return Status();
 
@@ -203,11 +205,13 @@ void LogMgr::logMgrSettings() {
     _log_info( myLog,
                "initialized log manager, memtable flush buffer %zu, "
                "direct-IO %s, custom hash length function %s, "
-               "sync multi-threaded log flush %s",
+               "sync multi-threaded log flush %s, "
+               "skip manifest sync %s",
                g_conf->memTableFlushBufferSize,
                get_on_off_str(opt.dbConfig->directIoOpt.enabled),
                get_on_off_str((bool)opt.dbConfig->customLenForHash),
-               opt.dbConfig->serializeMultiThreadedLogFlush ? "ON" : "OFF" );
+               get_on_off_str(opt.dbConfig->serializeMultiThreadedLogFlush),
+               get_on_off_str(opt.dbConfig->skipManifestSync) );
 }
 
 Status LogMgr::rollback(uint64_t seq_upto) {
@@ -476,6 +480,8 @@ Status LogMgr::cloneManifest(DB* snap_handle,
 Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
                              LogFileInfoGuard& new_log_file_info)
 {
+    const DBConfig* db_config = getDbConfig();
+
     std::unique_lock<std::mutex> ll(addNewLogFileMutex);
     Status s;
 
@@ -511,8 +517,10 @@ Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
         _log_info(myLog, "moved to a new log file %ld, start seq %s",
                   new_log_num, _seq_str(start_seqnum).c_str());
 
-        // Sync manifest file.
-        mani->store(false);
+        if (!db_config->skipManifestSync) {
+            // Sync manifest file.
+            mani->store(false);
+        }
 
     } else {
         // Otherwise, other thread already added a new log file.
@@ -527,6 +535,8 @@ Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
 
     new_log_file_info = LogFileInfoGuard(lf_info);
 
+    // Next `sync()` call should sync manifest file, regardless of `skipManifestSync`.
+    needSkippedManiSync = true;
     return Status();
 }
 
@@ -1214,9 +1224,13 @@ Status LogMgr::syncInternal(bool call_fsync) {
 
     // Sync up manifest file next
     mani->setLastSyncedLog(last_synced_log);
-    EP( mani->store(call_fsync) );
-    _log_(log_level, myLog, "updated log manifest file.");
 
+    const DBConfig* db_config = getDbConfig();
+    if (!db_config->skipManifestSync || needSkippedManiSync) {
+        EP( mani->store(call_fsync) );
+        _log_(log_level, myLog, "updated log manifest file.");
+        needSkippedManiSync = false;
+    }
     return Status();
 }
 
@@ -1958,6 +1972,7 @@ Status LogMgr::close() {
 
     if (!db_config->readOnly) {
         // Last sync before close (not in read-only mode).
+        needSkippedManiSync = true;
         syncInternal(false);
         _log_info(myLog, "Last sync done");
     } else {

@@ -145,6 +145,7 @@ public:
         , seqLoadingDelayFactor(0)
         , safeMode(false)
         , serializeMultiThreadedLogFlush(false)
+        , skipManifestSync(false)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -595,6 +596,17 @@ public:
      * the other concurrent threads will get `OPERATION_IN_PROGRESS` status.
      */
     bool serializeMultiThreadedLogFlush;
+
+    /**
+     * [EXPERIMENTAL]
+     * If `true`, when `sync()` is invoked, only the actual log files will be synced,
+     * not the manifest file. The manifest file is synced when 1) a new log file is
+     * added, or 2) the DB is closed.
+     *
+     * Even without syncing the manifest file, Jungle can recover the last synced
+     * data by scanning the log files.
+     */
+    bool skipManifestSync;
 };
 
 class GlobalConfig {

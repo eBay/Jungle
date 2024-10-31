@@ -459,6 +459,11 @@ protected:
     std::atomic<uint32_t> numMemtables;
 
     /**
+     * If `true`, the sync of manifest is a must in the next `sync()` call.
+     */
+    std::atomic<bool> needSkippedManiSync;
+
+    /**
      * Logger.
      */
     SimpleLogger* myLog;
