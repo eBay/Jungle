@@ -903,7 +903,7 @@ Status TableFile::setSingle(uint32_t key_hash_val,
         // Immediate purging option,
         // only for the bottom-most non-zero level.
         InternalMeta i_meta_from_rec;
-        readInternalMeta(rec.meta, i_meta_from_rec);
+        readInternalMeta(SizedBuf(doc.metalen, doc.meta), i_meta_from_rec);
         if (i_meta_from_rec.isTombstone || force_delete) {
             fs = fdb_del(kvs_db, &doc);
             deletion_executed = true;
