@@ -182,12 +182,6 @@ Status TableMgr::init(const TableMgrOptions& _options) {
         opt.compressionEnabled = true;
     }
 
-    compactStatus.resize(db_config->numL0Partitions);
-    for (size_t ii=0; ii<compactStatus.size(); ++ii) {
-        std::atomic<bool>*& entry = compactStatus[ii];
-        entry = new std::atomic<bool>(false);
-    }
-
     Status s;
     mani = new TableManifest(this, opt.fOps);
     mani->setLogger(myLog);
@@ -252,6 +246,57 @@ Status TableMgr::init(const TableMgrOptions& _options) {
             }
         }
 
+        // Adjust num L0 partitions blockingly only when it is not logSectionOnly mdoe,
+        // not read only mode, and the number of L0 partitions read from existing manifest
+        // file is different from the number specified in db config.
+        if (!db_config->logSectionOnly && !db_config->readOnly
+            && numL0Partitions != db_config->numL0Partitions) {
+            _log_info(myLog,
+                      "adjust numL0 partitions: %zu -> %zu",
+                      numL0Partitions,
+                      db_config->numL0Partitions);
+
+            if (!db_config->nextLevelExtension) {
+                _log_err(myLog, "[Adjust numL0] not allowed in L0 only mode");
+                throw Status(Status::INVALID_CONFIG);
+            }
+
+            // Need to compact all existing L0 tables to L1 and recreate empty L0 tables,
+            // otherwise hash will be messed up.
+            for (size_t ii = 0; ii < numL0Partitions; ++ii) {
+                // Force compact L0 table to L1 in blocking manner to reduce L0
+                // partitions.
+                std::list<TableInfo*> tables;
+                s = mani->getL0Tables(ii, tables);
+                if (tables.size() != 1 || !s) {
+                    _log_err(myLog, "[Adjust numL0] tables of hash %zu not found", ii);
+                    throw s;
+                }
+                s = compactLevelItr(CompactOptions(), tables.back(), 0, true);
+                if (!s) {
+                    _log_err(myLog, "[Adjust numL0] compaction error: %d", s);
+                    throw s;
+                }
+                // The compacted table is remove from manifest in compactLevelItr,
+                // just release
+                for (TableInfo*& table: tables) {
+                    table->done();
+                }
+            }
+            for (size_t ii = 0; ii < db_config->numL0Partitions; ++ii) {
+                TableFile* t_file = nullptr;
+                TableFileOptions t_opt;
+                // Set 1M bits as an initial size.
+                // It will be converging to some value as compaction happens.
+                t_opt.bloomFilterSize = 1024 * 1024;
+                EP(createNewTableFile(0, t_file, t_opt));
+                EP(mani->addTableFile(0, ii, SizedBuf(), t_file));
+            }
+            // Store manifest file.
+            mani->store(true);
+            numL0Partitions = db_config->numL0Partitions;
+        }
+
     } else {
         // Not exist, initial setup phase.
 
@@ -287,6 +332,13 @@ Status TableMgr::init(const TableMgrOptions& _options) {
         // Store manifest file.
         mani->store(true);
     }
+
+    compactStatus.resize(numL0Partitions);
+    for (size_t ii = 0; ii < compactStatus.size(); ++ii) {
+        std::atomic<bool>*& entry = compactStatus[ii];
+        entry = new std::atomic<bool>(false);
+    }
+
     logTableSettings(db_config);
 
     removeStaleFiles();
