@@ -401,7 +401,7 @@ Status LogFile::getPrefix(const uint64_t chk,
     return Status();
 }
 
-Status LogFile::flushMemTable(uint64_t upto) {
+Status LogFile::flushMemTable(uint64_t upto, uint64_t& flushed_seq_out) {
    touch();
    // Skip unnecessary flushing
    if (immutable && !fHandle && isSynced()) {
@@ -509,7 +509,7 @@ Status LogFile::flushMemTable(uint64_t upto) {
 
     RwSerializer rws(fOps, fHandle, true);
 
-    TC( mTable->flush(rws, upto) );
+    TC( mTable->flush(rws, upto, flushed_seq_out) );
     TC( mTable->appendFlushMarker(rws) );
 
     TC( fOps->flush(fHandle) );
