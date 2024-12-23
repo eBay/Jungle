@@ -162,6 +162,7 @@ struct TableWriterArgs {
     std::atomic<bool> stopSignal;
     TableWritePayload payload;
     SimpleLogger* myLog;
+    std::atomic<bool> adjustingNumL0;
 };
 
 struct TableWriterPkg {
