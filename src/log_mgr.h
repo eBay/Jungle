@@ -87,30 +87,44 @@ struct OpSema {
     OpSema() : enabled(true), grabbed(false) {}
     std::atomic<bool> enabled;
     std::atomic<bool> grabbed;
+
+    // Used only when `synchronizeMultiThreadedLogFlush` is on.
+    std::mutex lock;
 };
 
 struct OpSemaWrapper {
-    OpSemaWrapper(OpSema* _op_sema) : op_sema(_op_sema), acquired(false) {}
+    OpSemaWrapper(OpSema* op_sema, bool lock_mode = false)
+        : opSema(op_sema), acquired(false), lockMode(lock_mode) {}
     ~OpSemaWrapper() {
         if (acquired) {
-            op_sema->grabbed = false;
+            opSema->grabbed = false;
+            if (lockMode) {
+                opSema->lock.unlock();
+            }
         }
-        op_sema = nullptr;
+        opSema = nullptr;
         acquired = false;
     }
 
     bool acquire() {
-        bool expected = false;
-        bool val = true;
-        if ( op_sema->enabled &&
-             op_sema->grabbed.compare_exchange_weak(expected, val) ) {
+        if (lockMode) {
+            opSema->lock.lock();
+            opSema->grabbed = true;
             acquired = true;
+        } else {
+            bool expected = false;
+            bool val = true;
+            if ( opSema->enabled &&
+                 opSema->grabbed.compare_exchange_weak(expected, val) ) {
+                acquired = true;
+            }
         }
         return acquired;
     }
 
-    OpSema* op_sema;
+    OpSema* opSema;
     bool acquired;
+    bool lockMode;
 };
 
 namespace checker { class Checker; }
@@ -443,6 +457,11 @@ protected:
      * Number of memory loaded log files.
      */
     std::atomic<uint32_t> numMemtables;
+
+    /**
+     * If `true`, the sync of manifest is a must in the next `sync()` call.
+     */
+    std::atomic<bool> needSkippedManiSync;
 
     /**
      * Logger.

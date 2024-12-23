@@ -1233,7 +1233,7 @@ Status MemTable::findOffsetOfSeq(SimpleLogger* logger,
 }
 
 // MemTable flush: skiplist (memory) -> log file. (disk)
-Status MemTable::flush(RwSerializer& rws, uint64_t upto)
+Status MemTable::flush(RwSerializer& rws, uint64_t upto, uint64_t& flushed_seq_out)
 {
     if (minSeqNum == NOT_INITIALIZED) {
         // No log in this file. Just do nothing and return OK.
@@ -1450,7 +1450,7 @@ Status MemTable::flush(RwSerializer& rws, uint64_t upto)
                skiplist_get_size(idxBySeq),
                start_seqnum, seqnum_upto);
 
-    syncedSeqNum = seqnum_upto;
+    flushed_seq_out = seqnum_upto;
     return Status();
 
    } catch (Status s) {

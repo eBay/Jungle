@@ -104,6 +104,7 @@ public:
     DBConfig()
         : allowOverwriteSeqNum(false)
         , logSectionOnly(false)
+        , autoLogFlush(true)
         , truncateInconsecutiveLogs(true)
         , logFileTtl_sec(0)
         , maxKeepingMemtables(0)
@@ -143,6 +144,8 @@ public:
         , fastIndexScan(false)
         , seqLoadingDelayFactor(0)
         , safeMode(false)
+        , serializeMultiThreadedLogFlush(false)
+        , skipManifestSync(false)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -178,10 +181,20 @@ public:
      */
     bool allowOverwriteSeqNum;
 
-    /*
+    /**
      * Disable table section and use logging part only.
      */
     bool logSectionOnly;
+
+    /**
+     * If it is normal DB instance (`readOnly = false` and `logSectionOnly = false`),
+     * background flusher thread will automatically flush logs to L0 tables.
+     *
+     * WARNING:
+     *   If it is set to `false`, users should manually call `flushLogs()`.
+     *   The more unflushed logs, the more memory consumption.
+     */
+    bool autoLogFlush;
 
     /*
      * (Only when `logSectionOnly == true`)
@@ -575,6 +588,25 @@ public:
      * real production environment.
      */
     bool safeMode;
+
+    /**
+     * If `true`, `sync` and `flushLogs` calls by multiple threads will be serialized,
+     * and executed one by one.
+     * If `false`, only one thread will execute `sync` and `flushLogs` calls, while
+     * the other concurrent threads will get `OPERATION_IN_PROGRESS` status.
+     */
+    bool serializeMultiThreadedLogFlush;
+
+    /**
+     * [EXPERIMENTAL]
+     * If `true`, when `sync()` is invoked, only the actual log files will be synced,
+     * not the manifest file. The manifest file is synced when 1) a new log file is
+     * added, or 2) the DB is closed.
+     *
+     * Even without syncing the manifest file, Jungle can recover the last synced
+     * data by scanning the log files.
+     */
+    bool skipManifestSync;
 };
 
 class GlobalConfig {
