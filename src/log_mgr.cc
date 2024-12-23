@@ -1202,8 +1202,20 @@ Status LogMgr::syncInternal(bool call_fsync) {
         if (li.empty() || li.ptr->isRemoved()) continue;
 
         uint64_t before_sync = li->file->getSyncedSeqNum();
-        EP( li->file->flushMemTable( seq_barrier ? seq_barrier : NOT_INITIALIZED ) );
-        uint64_t after_sync = li->file->getSyncedSeqNum();
+        uint64_t after_sync = NOT_INITIALIZED;
+        EP( li->file->flushMemTable( (seq_barrier ? seq_barrier : NOT_INITIALIZED),
+                                     after_sync ) );
+        if (call_fsync) {
+            EP( li->file->sync() );
+        }
+
+        // WARNING:
+        //   We should update the syncedSeqNum after the sync() operation.
+        //   If sync() fails and we update syncedSeqNum beforehand, there's a
+        //   risk that the manifest might write an incorrect syncedSeqNum in
+        //   another call stack (e.g., addNewLogFile()). This could lead to
+        //   data loss in the event of a crash.
+        li->file->setSyncedSeqNum(after_sync);
         _log_( log_level, myLog, "synced log file %zu, min seq %s, "
                "flush seq %s, sync seq %s -> %s, max seq %s",
                ii,
@@ -1212,9 +1224,7 @@ Status LogMgr::syncInternal(bool call_fsync) {
                _seq_str( before_sync ).c_str(),
                _seq_str( after_sync ).c_str(),
                _seq_str( li->file->getMaxSeqNum() ).c_str() );
-        if (call_fsync) {
-            EP( li->file->sync() );
-        }
+
         if (valid_number(after_sync)) {
             last_synced_log = ii;
         }
