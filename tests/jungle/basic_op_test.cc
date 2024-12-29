@@ -1829,8 +1829,6 @@ int different_l0_partitions() {
     CHK_Z(db->flushLogs(jungle::FlushOptions()));
     CHK_Z(_get_bykey_check(0, n, db, kv5));
 
-    // Wait 7 seconds.
-    // TestSuite::sleep_sec(7);
     CHK_Z(jungle::DB::close(db));
 
     CHK_Z(jungle::shutdown());

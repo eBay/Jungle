@@ -37,6 +37,7 @@ const size_t TableMgr::APPROX_META_SIZE = 96;
 TableMgr::TableMgr(DB* parent_db)
     : parentDb(parent_db)
     , allowCompaction(false)
+    , tableAdjInProgress(false)
     , mani(nullptr)
     , numL0Partitions(1)
     , numL1Compactions(0)
@@ -249,52 +250,15 @@ Status TableMgr::init(const TableMgrOptions& _options) {
         // Adjust num L0 partitions blockingly only when it is not logSectionOnly mdoe,
         // not read only mode, and the number of L0 partitions read from existing manifest
         // file is different from the number specified in db config.
-        if (!db_config->logSectionOnly && !db_config->readOnly
-            && numL0Partitions != db_config->numL0Partitions) {
-            _log_info(myLog,
-                      "adjust numL0 partitions: %zu -> %zu",
-                      numL0Partitions,
-                      db_config->numL0Partitions);
-
-            if (!db_config->nextLevelExtension) {
-                _log_err(myLog, "[Adjust numL0] not allowed in L0 only mode");
-                throw Status(Status::INVALID_CONFIG);
+        if (!db_config->logSectionOnly &&
+            !db_config->readOnly &&
+            numL0Partitions != db_config->numL0Partitions) {
+            s = adjustNumL0Partitions();
+            if (!s.ok()) {
+                // If failed to adjust num L0 partitions, tolerate it.
+                // We can try it next time.
+                _log_warn(myLog, "failed to adjust num L0 partitions: %d", s);
             }
-
-            // Need to compact all existing L0 tables to L1 and recreate empty L0 tables,
-            // otherwise hash will be messed up.
-            for (size_t ii = 0; ii < numL0Partitions; ++ii) {
-                // Force compact L0 table to L1 in blocking manner to reduce L0
-                // partitions.
-                std::list<TableInfo*> tables;
-                s = mani->getL0Tables(ii, tables);
-                if (tables.size() != 1 || !s) {
-                    _log_err(myLog, "[Adjust numL0] tables of hash %zu not found", ii);
-                    throw s;
-                }
-                s = compactLevelItr(CompactOptions(), tables.back(), 0, true);
-                if (!s) {
-                    _log_err(myLog, "[Adjust numL0] compaction error: %d", s);
-                    throw s;
-                }
-                // The compacted table is remove from manifest in compactLevelItr,
-                // just release
-                for (TableInfo*& table: tables) {
-                    table->done();
-                }
-            }
-            for (size_t ii = 0; ii < db_config->numL0Partitions; ++ii) {
-                TableFile* t_file = nullptr;
-                TableFileOptions t_opt;
-                // Set 1M bits as an initial size.
-                // It will be converging to some value as compaction happens.
-                t_opt.bloomFilterSize = 1024 * 1024;
-                EP(createNewTableFile(0, t_file, t_opt));
-                EP(mani->addTableFile(0, ii, SizedBuf(), t_file));
-            }
-            // Store manifest file.
-            mani->store(true);
-            numL0Partitions = db_config->numL0Partitions;
         }
 
     } else {
@@ -354,6 +318,119 @@ Status TableMgr::init(const TableMgrOptions& _options) {
     DELETE(mani);
     return s;
    }
+}
+
+Status TableMgr::adjustNumL0Partitions() {
+    Status s;
+    const DBConfig* db_config = getDbConfig();
+
+    _log_info(myLog, "adjust numL0 partitions: %zu -> %zu",
+              numL0Partitions, db_config->numL0Partitions);
+
+    if (!db_config->nextLevelExtension) {
+        _log_err(myLog, "[adjust numL0] not allowed in L0 only mode");
+        throw Status(Status::INVALID_CONFIG);
+    }
+
+    tableAdjInProgress = true;
+    GcFunc gcf_adj_flag([this]() {
+        // Clear the flag when we exit this function.
+        tableAdjInProgress = false;
+    });
+
+    // Need to compact all existing L0 tables to L1 and recreate empty L0 tables,
+    // otherwise hash will be messed up.
+    std::list<TableInfo*> l0_tables;
+    CompactOptions c_opt;
+    c_opt.doNotRemoveOldFile = true;
+
+    for (size_t ii = 0; ii < numL0Partitions; ++ii) {
+        // Force compact L0 table to L1 in blocking manner to reduce L0
+        // partitions.
+        std::list<TableInfo*> tables;
+
+        // On any error, we should release the table.
+        GcFunc gcf([&tables]() {
+            for (auto& t: tables) {
+                t->done();
+            }
+        });
+
+        s = mani->getL0Tables(ii, tables);
+        if (tables.size() < 1 || !s) {
+            _log_err(myLog, "[adjust numL0] tables of hash %zu not found", ii);
+            EP(s);
+        }
+
+        // WARNING:
+        //   There can be two tables for the same hash, if the DB was closed
+        //   in the middle of compaction.
+        //
+        //   e.g.)
+        //      * let's say hash 0's table: table_001, and L1's table table_002
+        //      * compaction happens from L0 to L1.
+        //        - new table table_003 is created for hash 0 in L0 to serve traffic.
+        //        - meanwhile, table_001's data is flushed to table_002
+        //      * before compaction is done, DB is closed.
+        //        - as a result, hash 0 will have two tables: table_001 and table_003.
+        //
+        //   In this case, we have to flush both table_001 and table_003 to L1.
+
+        for (auto& tt: tables) {
+            s = compactLevelItr(c_opt, tables.back(), 0);
+            if (!s) {
+                _log_err(myLog, "[adjust numL0] compaction error: %d, "
+                         "table: %lu, hash %zu",
+                         s, tt->number, tt->hashNum);
+                EP(s);
+            }
+        }
+
+        // For safety reason (any shutdown or crash in the middle),
+        // original file should be removed and released after
+        // the new L0 (with new num L0 setting) tables are created.
+        //
+        // Until then, keep the original file in the list.
+        for (TableInfo*& table: tables) {
+            l0_tables.push_back(table);
+        }
+        tables.clear();
+    }
+
+    // After this point, there won't be data loss, as all data in L0 are
+    // already copied to L1. Any errors happen after this can be tolerable.
+
+    // Tables in `l0_tables` should be release when we exit this function.
+    GcFunc gcf_l0_tables([&l0_tables]() {
+        for (auto& t: l0_tables) {
+            t->done();
+        }
+    });
+
+    for (size_t ii = 0; ii < db_config->numL0Partitions; ++ii) {
+        TableFile* t_file = nullptr;
+        TableFileOptions t_opt;
+
+        // Set 1M bits as an initial size.
+        // It will be converging to some value as compaction happens.
+        t_opt.bloomFilterSize = 1024 * 1024;
+        EP(createNewTableFile(0, t_file, t_opt));
+        EP(mani->addTableFile(0, ii, SizedBuf(), t_file));
+    }
+
+    // Now release and remove table files at once.
+    for (TableInfo*& table: l0_tables) {
+        mani->removeTableFile(0, table);
+    }
+
+    // Store manifest file.
+    EP(mani->store(true));
+    numL0Partitions = db_config->numL0Partitions;
+
+    _log_info(myLog, "adjust numL0 partitions: %zu -> %zu, done",
+              numL0Partitions, db_config->numL0Partitions);
+
+    return Status();
 }
 
 Status TableMgr::removeStaleFiles() {

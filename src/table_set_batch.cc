@@ -55,8 +55,7 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
                                    TableFile* dst_file,
                                    std::vector<uint64_t>& offsets,
                                    uint64_t start_index,
-                                   uint64_t count,
-                                   bool adjusting_num_l0 ) {
+                                   uint64_t count) {
     const DBConfig* db_config = getDbConfig();
     (void)db_config;
 
@@ -86,7 +85,7 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
 
    try {
     for (uint64_t ii = start_index; ii < start_index + count; ++ii) {
-        if (!isCompactionAllowed() && !adjusting_num_l0 ) {
+        if (!isCompactionAllowed()) {
             // To avoid file corruption, we should flush all cached pages
             // even for cancel.
             Timer cancel_timer;

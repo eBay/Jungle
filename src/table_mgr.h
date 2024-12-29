@@ -159,6 +159,8 @@ public:
 
     Status init(const TableMgrOptions& _options);
 
+    Status adjustNumL0Partitions();
+
     Status removeStaleFiles();
 
     Status shutdown();
@@ -236,8 +238,7 @@ public:
 
     Status compactLevelItr(const CompactOptions& options,
                            TableInfo* victim_table,
-                           size_t level,
-                           bool adjust_num_l0 = false);
+                           size_t level);
 
     Status migrateLevel(const CompactOptions& options,
                         size_t level);
@@ -286,7 +287,9 @@ public:
 
     uint64_t getBoosterLimit(size_t level) const;
 
-    bool isCompactionAllowed() const { return allowCompaction; }
+    bool isCompactionAllowed() const {
+        return allowCompaction || tableAdjInProgress;
+    }
 
     void setTableFile(std::list<Record*>& batch,
                       std::list<uint64_t>& checkpoints,
@@ -301,8 +304,7 @@ public:
                             TableFile* dst_file,
                             std::vector<uint64_t>& offsets,
                             uint64_t start_index,
-                            uint64_t count,
-                            bool adjusting_num_l0 = false);
+                            uint64_t count);
 
     void setTableFileItrFlush(TableFile* dst_file,
                               std::list<Record*>& recs_batch,
@@ -527,7 +529,16 @@ protected:
      */
     DB* parentDb;
 
+    /**
+     * If `false`, compaction is not allowed.
+     */
     std::atomic<bool> allowCompaction;
+
+    /**
+     * If `true`, internal adjustment is in progress. Temporarily allow
+     * compaction or other mutations, even though `allowCompaction == false`.
+     */
+    std::atomic<bool> tableAdjInProgress;
 
     TableMgrOptions opt;
     TableManifest* mani;

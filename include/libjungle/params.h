@@ -79,6 +79,7 @@ public:
     CompactOptions()
         : preserveTombstone(false)
         , ignoreThreshold(false)
+        , doNotRemoveOldFile(false)
         {}
 
     /**
@@ -92,6 +93,11 @@ public:
      * manner, even though it does not meet the compaction threshold.
      */
     bool ignoreThreshold;
+
+    /**
+     * If `true`, the old file will not be removed after compaction.
+     */
+    bool doNotRemoveOldFile;
 };
 
 /**
