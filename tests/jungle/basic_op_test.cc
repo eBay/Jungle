@@ -1778,42 +1778,65 @@ int different_l0_partitions() {
     config.numL0Partitions = 1;
     CHK_Z(jungle::DB::open(&db, filename, config));
     int n = 10;
+
+    // Insert, flush, and check
     std::vector<jungle::KV> kv(n);
-    CHK_Z(_init_kv_pairs(n, kv, "key", "value"));
+    CHK_Z(_init_kv_pairs(n, kv, "key1", "value1"));
     CHK_Z(_set_bykey_kv_pairs(0, n, db, kv));
     CHK_Z(db->sync());
     CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    CHK_Z(_get_bykey_check(0, n, db, kv));
     CHK_Z(jungle::DB::close(db));
 
-    // Change the number of partitions,
-    // but it should be ignored internally.
+    // Increase the number of partitions, it should be handle correctly internally.
     config.numL0Partitions = 4;
-
     // Reopen & check.
     CHK_Z(jungle::DB::open(&db, filename, config));
     CHK_Z(_get_bykey_check(0, n, db, kv));
 
-    // Insert more.
+    // Insert more, flush and check.
     std::vector<jungle::KV> kv2(n);
-    CHK_Z(_init_kv_pairs(n, kv2, "key_new", "value_new"));
+    CHK_Z(_init_kv_pairs(n, kv2, "key2", "value2"));
     CHK_Z(_set_bykey_kv_pairs(0, n, db, kv2));
+    std::vector<jungle::KV> kv3(n);
+    CHK_Z(_init_kv_pairs(n, kv3, "key3", "value3"));
+    CHK_Z(_set_bykey_kv_pairs(0, n, db, kv3));
+    std::vector<jungle::KV> kv4(n);
+    CHK_Z(_init_kv_pairs(n, kv4, "key4", "value4"));
+    CHK_Z(_set_bykey_kv_pairs(0, n, db, kv4));
     CHK_Z(db->sync());
     CHK_Z(db->flushLogs(jungle::FlushOptions()));
-
-    // Check both.
     CHK_Z(_get_bykey_check(0, n, db, kv));
     CHK_Z(_get_bykey_check(0, n, db, kv2));
+    CHK_Z(_get_bykey_check(0, n, db, kv3));
+    CHK_Z(_get_bykey_check(0, n, db, kv4));
     CHK_Z(jungle::DB::close(db));
 
+    // Decrease the number of partitions, it should be handle correctly internally.
+    config.numL0Partitions = 2;
     // Reopen & check.
     CHK_Z(jungle::DB::open(&db, filename, config));
     CHK_Z(_get_bykey_check(0, n, db, kv));
     CHK_Z(_get_bykey_check(0, n, db, kv2));
+    CHK_Z(_get_bykey_check(0, n, db, kv3));
+    CHK_Z(_get_bykey_check(0, n, db, kv4));
+
+    // Insert more, flush and check
+    std::vector<jungle::KV> kv5(n);
+    CHK_Z(_init_kv_pairs(n, kv5, "key5", "value5"));
+    CHK_Z(_set_bykey_kv_pairs(0, n, db, kv5));
+    CHK_Z(db->sync());
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    CHK_Z(_get_bykey_check(0, n, db, kv5));
+
     CHK_Z(jungle::DB::close(db));
 
     CHK_Z(jungle::shutdown());
     _free_kv_pairs(n, kv);
     _free_kv_pairs(n, kv2);
+    _free_kv_pairs(n, kv3);
+    _free_kv_pairs(n, kv4);
+    _free_kv_pairs(n, kv5);
 
     TEST_SUITE_CLEANUP_PATH();
     return 0;
