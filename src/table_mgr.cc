@@ -377,7 +377,9 @@ Status TableMgr::adjustNumL0Partitions() {
         //   In this case, we have to flush both table_001 and table_003 to L1.
 
         for (auto& tt: tables) {
-            s = compactLevelItr(c_opt, tables.back(), 0);
+            _log_info(myLog, "[adjust numL0] compacting table: %lu, hash %zu",
+                      tt->number, tt->hashNum);
+            s = compactLevelItr(c_opt, tt, 0);
             if (!s) {
                 _log_err(myLog, "[adjust numL0] compaction error: %d, "
                          "table: %lu, hash %zu",
@@ -425,10 +427,11 @@ Status TableMgr::adjustNumL0Partitions() {
 
     // Store manifest file.
     EP(mani->store(true));
-    numL0Partitions = db_config->numL0Partitions;
 
     _log_info(myLog, "adjust numL0 partitions: %zu -> %zu, done",
               numL0Partitions, db_config->numL0Partitions);
+
+    numL0Partitions = db_config->numL0Partitions;
 
     return Status();
 }
