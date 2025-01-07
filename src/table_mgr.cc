@@ -344,6 +344,8 @@ Status TableMgr::adjustNumL0Partitions() {
     CompactOptions c_opt;
     c_opt.doNotRemoveOldFile = true;
 
+    DebugParams d_params = DBMgr::get()->getDebugParams();
+
     for (size_t ii = 0; ii < numL0Partitions; ++ii) {
         // Force compact L0 table to L1 in blocking manner to reduce L0
         // partitions.
@@ -390,13 +392,17 @@ Status TableMgr::adjustNumL0Partitions() {
 
         // For safety reason (any shutdown or crash in the middle),
         // original file should be removed and released after
-        // the new L0 (with new num L0 setting) tables are created.
+        // all the new L0 (with new num L0 setting) tables are created.
         //
         // Until then, keep the original file in the list.
         for (TableInfo*& table: tables) {
             l0_tables.push_back(table);
         }
         tables.clear();
+
+        if (d_params.adjustL0Cb) {
+            d_params.adjustL0Cb(DebugParams::GenericCbParams());
+        }
     }
 
     // After this point, there won't be data loss, as all data in L0 are

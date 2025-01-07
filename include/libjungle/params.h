@@ -212,6 +212,7 @@ struct DebugParams {
         , getLogFileInfoBySeqCb(nullptr)
         , logFlushCb(nullptr)
         , syncCb(nullptr)
+        , adjustL0Cb(nullptr)
         , forceMerge(false)
         {}
 
@@ -311,6 +312,12 @@ struct DebugParams {
      * (reading memtable data and writing them into log files).
      */
     std::function< void(const GenericCbParams&) > syncCb;
+
+    /**
+     * Callback function that will be invoked after compacting L0 tables
+     * of each hash number.
+     */
+    std::function< void(const GenericCbParams&) > adjustL0Cb;
 
     /**
      * If true, merge will proceed the task even with the small number
