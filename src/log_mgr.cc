@@ -87,6 +87,13 @@ Status LogMgr::init(const LogMgrOptions& lm_opt) {
     }
 
    try {
+    // WARNING:
+    //   This flag should be set to `false` before doing initialization or load.
+    //   For the first time creation, the very first log file will be created,
+    //   and it should be synced to the disk. `addNewLogFile()` will set this
+    //   flag to `true`. It should not be set to `false` after that.
+    needSkippedManiSync = false;
+
     std::string m_filename;
     if (opt.dbConfig->customManifestPath.empty()) {
         // Normal open: manifest file in the same path.
@@ -145,6 +152,7 @@ Status LogMgr::init(const LogMgrOptions& lm_opt) {
             l_file->setSyncedSeqNum(opt.startSeqnum - 1);
         }
         TC(mani->addNewLogFile(log_num, l_file, 1));
+        needSkippedManiSync = true;
 
        } catch (Status s) {
         delete l_file;
@@ -183,7 +191,6 @@ Status LogMgr::init(const LogMgrOptions& lm_opt) {
        }
     }
 
-    needSkippedManiSync = false;
     initialized = true;
     return Status();
 
