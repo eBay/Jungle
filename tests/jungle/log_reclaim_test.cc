@@ -1660,6 +1660,28 @@ int dedicated_flusher_test() {
     return 0;
 }
 
+int insert_keys(jungle::DB* db, size_t from, size_t to) {
+    for (size_t ii = from; ii < to; ++ii) {
+        std::string key_str = "key" + TestSuite::lzStr(5, ii);
+        std::string val_str = "val" + TestSuite::lzStr(5, ii);
+        CHK_Z(db->set(jungle::KV(key_str, val_str)));
+    }
+    return 0;
+}
+
+int verify(jungle::DB* db, size_t upto) {
+    for (size_t ii = 0; ii < upto; ++ii) {
+        TestSuite::setInfo("ii=%zu", ii);
+        jungle::SizedBuf value_out;
+        jungle::SizedBuf::Holder h(value_out);
+        std::string key_str = "key" + TestSuite::lzStr(5, ii);
+        std::string val_str = "val" + TestSuite::lzStr(5, ii);
+        CHK_Z(db->get(jungle::SizedBuf(key_str), value_out));
+        CHK_EQ(val_str, value_out.toString());
+    }
+    return 0;
+}
+
 int sync_wo_manifest_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1677,31 +1699,10 @@ int sync_wo_manifest_test() {
     config.skipManifestSync = true;
     CHK_Z(jungle::DB::open(&db, filename, config));
 
-    auto insert_keys = [&](size_t from, size_t to) {
-        for (size_t ii = from; ii < to; ++ii) {
-            std::string key_str = "key" + TestSuite::lzStr(5, ii);
-            std::string val_str = "val" + TestSuite::lzStr(5, ii);
-            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
-        }
-        return 0;
-    };
-    auto verify = [&](size_t upto) {
-        for (size_t ii = 0; ii < upto; ++ii) {
-            TestSuite::setInfo("ii=%zu", ii);
-            jungle::SizedBuf value_out;
-            jungle::SizedBuf::Holder h(value_out);
-            std::string key_str = "key" + TestSuite::lzStr(5, ii);
-            std::string val_str = "val" + TestSuite::lzStr(5, ii);
-            CHK_Z( db->get(jungle::SizedBuf(key_str), value_out) );
-            CHK_EQ(val_str, value_out.toString());
-        }
-        return 0;
-    };
-
-    CHK_Z(insert_keys(0, 11));
+    CHK_Z(insert_keys(db, 0, 11));
     CHK_Z(db->sync(true));
 
-    CHK_Z(insert_keys(11, 15));
+    CHK_Z(insert_keys(db, 11, 15));
     CHK_Z(db->sync(true));
 
     // Copy file at this moment to mimic crash.
@@ -1713,7 +1714,47 @@ int sync_wo_manifest_test() {
     // Open clone.
     // Even with crash without manifest sync, all 15 logs should be there.
     CHK_Z(jungle::DB::open(&db, clone_path, config));
-    CHK_Z(verify(15));
+    CHK_Z(verify(db, 15));
+    CHK_Z(jungle::DB::close(db));
+
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int sync_1st_file_wo_manifest_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db = nullptr;
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 1;
+    jungle::init(g_config);
+
+    config.maxEntriesInLogFile = 10;
+    config.skipManifestSync = true;
+    config.logSectionOnly = true;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Write on the first log file and sync.
+    CHK_Z(insert_keys(db, 0, 5));
+    CHK_Z(db->sync(true));
+
+    // Copy file at this moment to mimic crash.
+    std::string clone_path = filename + "_clone";
+    TestSuite::copyfile(filename, clone_path);
+
+    CHK_Z(jungle::DB::close(db));
+
+    // Open clone.
+    // Even with crash without manifest sync, all 5 logs should be there.
+    CHK_Z(jungle::DB::open(&db, clone_path, config));
+    CHK_Z(verify(db, 5));
     CHK_Z(jungle::DB::close(db));
 
     CHK_Z(jungle::shutdown());
@@ -1808,6 +1849,9 @@ int main(int argc, char** argv) {
 
     ts.doTest("sync without manifest test",
               sync_wo_manifest_test);
+
+    ts.doTest("sync 1st file without manifest test",
+              sync_1st_file_wo_manifest_test);
 
 #if 0
     ts.doTest("reload empty files test",
