@@ -397,10 +397,22 @@ Status DB::getLastFlushedSeqNum(uint64_t& seq_num_out) {
     return p->logMgr->getLastFlushedSeqNum(seq_num_out);
 }
 
+Status DB::getLastFlushedLogFileNum(uint64_t& log_file_num_out) {
+    Status s;
+    EP( p->checkHandleValidity() );
+    return p->logMgr->getLastFlushedLogFileNum(log_file_num_out);
+}
+
 Status DB::getLastSyncedSeqNum(uint64_t& seq_num_out) {
     Status s;
     EP( p->checkHandleValidity() );
     return p->logMgr->getLastSyncedSeqNum(seq_num_out);
+}
+
+Status DB::getLastSyncedLogFileNum(uint64_t& log_file_num_out) {
+    Status s;
+    EP( p->checkHandleValidity() );
+    return p->logMgr->getLastSyncedLogFileNum(log_file_num_out);
 }
 
 Status DB::getCheckpoints(std::list<uint64_t>& chk_out) {

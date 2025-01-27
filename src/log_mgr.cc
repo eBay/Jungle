@@ -1488,7 +1488,15 @@ Status LogMgr::flush(const FlushOptions& options,
               _seq_str(seq_num).c_str(), seq_num_local, ln_from, ln_to);
 
     if (options.beyondLastSync) {
-        mani->setLastSyncedLog(ln_to);
+        // WARNING:
+        //   Update last synced log only if it is beyond the last sync.
+        //   Due to `FlushOptions::numFilesLimit`, `ln_to` could be
+        //   less than `last_synced_log`.
+        uint64_t last_synced_log = 0;
+        mani->getLastSyncedLog(last_synced_log);
+        if (ln_to > last_synced_log) {
+            mani->setLastSyncedLog(ln_to);
+        }
     }
     mani->setLastFlushedLog(ln_to);
     // Remove log file except for ln_to.
@@ -1914,6 +1922,22 @@ Status LogMgr::getLastSyncedSeqNum(uint64_t& seq_num_out) {
         return Status::INVALID_SEQNUM;
     }
     seq_num_out = sync_seq;
+    return Status();
+}
+
+Status LogMgr::getLastFlushedLogFileNum(uint64_t& log_file_num_out) {
+    Status s;
+    uint64_t ln_flush = 0;
+    EP( mani->getLastFlushedLog(ln_flush) );
+    log_file_num_out = ln_flush;
+    return Status();
+}
+
+Status LogMgr::getLastSyncedLogFileNum(uint64_t& log_file_num_out) {
+    Status s;
+    uint64_t ln_sync = 0;
+    EP( mani->getLastSyncedLog(ln_sync) );
+    log_file_num_out = ln_sync;
     return Status();
 }
 

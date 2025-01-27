@@ -371,12 +371,28 @@ public:
     Status getLastFlushedSeqNum(uint64_t& seq_num_out);
 
     /**
+     * Get the last flushed log file number.
+     *
+     * @param[out] log_file_num_out Reference to log file number as a result.
+     * @return OK on success.
+     */
+    Status getLastFlushedLogFileNum(uint64_t& log_file_num_out);
+
+    /**
      * Get the last synced (written to file) sequence number.
      *
      * @param[out] seq_num_out Reference to sequence number as a result.
      * @return OK on success.
      */
     Status getLastSyncedSeqNum(uint64_t& seq_num_out);
+
+    /**
+     * Get the last synced (written to file) log file number.
+     *
+     * @param[out] log_file_num_out Reference to log file number as a result.
+     * @return OK on success.
+     */
+    Status getLastSyncedLogFileNum(uint64_t& log_file_num_out);
 
     /**
      * Get the list of checkpoint markers.

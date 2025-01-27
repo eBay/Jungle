@@ -3188,6 +3188,58 @@ int disabling_auto_flush_test() {
     return 0;
 }
 
+
+int sync_flush_race_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db = nullptr;
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 1;
+    g_config.flusherMinRecordsToTrigger = 100;
+    jungle::init(g_config);
+
+    config.maxEntriesInLogFile = 10;
+    std::string db_file = filename + "_db1";
+    CHK_Z(jungle::DB::open(&db, db_file, config));
+
+    auto insert_keys = [&](size_t from, size_t to) {
+        for (size_t ii = from; ii < to; ++ii) {
+            std::string key_str = "key" + TestSuite::lzStr(5, ii);
+            std::string val_str = "val" + TestSuite::lzStr(5, ii);
+            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
+        }
+        return 0;
+    };
+
+    // Write 20 log files.
+    CHK_Z( insert_keys(0, 100) );
+
+    // Sync and flush (but 5 files only).
+    CHK_Z( db->sync(false) );
+    uint64_t last_synced_log_file_num = 0;
+    CHK_Z( db->getLastSyncedLogFileNum(last_synced_log_file_num) );
+
+    jungle::FlushOptions f_opt;
+    f_opt.beyondLastSync = true;
+    f_opt.numFilesLimit = 5;
+    CHK_Z( db->flushLogs(f_opt) );
+
+    uint64_t last_synced_log_file_num2 = 0;
+    CHK_Z( db->getLastSyncedLogFileNum(last_synced_log_file_num2) );
+    CHK_EQ(last_synced_log_file_num, last_synced_log_file_num2);
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -3244,6 +3296,7 @@ int main(int argc, char** argv) {
     ts.doTest("log flush add new file race test", log_flush_add_new_file_race_test);
     ts.doTest("serialized sync and flush test", serialized_sync_and_flush_test);
     ts.doTest("disabling auto flush test", disabling_auto_flush_test);
+    ts.doTest("sync flush race test", sync_flush_race_test);
 
     return 0;
 }
