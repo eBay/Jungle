@@ -30,6 +30,7 @@ TableFile::Iterator::Iterator()
     , minSeq(NOT_INITIALIZED)
     , maxSeq(NOT_INITIALIZED)
     , safeMode(false)
+    , prevNextHappened(false)
     {}
 
 TableFile::Iterator::~Iterator() {
@@ -178,7 +179,13 @@ Status TableFile::Iterator::get(Record& rec_out) {
             return Status::KEY_NOT_FOUND;
         }
         // Otherwise, error.
-        _log_err(tFile->myLog, "fdb_iterator_get failed: %d", fs);
+
+        // NOTE: If it is the very first get without moving the cursor,
+        //       an error is expected if no record exists in the range.
+        //       Tolerate this case.
+        if (prevNextHappened) {
+            _log_err(tFile->myLog, "fdb_iterator_get failed: %d", fs);
+        }
         return toJungleStatus(fs);
     }
 
@@ -243,7 +250,11 @@ Status TableFile::Iterator::getMeta(Record& rec_out,
             return Status::KEY_NOT_FOUND;
         }
         // Otherwise, error.
-        _log_err(tFile->myLog, "fdb_iterator_get failed: %d", fs);
+
+        // NOTE: Same as `get()`.
+        if (prevNextHappened) {
+            _log_err(tFile->myLog, "fdb_iterator_get_metaonly failed: %d", fs);
+        }
         return toJungleStatus(fs);
     }
 
@@ -285,6 +296,7 @@ Status TableFile::Iterator::prev() {
         assert(fs == FDB_RESULT_SUCCESS);
         return Status::OUT_OF_RANGE;
     }
+    prevNextHappened = true;
     return Status();
 }
 
@@ -298,6 +310,7 @@ Status TableFile::Iterator::next() {
         assert(fs == FDB_RESULT_SUCCESS);
         return Status::OUT_OF_RANGE;
     }
+    prevNextHappened = true;
     return Status();
 }
 
