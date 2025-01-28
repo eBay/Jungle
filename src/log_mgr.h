@@ -245,6 +245,9 @@ public:
     Status getLastFlushedSeqNum(uint64_t& seq_num_out);
     Status getLastSyncedSeqNum(uint64_t& seq_num_out);
 
+    Status getLastFlushedLogFileNum(uint64_t& log_file_num_out);
+    Status getLastSyncedLogFileNum(uint64_t& log_file_num_out);
+
     bool checkTimeToFlush(const GlobalConfig& config);
     Status close();
 
