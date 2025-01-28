@@ -217,6 +217,7 @@ if (CODE_COVERAGE GREATER 0)
                      memtable_test
                      table_test
                      basic_op_test
+                     sync_and_flush_test
                      nearest_search_test
                      seq_itr_test
                      key_itr_test
