@@ -57,6 +57,11 @@ add_executable(basic_op_test ${BASIC_OP_TEST})
 target_link_libraries(basic_op_test ${JUNGLE_TEST_DEPS})
 add_dependencies(basic_op_test static_lib)
 
+set(SYNC_AND_FLUSH_TEST ${TEST_DIR}/jungle/sync_and_flush_test.cc)
+add_executable(sync_and_flush_test ${SYNC_AND_FLUSH_TEST})
+target_link_libraries(sync_and_flush_test ${JUNGLE_TEST_DEPS})
+add_dependencies(sync_and_flush_test static_lib)
+
 set(NEAREST_SEARCH_TEST ${TEST_DIR}/jungle/nearest_search_test.cc)
 add_executable(nearest_search_test ${NEAREST_SEARCH_TEST})
 target_link_libraries(nearest_search_test ${JUNGLE_TEST_DEPS})
