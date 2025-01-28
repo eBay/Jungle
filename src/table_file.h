@@ -291,6 +291,7 @@ public:
         uint64_t maxSeq;
 
         bool safeMode;
+        bool prevNextHappened;
     };
 
     Status updateSnapshot();
