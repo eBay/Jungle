@@ -152,11 +152,14 @@ int auto_flusher_stress_test(size_t dur_sec) {
     jungle::GlobalConfig g_config;
     g_config.numFlusherThreads = 1;
     g_config.fdbCacheSize = (uint64_t)1024*1024*1024; // 1GB
+    g_config.ltOpt.startNumLogs = 64;
+    g_config.ltOpt.limitNumLogs = 128;
+    g_config.ltOpt.maxSleepTimeMs = 1000;
     jungle::init(g_config);
 
     jungle::DBConfig config;
     TEST_CUSTOM_DB_CONFIG(config)
-    //config.maxEntriesInLogFile = 1000;
+    config.maxEntriesInLogFile = 1000;
 
     jungle::DB* db;
     CHK_Z(jungle::DB::open(&db, filename, config));
@@ -214,6 +217,93 @@ int auto_flusher_stress_test(size_t dur_sec) {
     return 0;
 }
 
+int auto_flusher_many_db_test(size_t dur_sec) {
+    jungle::Status s;
+
+    const std::string prefix = TEST_SUITE_AUTO_PREFIX;
+    TestSuite::clearTestFile(prefix);
+    std::string filename = TestSuite::getTestFileName(prefix);
+    TestSuite::mkdir(filename);
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 1;
+    g_config.fdbCacheSize = (uint64_t)1024*1024*1024; // 1GB
+    g_config.ltOpt.startNumLogs = 64;
+    g_config.ltOpt.limitNumLogs = 128;
+    g_config.ltOpt.maxSleepTimeMs = 1000;
+    jungle::init(g_config);
+
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.maxEntriesInLogFile = 1000;
+
+    const size_t NUM_DBS = 32;
+
+    std::vector<jungle::DB*> dbs;
+    for (size_t ii=0; ii<NUM_DBS; ++ii) {
+        jungle::DB* db;
+        std::string path = filename + "/" + TestSuite::lzStr(2, ii);
+        CHK_Z(jungle::DB::open(&db, path, config));
+        dbs.push_back(db);
+    }
+
+    uint64_t idx = 0;
+    uint64_t last_inserted_idx = 0;
+
+    TestSuite::Progress pp(dur_sec, "populating", "sec");
+    TestSuite::Timer tt(dur_sec * 1000);
+    while (!tt.timeover()) {
+        std::string key = "k" + TestSuite::lzStr(7, idx);
+        std::string val = "v" + TestSuite::lzStr(7, idx);
+
+        for (auto& db: dbs) {
+            CHK_Z(db->set(jungle::KV(key, val)));
+        }
+        idx++;
+        last_inserted_idx = idx;
+
+        uint64_t cur_sec = tt.getTimeUs() / 1000000;
+        pp.update(cur_sec);
+    }
+    TestSuite::_msg("%lu writes (* %zu = %lu)\n", idx, NUM_DBS, idx * NUM_DBS);
+
+    // Close, reopen, verify (twice).
+    for (size_t ii=0; ii<2; ++ii) {
+        for (size_t ii=0; ii<NUM_DBS; ++ii) {
+            pp = TestSuite::Progress(last_inserted_idx,
+                                     "verifying " + TestSuite::lzStr(2, ii));
+
+            std::string path = filename + "/" + TestSuite::lzStr(2, ii);
+            CHK_Z(jungle::DB::close(dbs[ii]));
+            CHK_Z(jungle::DB::open(&dbs[ii], path, config));
+
+            for (uint64_t jj = 0; jj < last_inserted_idx; ++jj) {
+                std::string key = "k" + TestSuite::lzStr(7, jj);
+                std::string val = "v" + TestSuite::lzStr(7, jj);
+
+                jungle::SizedBuf key_req(key);
+                jungle::SizedBuf value_out;
+                s = dbs[ii]->get(key_req, value_out);
+                CHK_Z(s);
+
+                CHK_EQ(jungle::SizedBuf(val), value_out);
+                value_out.free();
+                pp.update(jj);
+            }
+
+            pp.done();
+        }
+    }
+
+    for (auto& db: dbs) {
+        CHK_Z(jungle::DB::close(db));
+    }
+    CHK_Z(jungle::shutdown());
+
+    TestSuite::clearTestFile(prefix, TestSuite::END_OF_TEST);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -223,6 +313,8 @@ int main(int argc, char** argv) {
                flusher_stress_basic_test, TestRange<size_t>({10}) );
     ts.doTest( "auto flusher stress test",
                auto_flusher_stress_test, TestRange<size_t>({10}) );
+    ts.doTest( "auto flusher many db test",
+               auto_flusher_many_db_test, TestRange<size_t>({10}) );
 
     return 0;
 }

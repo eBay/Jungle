@@ -187,7 +187,9 @@ DBMgr::DBMgr()
     , twMgr(new TableWriterMgr())
     , gbExecutor(new GlobalBatchExecutor())
     , debugCbEnabled(false)
+    , globalTime(0)
     , idleTraffic(false)
+    , globalThrottlingMs(0)
     , myLog(nullptr)
 {
     updateGlobalTime();

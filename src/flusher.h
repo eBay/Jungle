@@ -84,6 +84,8 @@ public:
     ~Flusher();
     void work(WorkerOptions* opt_base);
 
+    void calcGlobalThrottling(size_t total_num_log_files);
+
     GlobalConfig gConfig;
     size_t lastCheckedFileIndex;
     FlusherType type;
