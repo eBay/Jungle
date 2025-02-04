@@ -789,6 +789,53 @@ public:
     CompactionThrottlingOptions ctOpt;
 
     /**
+     * Settings for Log Throttling. When there is heavy incoming traffic
+     * and the flush speed cannot keep up with the incoming write speed,
+     * the number of log files increases. If the total number of log files
+     * across all open database instances exceeds `startNumLogs`, user threads
+     * calling the write API will be temporarily blocked for a certain period
+     * of time.
+     *
+     * Once the total number of log files reaches `limitNumLogs`, each write API
+     * call will be blocked for `maxSleepTimeMs`, and the background flushers
+     * will immediately flush the log files. The sleep time will not exceed
+     * `maxSleepTimeMs`.
+     *
+     * If `maxSleepTimeMs` is set to zero, this feature will be disabled.
+     */
+    struct LogThrottlingOptions {
+        LogThrottlingOptions()
+            : startNumLogs(256)
+            , limitNumLogs(512)
+            , maxSleepTimeMs(0)
+            {}
+
+        /**
+         * The minimum number of log files initiates the throttling.
+         */
+        uint32_t startNumLogs;
+
+        /**
+         * The number of log files that will cause user threads to
+         * sleep for `maxSleepTimeMs`.
+         */
+        uint32_t limitNumLogs;
+
+        /**
+         * The maximum duration of sleep time.
+         */
+        uint32_t maxSleepTimeMs;
+    };
+
+    /**
+     * Log throttling option.
+     *
+     * It can be used to limit the overall memory consumption of the
+     * process occupied by memory tables corresponding to each log file.
+     */
+    LogThrottlingOptions ltOpt;
+
+    /**
      * Shutdown system logger on shutdown of Jungle.
      */
     bool shutdownLogger;

@@ -550,36 +550,47 @@ Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
 }
 
 void LogMgr::execBackPressure(uint64_t elapsed_us) {
-    if (throttlingRate > 0) {
-        DBMgr* mgr = DBMgr::getWithoutInit();
-        GlobalConfig* g_config = mgr->getGlobalConfig();
+    DBMgr* mgr = DBMgr::getWithoutInit();
+    GlobalConfig* g_config = mgr->getGlobalConfig();
 
-        // Throttling.
-        double exp_us = 1000000.0 / throttlingRate.load();
-
-        size_t effective_time_ms =
-            std::min( lastFlushIntervalMs.load(),
-                      (int64_t)THROTTLING_EFFECTIVE_TIME_MS );
-        size_t num_log_files = mani->getNumLogFiles();
-        size_t log_files_limit = g_config->flusherMinLogFilesToTrigger * 2;
-        if (num_log_files > log_files_limit) {
-            effective_time_ms *= (num_log_files - log_files_limit);
+    if (g_config->ltOpt.maxSleepTimeMs) {
+        uint32_t global_throttling_ms = mgr->getGlobalThrottling();
+        if (global_throttling_ms) {
+            // Global throttling is enabled.
+            // Do not apply local throttling.
+            _log_trace(myLog, "global throttling %u ms", global_throttling_ms);
+            Timer::sleepMs(global_throttling_ms);
+            return;
         }
+    }
 
-        uint64_t throttle_age_ms = throttlingRateTimer.getUs() / 1000;
-        if ( effective_time_ms &&
-             throttle_age_ms < effective_time_ms ) {
-            // Should consider age.
-            exp_us *= (effective_time_ms - throttle_age_ms);
-            exp_us /= effective_time_ms;
+    if (throttlingRate == 0) return;
 
-            double cur_us = elapsed_us;
-            if ( exp_us > cur_us ) {
-                // Throttle incoming writes.
-                double remaining_us = exp_us - cur_us;
-                if (remaining_us > 1.0) {
-                    Timer::sleepUs((uint64_t)remaining_us);
-                }
+    // Throttling.
+    double exp_us = 1000000.0 / throttlingRate.load();
+
+    size_t effective_time_ms =
+        std::min( lastFlushIntervalMs.load(),
+                  (int64_t)THROTTLING_EFFECTIVE_TIME_MS );
+    size_t num_log_files = mani->getNumLogFiles();
+    size_t log_files_limit = g_config->flusherMinLogFilesToTrigger * 2;
+    if (num_log_files > log_files_limit) {
+        effective_time_ms *= (num_log_files - log_files_limit);
+    }
+
+    uint64_t throttle_age_ms = throttlingRateTimer.getUs() / 1000;
+    if ( effective_time_ms &&
+         throttle_age_ms < effective_time_ms ) {
+        // Should consider age.
+        exp_us *= (effective_time_ms - throttle_age_ms);
+        exp_us /= effective_time_ms;
+
+        double cur_us = elapsed_us;
+        if ( exp_us > cur_us ) {
+            // Throttle incoming writes.
+            double remaining_us = exp_us - cur_us;
+            if (remaining_us > 1.0) {
+                Timer::sleepUs((uint64_t)remaining_us);
             }
         }
     }
@@ -1988,8 +1999,19 @@ bool LogMgr::checkTimeToFlush(const GlobalConfig& config) {
     if (seq_max > seq_last_flush + config.flusherMinRecordsToTrigger) {
         return true;
     }
+
+    size_t min_log_files = config.flusherMinLogFilesToTrigger;
+    DBMgr* dbm = DBMgr::getWithoutInit();
+    if (dbm && dbm->getGlobalThrottling()) {
+        // If global throttling is active, we should flush more often.
+        _log_trace(myLog, "global throttling is active, flush more often. "
+                   "l_max %lu, l_last_flush %lu, seq_max %lu, seq_last_flush %lu",
+                   l_max, l_last_flush, seq_max, seq_last_flush);
+        min_log_files = 1;
+    }
+
     // If the number of log files exceeds the limit.
-    if (l_max > l_last_flush + config.flusherMinLogFilesToTrigger) {
+    if (l_max > l_last_flush + min_log_files) {
         return true;
     }
 

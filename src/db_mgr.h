@@ -140,6 +140,16 @@ public:
 
     bool isDebugCallbackEffective() const { return debugCbEnabled.load(MOR); }
 
+    uint32_t setGlobalThrottling(uint32_t to) {
+        uint32_t prev = globalThrottlingMs.load(MOR);
+        globalThrottlingMs = to;
+        return prev;
+    }
+
+    uint32_t getGlobalThrottling() const {
+        return globalThrottlingMs.load(MOR);
+    }
+
 private:
     DBMgr();
 
@@ -193,6 +203,11 @@ private:
 
     // `true` if the current traffic to this process is idle.
     std::atomic<bool> idleTraffic;
+
+    /**
+     * Non-zero if global log throttling is active.
+     */
+    std::atomic<uint32_t> globalThrottlingMs;
 
     // Logger.
     SimpleLogger* myLog;

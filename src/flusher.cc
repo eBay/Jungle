@@ -97,6 +97,41 @@ Flusher::Flusher(const std::string& w_name,
 Flusher::~Flusher() {
 }
 
+void Flusher::calcGlobalThrottling(size_t total_num_log_files) {
+    if (gConfig.ltOpt.maxSleepTimeMs == 0) {
+        return;
+    }
+
+    DBMgr* dbm = DBMgr::getWithoutInit();
+
+    uint32_t next_throttling_ms = 0;
+    uint32_t old_ms =
+        dbm->getGlobalThrottling();
+
+    if (total_num_log_files > gConfig.ltOpt.startNumLogs) {
+        next_throttling_ms =
+            (total_num_log_files - gConfig.ltOpt.startNumLogs) *
+            gConfig.ltOpt.maxSleepTimeMs /
+            (gConfig.ltOpt.limitNumLogs - gConfig.ltOpt.startNumLogs);
+        if (next_throttling_ms > gConfig.ltOpt.maxSleepTimeMs) {
+            next_throttling_ms = gConfig.ltOpt.maxSleepTimeMs;
+        }
+    }
+
+    if (next_throttling_ms != old_ms) {
+        dbm->setGlobalThrottling(next_throttling_ms);
+
+        auto logger = dbm->getLogger();
+        _timed_log_g(logger,
+                     5000,
+                     SimpleLogger::TRACE, SimpleLogger::INFO,
+                     "total log files %zu, "
+                     "global throttling is set to %u ms (was %u ms).",
+                     total_num_log_files,
+                     next_throttling_ms, old_ms);
+    }
+}
+
 void Flusher::work(WorkerOptions* opt_base) {
     Status s;
 
@@ -136,14 +171,22 @@ void Flusher::work(WorkerOptions* opt_base) {
         //   as long as we are holding `dbMapLock`.
         std::vector<DBWrap*> dbs_to_check;
 
+        size_t total_num_log_files = 0;
+
         skiplist_node* cursor = skiplist_begin(&dbm->dbMap);
         while (cursor) {
             DBWrap* dbwrap = _get_entry(cursor, DBWrap, snode);
             dbs_to_check.push_back(dbwrap);
+            if (!dbwrap->db->p->dbConfig.logSectionOnly) {
+                total_num_log_files += dbwrap->db->p->logMgr->getNumLogFiles();
+            }
+
             cursor = skiplist_next(&dbm->dbMap, cursor);
             skiplist_release_node(&dbwrap->snode);
         }
         if (cursor) skiplist_release_node(cursor);
+
+        calcGlobalThrottling(total_num_log_files);
 
         size_t num_dbs = dbs_to_check.size();
         if (++lastCheckedFileIndex >= num_dbs) lastCheckedFileIndex = 0;
