@@ -70,9 +70,40 @@ void DBMgr::printGlobalConfig() {
         _log_info(myLog, "idle time compaction disabled");
     }
 
+    if (gConfig.ltOpt.maxSleepTimeMs) {
+        _log_info(myLog, "global log throttling enabled, "
+                  "start and limit: %u, %u, "
+                  "max sleep time %u ms",
+                  gConfig.ltOpt.startNumLogs,
+                  gConfig.ltOpt.limitNumLogs,
+                  gConfig.ltOpt.maxSleepTimeMs);
+    } else {
+        _log_info(myLog, "global log throttling disabled");
+    }
+
     _log_info(myLog, "compaction throttling resolution %zu ms factor %zu",
               gConfig.ctOpt.resolution_ms,
               gConfig.ctOpt.throttlingFactor);
+
+    _log_info(myLog, "num flusher threads %zu, sleep time %zu ms, "
+              "dedicated flusher for async reqs %zu, "
+              "min records to flush %zu, min log files to flush %zu",
+              gConfig.numFlusherThreads,
+              gConfig.flusherSleepDuration_ms,
+              gConfig.numDedicatedFlusherForAsyncReqs,
+              gConfig.flusherMinRecordsToTrigger,
+              gConfig.flusherMinLogFilesToTrigger);
+
+    _log_info(myLog, "num compactor threads %zu, "
+              "num table writers %zu, "
+              "sleep time %zu ms",
+              gConfig.numCompactorThreads,
+              gConfig.numTableWriters,
+              gConfig.compactorSleepDuration_ms);
+
+    _log_info(myLog, "fdb cache size %zu, memtable flush buffer size %zu",
+              gConfig.fdbCacheSize,
+              gConfig.memTableFlushBufferSize);
 }
 
 void DBMgr::initInternal(const GlobalConfig& config) {
