@@ -16,6 +16,10 @@ limitations under the License.
 
 #include "worker_mgr.h"
 
+#include "db_mgr.h"
+
+#include _MACRO_TO_STR(LOGGER_H)
+
 namespace jungle {
 
 WorkerBase::WorkerBase()
@@ -36,6 +40,11 @@ void WorkerBase::loop(WorkerOptions* opt) {
     thread_name = thread_name.substr(0, 15);
     pthread_setname_np(pthread_self(), thread_name.c_str());
 #endif
+
+    DBMgr* dbm = DBMgr::getWithoutInit();
+    SimpleLogger* my_log = dbm->getLogger();
+
+    _log_info(my_log, "worker %s initiated", worker->workerName.c_str());
 
     for (;;) {
         // Sleep if IDLE or STOP.
@@ -64,6 +73,8 @@ void WorkerBase::loop(WorkerOptions* opt) {
         }
     }
     worker->status = NO_INSTANCE;
+
+    _log_info(my_log, "worker %s terminated", worker->workerName.c_str());
 }
 
 void WorkerBase::run() {

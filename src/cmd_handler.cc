@@ -463,7 +463,7 @@ std::string CmdHandler::hTableInfo(DBWrap* target_dbw,
             ss << "      space by index: " << t_stats.numIndexNodes << " nodes, "
                << t_stats.numIndexNodes * 4096 << " / " << t_stats.workingSetSizeByte
                << ", " << std::fixed << std::setprecision(1) << space_perc
-               << "%%\n";
+               << "%\n";
 
             ss << "      block reuse cycle: " << t_stats.blockReuseCycle << "\n";
             ss << "      status: " << t_info->status.load() << "\n";
