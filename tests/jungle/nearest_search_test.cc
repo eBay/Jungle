@@ -448,6 +448,77 @@ int get_by_prefix_frequent_update_test() {
     return 0;
 }
 
+int get_by_prefix_out_of_order_delete_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.maxEntriesInLogFile = 10;
+    jungle::DB* db;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    std::string key_prefix = "key";
+    std::string val_prefix = "val";
+
+    // Insert keys in asc order.
+    for (size_t ii = 0; ii < 10; ++ii) {
+        std::string key_str = key_prefix + TestSuite::lzStr(3, ii);;
+        std::string val_str = val_prefix + TestSuite::lzStr(3, ii);
+        CHK_Z(db->set(jungle::KV(key_str, val_str)));
+    }
+
+    // Delete odd number keys in arbitrary order. They should be in the next log file.
+    std::vector<size_t> del_keys = {5, 7, 3, 9, 1};
+    for (size_t ii: del_keys) {
+        std::string key_str = key_prefix + TestSuite::lzStr(3, ii);;
+        CHK_Z(db->del(jungle::SizedBuf(key_str)));
+    }
+
+    size_t count = 0;
+    auto cb_func = [&](const jungle::SearchCbParams& params)
+                   -> jungle::SearchCbDecision {
+        // Should be returned in asc order.
+        TestSuite::_msg("key: %s, type: %d\n",
+                        params.rec.kv.key.toReadableString().c_str(),
+                        params.rec.type);
+        std::string exp_key = key_prefix + TestSuite::lzStr(3, count);
+        if (jungle::SizedBuf(exp_key) != params.rec.kv.key) {
+            return jungle::SearchCbDecision::STOP;
+        }
+        if (count % 2 == 1) {
+            if (!params.rec.isDel()) {
+                return jungle::SearchCbDecision::STOP;
+            }
+        } else {
+            if (params.rec.isDel()) {
+                return jungle::SearchCbDecision::STOP;
+            }
+        }
+        count++;
+        return jungle::SearchCbDecision::NEXT;
+    };
+    CHK_Z(db->getRecordsByPrefix(jungle::SizedBuf(key_prefix), cb_func));
+
+    // All records should be found.
+    CHK_EQ(10, count);
+
+    // Search with prefix smaller than key.
+    CHK_EQ(jungle::Status::KEY_NOT_FOUND,
+           db->getRecordsByPrefix(jungle::SizedBuf("a"), cb_func).getValue());
+
+    // Search with prefix greater than key.
+    CHK_EQ(jungle::Status::KEY_NOT_FOUND,
+           db->getRecordsByPrefix(jungle::SizedBuf("l"), cb_func).getValue());
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -462,5 +533,7 @@ int main(int argc, char** argv) {
               get_by_prefix_test, TestRange<size_t>( {0, 8, 16} ));
     ts.doTest("get by prefix frequent update test",
               get_by_prefix_frequent_update_test);
+    ts.doTest("get by prefix out of order delete test",
+              get_by_prefix_out_of_order_delete_test);
     return 0;
 }

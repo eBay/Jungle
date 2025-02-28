@@ -1076,6 +1076,8 @@ Status LogMgr::getNearest(const uint64_t chk,
     return Status();
 }
 
+#if 0
+// Deprecated: naive implementation without ordering.
 Status LogMgr::getPrefix(const uint64_t chk,
                          std::list<LogFileInfo*>* l_list,
                          const SizedBuf& prefix,
@@ -1149,6 +1151,49 @@ Status LogMgr::getPrefix(const uint64_t chk,
 
     return Status::OK;
 }
+
+#else
+// Iterator based implementation, which provides snapshot and key ordering.
+Status LogMgr::getPrefix(const uint64_t chk,
+                         std::list<LogFileInfo*>* l_list,
+                         const SizedBuf& prefix,
+                         SearchCbFunc cb_func)
+{
+    Status s;
+    Iterator itr;
+    SizedBuf dummy;
+
+    auto prefix_match = [prefix](const SizedBuf& key) -> bool {
+        if (key.size < prefix.size) return false;
+        return (SizedBuf::cmp( SizedBuf(prefix.size, key.data),
+                               prefix ) == 0);
+    };
+
+    // Create an iterator, starting from prefix.
+    s = itr.init(nullptr, this, prefix, dummy);
+    do {
+        Record rec;
+        s = itr.get(rec);
+        if (!s.ok()) {
+            break;
+        }
+
+        // Check if prefix matches.
+        if (!prefix_match(rec.kv.key)) {
+            break;
+        }
+
+        SearchCbDecision dec = cb_func({rec});
+        if (dec == SearchCbDecision::STOP) {
+            return Status::OPERATION_STOPPED;
+        }
+
+    } while (itr.next().ok());
+
+    return Status::OK;
+}
+
+#endif
 
 Status LogMgr::sync(bool call_fsync) {
     std::lock_guard<std::mutex> l(syncMutex);
