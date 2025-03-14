@@ -1,65 +1,86 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.20)
 project(Jungle VERSION 1.0.0 LANGUAGES CXX)
 
+include(CTest) # automatically defines BUILD_TESTING option
+
+option(WITH_CONAN "Use dependences provide by Conan" OFF)
+option(SNAPPY_OPTION "Use Snappy Compression" ON)
+option(CODE_COVERAGE "Enable Coverage" OFF)
+option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
+option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
+option(LEAK_SANITIZER "Enable leak sanitizer" OFF)
+option(BUILD_EXAMPLES "Build examples" ON)
+option(DETACH_LOGGER "Build libsimplelogger.a" ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # === Build type (default: RelWithDebInfo, O2) ===========
-if (NOT CMAKE_BUILD_TYPE)
+if(NOT CMAKE_BUILD_TYPE)
     set(BUILD_TYPE_OPTIONS
         "Choose the type of build, "
         "options are: Debug Release RelWithDebInfo MinSizeRel.")
     set(CMAKE_BUILD_TYPE "RelWithDebInfo"
         CACHE ${BUILD_TYPE_OPTIONS} FORCE)
     message(STATUS "Build type is not given, use default.")
-endif ()
+endif()
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 
 
 set(ROOT_SRC ${PROJECT_SOURCE_DIR}/src)
-set(CMAKE_DIR ${PROJECT_SOURCE_DIR}/cmake)
-set(FDB_LIB_DIR ${PROJECT_SOURCE_DIR}/third_party/forestdb/build)
+# set(CMAKE_DIR ${PROJECT_SOURCE_DIR}/cmake)
 
-if (CODE_COVERAGE GREATER 0)
+if(CODE_COVERAGE)
     set(CMAKE_BUILD_TYPE "Debug")
     include(cmake/CodeCoverage.cmake)
     message(STATUS "---- CODE COVERAGE DETECTION MODE ----")
 endif()
 
 # Libraries
-#set(LIBZ z)
 
-# Find snappy
-include(cmake/FindSnappy.cmake)
-if ( (SNAPPY_OPTION STREQUAL "Enable") OR
-     (SNAPPY_OPTION STREQUAL "enable") )
-    message(STATUS "Snappy option is enabled.")
-    if (SNAPPY_FOUND)
-        set(LIBSNAPPY ${SNAPPY_LIBRARIES})
-        add_definitions(-DSNAPPY_AVAILABLE=1)
+if(WITH_CONAN)
+    find_package(forestdb REQUIRED)
+    set(FORESTDB forestdb::forestdb)
+else()
+    set(FORESTDB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/forestdb/build/libforestdb.a)
+    set(LIBZ z)
+endif()
+
+if(SNAPPY_OPTION)
+    if(WITH_CONAN)
+        find_package(Snappy REQUIRED)
+        set(LIBSNAPPY Snappy::snappy)
     else()
-        MESSAGE(FATAL_ERROR "Can't find snappy, "
-                "if you want to build without snappy set"
-                " \"-DSNAPPY_OPTION=Disable\"")
-    endif(SNAPPY_FOUND)
+        include(cmake/FindSnappy.cmake)
+        if(SNAPPY_FOUND)
+            set(LIBSNAPPY ${SNAPPY_LIBRARIES})
+        else()
+            message(FATAL_ERROR "Can't find snappy, "
+                "if you want to build without snappy set SNAPPY_OPTION=OFF")
+        endif(SNAPPY_FOUND)
+
+    endif(WITH_CONAN)
+    message(STATUS "Snappy option is enabled.")
+    add_compile_definitions(SNAPPY_AVAILABLE=1)
 endif()
 
 set(LIBDL dl)
 
 # Includes
-include_directories(BEFORE ./)
-include_directories(BEFORE ${PROJECT_SOURCE_DIR}/src)
-include_directories(BEFORE ${PROJECT_SOURCE_DIR}/include)
-include_directories(BEFORE ${PROJECT_SOURCE_DIR}/tools)
-include_directories(BEFORE ${PROJECT_SOURCE_DIR}/tests)
+include_directories(BEFORE
+    src
+    include
+    tools
+    tests
+    $<$<NOT:$<BOOL:${WITH_CONAN}>>:${CMAKE_CURRENT_SOURCE_DIR}/third_party/forestdb/include>
+)
 
-# Compiler flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-pessimizing-move")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
-if (NOT APPLE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
-endif ()
+add_compile_options(
+    -g -Wall -Wno-pessimizing-move
+    $<$<CXX_COMPILER_ID:Clang>:-Wno-vla-cxx-extension>
+    $<$<NOT:$<BOOL:${APPLE}>>:-pthread>
+)
 
-if (CODE_COVERAGE GREATER 0)
+if(CODE_COVERAGE)
     APPEND_COVERAGE_COMPILER_FLAGS()
     #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions")
     #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-inline")
@@ -77,18 +98,18 @@ endif()
 
 # === SANITIZER ===
 
-if (ADDRESS_SANITIZER GREATER 0)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fuse-ld=gold")
+if(ADDRESS_SANITIZER)
+    add_compile_options(-fsanitize=address -fuse-ld=gold)
     message(STATUS "---- ADDRESS SANITIZER IS ON ----")
 endif()
 
-if (THREAD_SANITIZER GREATER 0)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
+if(THREAD_SANITIZER)
+    add_compile_options(-fsanitize=thread)
     message(STATUS "---- THREAD SANITIZER IS ON ----")
 endif()
 
-if (LEAK_SANITIZER GREATER 0)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=leak")
+if(LEAK_SANITIZER)
+    add_compile_options(-fsanitize=leak)
     message(STATUS "---- LEAK SANITIZER IS ON ----")
 endif()
 
@@ -96,29 +117,29 @@ endif()
 
 # === Program flags ===
 
-if (TESTSUITE_NO_COLOR GREATER 0)
-    add_definitions(-DTESTSUITE_NO_COLOR=1)
+if(TESTSUITE_NO_COLOR GREATER 0)
+    add_compile_definitions(TESTSUITE_NO_COLOR=1)
     message(STATUS "---- MONOCOLOR TESTSUITE ----")
 endif()
 
-if (LOGGER_NO_BACKTRACE GREATER 0)
-    add_definitions(-DLOGGER_NO_BACKTRACE=1)
+if(LOGGER_NO_BACKTRACE GREATER 0)
+    add_compile_definitions(LOGGER_NO_BACKTRACE=1)
     message(STATUS "---- NO BACKTRACE BY LOGGER ----")
 endif()
 
 file(COPY ${PROJECT_SOURCE_DIR}/scripts/runtests.sh
-     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 # === CUSTOM LOGGER ===
 
-if (LOGGER_PATH)
+if(LOGGER_PATH)
     set(LOGGER_CC_FILE "${LOGGER_PATH}/logger.cc")
     set(LOGGER_HEADER_FILE "${LOGGER_PATH}/logger.h")
-elseif (NOT LOGGER_CC_FILE)
+elseif(NOT LOGGER_CC_FILE)
     set(LOGGER_CC_FILE "${ROOT_SRC}/logger.cc")
     set(LOGGER_HEADER_FILE "${ROOT_SRC}/logger.h")
-endif ()
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLOGGER_H=${LOGGER_HEADER_FILE}")
+endif()
+add_compile_definitions(LOGGER_H=${LOGGER_HEADER_FILE})
 message(STATUS "Simple logger cc file: ${LOGGER_CC_FILE}")
 message(STATUS "Simple logger header file: ${LOGGER_HEADER_FILE}")
 
@@ -126,18 +147,18 @@ message(STATUS "Simple logger header file: ${LOGGER_HEADER_FILE}")
 # === Source files ===================
 set(LOGGER_SRC ${LOGGER_CC_FILE})
 
-if (DETACH_LOGGER GREATER 0)
+if(DETACH_LOGGER)
     message(STATUS "---- DETACH LOGGER ----")
     set(LIBSIMPLELOGGER "${CMAKE_CURRENT_BINARY_DIR}/libsimplelogger.a")
 
     add_library(simplelogger_lib ${LOGGER_SRC})
     set_target_properties(simplelogger_lib PROPERTIES OUTPUT_NAME simplelogger
-                          CLEAN_DIRECT_OUTPUT 1)
+        CLEAN_DIRECT_OUTPUT 1)
 
-else ()
+else()
     set(LOGGER_SRC_TO_CORE ${LOGGER_SRC})
 
-endif ()
+endif()
 
 set(JUNGLE_CORE
     ${ROOT_SRC}/avltree.cc
@@ -189,7 +210,7 @@ set(JUNGLE_CORE
 
 # Note: static libraries MUST be located in front of all shared libraries.
 set(JUNGLE_DEPS
-    ${FDB_LIB_DIR}/libforestdb.a
+    ${FORESTDB}
     ${LIBSNAPPY}
     ${LIBDL})
 
@@ -197,41 +218,52 @@ add_library(static_lib ${JUNGLE_CORE})
 target_include_directories(static_lib PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(static_lib ${JUNGLE_DEPS})
 set_target_properties(static_lib PROPERTIES OUTPUT_NAME jungle
-                      CLEAN_DIRECT_OUTPUT 1)
-if (DETACH_LOGGER GREATER 0)
+    CLEAN_DIRECT_OUTPUT 1)
+if(DETACH_LOGGER GREATER 0)
     add_dependencies(static_lib simplelogger_lib)
-endif ()
+endif()
 
-add_subdirectory("${PROJECT_SOURCE_DIR}/examples")
-add_subdirectory("${PROJECT_SOURCE_DIR}/tests")
-add_subdirectory("${PROJECT_SOURCE_DIR}/tools")
+if(BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
 
-if (CODE_COVERAGE GREATER 0)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+
+add_subdirectory(tools)
+
+if(CODE_COVERAGE GREATER 0)
     SETUP_TARGET_FOR_COVERAGE(
         NAME jungle_cov
         EXECUTABLE ./runtests.sh
         DEPENDENCIES keyvalue_test
-                     crc32_test
-                     fileops_test
-                     fileops_directio_test
-                     memtable_test
-                     table_test
-                     basic_op_test
-                     sync_and_flush_test
-                     nearest_search_test
-                     seq_itr_test
-                     key_itr_test
-                     snapshot_test
-                     custom_cmp_test
-                     corruption_test
-                     compaction_test
-                     mt_test
-                     log_reclaim_test
-                     custom_mani_verifier
-                     level_extension_test
-                     table_lookup_booster_test
-                     compression_test
-                     atomic_batch_test
-                     builder_test
+        crc32_test
+        fileops_test
+        fileops_directio_test
+        memtable_test
+        table_test
+        basic_op_test
+        sync_and_flush_test
+        nearest_search_test
+        seq_itr_test
+        key_itr_test
+        snapshot_test
+        custom_cmp_test
+        corruption_test
+        compaction_test
+        mt_test
+        log_reclaim_test
+        custom_mani_verifier
+        level_extension_test
+        table_lookup_booster_test
+        compression_test
+        atomic_batch_test
+        builder_test
     )
 endif()
+
+install(DIRECTORY src/ DESTINATION include FILES_MATCHING PATTERN "*.h")
+install(DIRECTORY include/ DESTINATION include)
+install(FILES tools/mutable_table_mgr.h DESTINATION include/libjungle)
+install(TARGETS static_lib simplelogger_lib DESTINATION lib ARCHIVE DESTINATION lib)

@@ -169,7 +169,7 @@ struct DistDef {
         uint64_t rr[2];
         MurmurHash3_x64_128(&index, sizeof(index), 0, rr);
 
-        double z = (double)rr[0] / std::numeric_limits<uint64_t>::max();
+        double z = (double)rr[0] / (double)std::numeric_limits<uint64_t>::max();
         auto iter = zProbs.lower_bound(z);
         assert(iter != zProbs.end());
         return iter->second - 1;

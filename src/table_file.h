@@ -21,7 +21,7 @@ limitations under the License.
 #include "table_lookup_booster.h"
 
 #include <libjungle/jungle.h>
-#include <third_party/forestdb/include/libforestdb/forestdb.h>
+#include <libforestdb/forestdb.h>
 
 #include <list>
 #include <map>
