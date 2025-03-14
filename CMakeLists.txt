@@ -101,16 +101,19 @@ endif()
 
 if(ADDRESS_SANITIZER)
     add_compile_options(-fsanitize=address -fuse-ld=gold)
+    add_link_options(-fsanitize=address -fuse-ld=gold)
     message(STATUS "---- ADDRESS SANITIZER IS ON ----")
 endif()
 
 if(THREAD_SANITIZER)
     add_compile_options(-fsanitize=thread)
+    add_link_options(-fsanitize=thread)
     message(STATUS "---- THREAD SANITIZER IS ON ----")
 endif()
 
 if(LEAK_SANITIZER)
     add_compile_options(-fsanitize=leak)
+    add_link_options(-fsanitize=leak)
     message(STATUS "---- LEAK SANITIZER IS ON ----")
 endif()
 
@@ -150,7 +153,9 @@ set(LOGGER_SRC ${LOGGER_CC_FILE})
 
 if(DETACH_LOGGER)
     message(STATUS "---- DETACH LOGGER ----")
-    set(LIBSIMPLELOGGER "${CMAKE_CURRENT_BINARY_DIR}/libsimplelogger.a")
+    # set(LIBSIMPLELOGGER "${CMAKE_CURRENT_BINARY_DIR}/libsimplelogger.a")
+    # The proper/safe way is to pass the name of the target
+    set(LIBSIMPLELOGGER simplelogger_lib)
 
     add_library(simplelogger_lib ${LOGGER_SRC})
     set_target_properties(simplelogger_lib PROPERTIES OUTPUT_NAME simplelogger
