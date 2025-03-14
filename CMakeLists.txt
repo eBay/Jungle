@@ -4,7 +4,7 @@ project(Jungle VERSION 1.0.0 LANGUAGES CXX)
 include(CTest) # automatically defines BUILD_TESTING option
 
 option(WITH_CONAN "Use dependences provide by Conan" OFF)
-option(SNAPPY_OPTION "Use Snappy Compression" ON)
+option(SNAPPY_OPTION "Use Snappy Compression" OFF)
 option(CODE_COVERAGE "Enable Coverage" OFF)
 option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
@@ -27,7 +27,6 @@ message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 
 
 set(ROOT_SRC ${PROJECT_SOURCE_DIR}/src)
-# set(CMAKE_DIR ${PROJECT_SOURCE_DIR}/cmake)
 
 if(CODE_COVERAGE)
     set(CMAKE_BUILD_TYPE "Debug")
@@ -39,7 +38,9 @@ endif()
 
 if(WITH_CONAN)
     find_package(forestdb REQUIRED)
+    find_package(ZLIB REQUIRED)
     set(FORESTDB forestdb::forestdb)
+    set(LIBZ ZLIB::ZLIB)
 else()
     set(FORESTDB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/forestdb/build/libforestdb.a)
     set(LIBZ z)
