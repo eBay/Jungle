@@ -32,8 +32,10 @@ limitations under the License.
 #include <sstream>
 #include <string>
 
+#ifndef LOGGER_NO_BACKTRACE
 #include <cxxabi.h>
 #include <execinfo.h>
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 #include <signal.h>
@@ -84,10 +86,17 @@ static INTPTR_UNUSED image_slide(void) {
     msg_len = snprintf( msg + cur_len, avail_len, __VA_ARGS__ );    \
     cur_len += (avail_len > msg_len) ? msg_len : avail_len
 
+#ifdef LOGGER_NO_BACKTRACE
+static SIZE_T_UNUSED
+_stack_backtrace(void** stack_ptr, size_t stack_ptr_capacity) {
+    return 0;
+}
+#else
 static SIZE_T_UNUSED
 _stack_backtrace(void** stack_ptr, size_t stack_ptr_capacity) {
     return backtrace(stack_ptr, stack_ptr_capacity);
 }
+#endif
 
 static SIZE_T_UNUSED _stack_interpret_linux(void** stack_ptr,
                                             char** stack_msg,
@@ -113,10 +122,11 @@ _stack_interpret(void** stack_ptr,
                  char* output_buf,
                  size_t output_buflen)
 {
+    size_t len = 0;
+
+#ifndef LOGGER_NO_BACKTRACE
     char** stack_msg = nullptr;
     stack_msg = backtrace_symbols(stack_ptr, stack_size);
-
-    size_t len = 0;
 
 #if defined(__linux__)
     len = _stack_interpret_linux( stack_ptr,
@@ -141,6 +151,7 @@ _stack_interpret(void** stack_ptr,
 
 #endif
     free(stack_msg);
+#endif
 
     return len;
 }
@@ -152,7 +163,7 @@ static SIZE_T_UNUSED _stack_interpret_linux(void** stack_ptr,
                                             size_t output_buflen)
 {
     size_t cur_len = 0;
-#ifdef __linux__
+#if defined(__linux__) && !defined(LOGGER_NO_BACKTRACE)
     size_t frame_num = 0;
 
     // NOTE: starting from 1, skipping this frame.
@@ -257,7 +268,7 @@ static SIZE_T_UNUSED _stack_interpret_apple(void** stack_ptr,
                                             size_t output_buflen)
 {
     size_t cur_len = 0;
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(LOGGER_NO_BACKTRACE)
 
     size_t frame_num = 0;
     (void)frame_num;
@@ -380,7 +391,6 @@ static SIZE_T_UNUSED _stack_interpret_other(void** stack_ptr,
     }
     return cur_len;
 }
-
 
 static SIZE_T_UNUSED stack_backtrace(char* output_buf, size_t output_buflen) {
     void* stack_ptr[256];

@@ -55,8 +55,7 @@ void TableMgr::setTableFileOffset( std::list<uint64_t>& checkpoints,
                                    TableFile* dst_file,
                                    std::vector<uint64_t>& offsets,
                                    uint64_t start_index,
-                                   uint64_t count )
-{
+                                   uint64_t count) {
     const DBConfig* db_config = getDbConfig();
     (void)db_config;
 

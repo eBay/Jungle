@@ -287,6 +287,9 @@ public:
     avl_tree curWindow;
     avl_node* windowCursor;
     Iterator* parent;
+
+    // Intolerable error detected. If set, we cannot proceed iteration.
+    Status fatalError;
 };
 
 struct GlobalBatchStatus {

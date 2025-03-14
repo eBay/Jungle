@@ -79,6 +79,7 @@ public:
     CompactOptions()
         : preserveTombstone(false)
         , ignoreThreshold(false)
+        , doNotRemoveOldFile(false)
         {}
 
     /**
@@ -92,6 +93,11 @@ public:
      * manner, even though it does not meet the compaction threshold.
      */
     bool ignoreThreshold;
+
+    /**
+     * If `true`, the old file will not be removed after compaction.
+     */
+    bool doNotRemoveOldFile;
 };
 
 /**
@@ -204,6 +210,9 @@ struct DebugParams {
         , addNewLogFileCb(nullptr)
         , newLogBatchCb(nullptr)
         , getLogFileInfoBySeqCb(nullptr)
+        , logFlushCb(nullptr)
+        , syncCb(nullptr)
+        , adjustL0Cb(nullptr)
         , forceMerge(false)
         {}
 
@@ -290,6 +299,25 @@ struct DebugParams {
      * before checking the max sequence number of the file.
      */
     std::function< void(const GenericCbParams&) > getLogFileInfoBySeqCb;
+
+    /**
+     * Callback function that will be invoked right after the log
+     * flushing (reading from log files and writing into table files),
+     * before updating last synced sequence number of each log file.
+     */
+    std::function< void(const GenericCbParams&) > logFlushCb;
+
+    /**
+     * Callback function that will be invoked at the beginning log sync
+     * (reading memtable data and writing them into log files).
+     */
+    std::function< void(const GenericCbParams&) > syncCb;
+
+    /**
+     * Callback function that will be invoked after compacting L0 tables
+     * of each hash number.
+     */
+    std::function< void(const GenericCbParams&) > adjustL0Cb;
 
     /**
      * If true, merge will proceed the task even with the small number

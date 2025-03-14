@@ -66,14 +66,18 @@ int MemTable::RecNode::cmp(skiplist_node *a, skiplist_node *b, void *aux) {
     return SizedBuf::cmp(aa->key, bb->key);
 }
 
-Record* MemTable::RecNode::getLatestRecord(const uint64_t chk) {
+Record* MemTable::RecNode::getLatestRecord( const uint64_t seq_from,
+                                            const uint64_t seq_upto )
+{
     mGuard l(recListLock);
     Record* rec = nullptr;
     auto entry = recList->rbegin();
     while (entry != recList->rend()) {
         Record* tmp = *entry;
-        if (!valid_number(chk) || tmp->seqNum <= chk) {
-            rec = tmp;
+        if (!valid_number(seq_upto) || tmp->seqNum <= seq_upto) {
+            if (!valid_number(seq_from) || tmp->seqNum >= seq_from) {
+                rec = tmp;
+            }
             break;
         }
         entry++;
@@ -109,18 +113,19 @@ uint64_t MemTable::RecNode::getMinSeq() {
     return rec->seqNum;
 }
 
-bool MemTable::RecNode::validKeyExist( const uint64_t chk,
+bool MemTable::RecNode::validKeyExist( const uint64_t seq_from,
+                                       const uint64_t seq_upto,
                                        bool allow_tombstone )
 {
     bool valid_key_exist = true;
 
-    if (getMinSeq() > chk) {
+    if (getMinSeq() > seq_upto) {
         // No record belongs to the current snapshot (iterator),
         valid_key_exist = false;
     }
 
     if (valid_key_exist) {
-        Record* rec = getLatestRecord(chk);
+        Record* rec = getLatestRecord(seq_from, seq_upto);
         if (!rec) {
             // All records in the list may have
             // higher sequence number than given `chk`.
@@ -655,7 +660,7 @@ Status MemTable::getRecordByKeyInternal(const uint64_t chk,
         }
     }
 
-    Record* rec_ret = node->getLatestRecord(chk);
+    Record* rec_ret = node->getLatestRecord(NOT_INITIALIZED, chk);
     if (!rec_ret) {
         skiplist_release_node(&node->snode);
         return Status::KEY_NOT_FOUND;
@@ -714,29 +719,37 @@ Status MemTable::getRecordsByPrefix(const uint64_t chk,
     };
 
     while ( is_prefix_match(node->key) ) {
-        Record* rec_ret = node->getLatestRecord(chk);
+        Record* rec_ret = node->getLatestRecord(NOT_INITIALIZED, chk);
         if (!rec_ret) {
             skiplist_release_node(&node->snode);
             return Status::KEY_NOT_FOUND;
         }
-        if ( valid_number(flushedSeqNum) &&
-             rec_ret->seqNum <= flushedSeqNum ) {
-            // Already purged KV pair, go to table.
-            if (!allow_flushed_log) {
-                skiplist_release_node(&node->snode);
-                return Status::KEY_NOT_FOUND;
-            } // Tolerate if this is snapshot.
-        }
 
-        if ( !allow_tombstone && rec_ret->isDel() ) {
-            // Last operation is deletion.
-            skiplist_release_node(&node->snode);
-            return Status::KEY_NOT_FOUND;
-        }
-        SearchCbDecision dec = cb_func({*rec_ret});
-        if (dec == SearchCbDecision::STOP) {
-            skiplist_release_node(&node->snode);
-            return Status::OPERATION_STOPPED;
+        bool found = true;
+        // Dummy loop to use `break`.
+        do {
+            if ( valid_number(flushedSeqNum) &&
+                 rec_ret->seqNum <= flushedSeqNum ) {
+                // Already purged KV pair, go to the next matching key.
+                if (!allow_flushed_log) {
+                    found = false;
+                    break;
+                } // Tolerate if this is snapshot.
+            }
+
+            if ( !allow_tombstone && rec_ret->isDel() ) {
+                // Last operation is deletion, go to the next matching key.
+                found = false;
+                break;
+            }
+        } while (false);
+
+        if (found) {
+            SearchCbDecision dec = cb_func({*rec_ret});
+            if (dec == SearchCbDecision::STOP) {
+                skiplist_release_node(&node->snode);
+                return Status::OPERATION_STOPPED;
+            }
         }
 
         cursor = skiplist_next(idxByKey, &node->snode);
@@ -1220,7 +1233,7 @@ Status MemTable::findOffsetOfSeq(SimpleLogger* logger,
 }
 
 // MemTable flush: skiplist (memory) -> log file. (disk)
-Status MemTable::flush(RwSerializer& rws, uint64_t upto)
+Status MemTable::flush(RwSerializer& rws, uint64_t upto, uint64_t& flushed_seq_out)
 {
     if (minSeqNum == NOT_INITIALIZED) {
         // No log in this file. Just do nothing and return OK.
@@ -1437,7 +1450,7 @@ Status MemTable::flush(RwSerializer& rws, uint64_t upto)
                skiplist_get_size(idxBySeq),
                start_seqnum, seqnum_upto);
 
-    syncedSeqNum = seqnum_upto;
+    flushed_seq_out = seqnum_upto;
     return Status();
 
    } catch (Status s) {

@@ -16,11 +16,14 @@ limitations under the License.
 
 #include "jungle_test_common.h"
 
-#include "jungle_builder.h"
-#include "libjungle/iterator.h"
-#include "libjungle/jungle.h"
-#include "libjungle/sized_buf.h"
+#include "dummy_compression.h"
+#include "fileops_posix.h"
+#include "mutable_table_mgr.h"
 #include "table_file.h"
+#include "table_mgr.h"
+
+#include <libjungle/jungle_builder.h>
+
 #include <cstdio>
 
 namespace builder_test {
@@ -47,6 +50,7 @@ int build_from_table_files_test() {
     // Manually create 4 table files and put key value pairs.
     jungle::FileOpsPosix f_ops;
     jungle::DBConfig d_conf;
+    d_conf.maxEntriesInLogFile = 20;
 
     jungle::TableMgrOptions t_mgr_opt;
     t_mgr_opt.path = path;
@@ -94,6 +98,7 @@ int build_from_table_files_test() {
     // Build from table files.
     jungle::builder::Builder::BuildParams params;
     params.path = path;
+    params.dbConfig = d_conf;
     for (size_t ii = 0; ii < 4; ++ii) {
         jungle::builder::Builder::BuildParams::TableData td;
         td.tableNumber = ii;
@@ -108,6 +113,11 @@ int build_from_table_files_test() {
     jungle::DB* db;
     jungle::Status s;
     CHK_Z( jungle::DB::open(&db, path, d_conf) );
+
+    // Get max seqnum should work.
+    uint64_t max_seq_out = 0;
+    CHK_Z( db->getMaxSeqNum(max_seq_out) );
+    CHK_EQ( 400, max_seq_out );
 
     // Put a few key-value pairs.
     for (size_t ii = 400; ii < 500; ++ii) {
@@ -185,6 +195,8 @@ int build_an_empty_db_test() {
 
     fdb_set_log_callback_ex_global(dummy_fdb_log_cb, nullptr);
 
+    jungle::DBConfig d_conf;
+
     // Build from table files.
     jungle::builder::Builder::BuildParams params;
     params.path = path;
@@ -194,7 +206,6 @@ int build_an_empty_db_test() {
     jungle::DB* db;
     jungle::Status s;
 
-    jungle::DBConfig d_conf;
     CHK_Z( jungle::DB::open(&db, path, d_conf) );
 
     // Put a few key-value pairs.
@@ -267,12 +278,94 @@ int build_an_empty_db_test() {
     return 0;
 }
 
+int builder_api_test(bool compression) {
+    std::string path;
+    TEST_SUITE_PREPARE_PATH(path);
+
+    TestSuite::mkdir(path);
+
+    jungle::builder::Builder bb;
+    jungle::DBConfig d_conf;
+    d_conf.maxL1TableSize = 256 * 1024;
+
+    if (compression) {
+        d_conf.compOpt.cbGetMaxSize = dummy_get_max_size;
+        d_conf.compOpt.cbCompress = dummy_compress;
+        d_conf.compOpt.cbDecompress = dummy_decompress;
+    }
+
+    CHK_Z( bb.init(path, d_conf) );
+
+    char key_buf[256];
+    jungle::SizedBuf val_buf;
+    jungle::SizedBuf::Holder h_val_buf(val_buf);
+    val_buf.alloc(1024);
+    memset(val_buf.data, 'x', 1023);
+    for (size_t ii = 0; ii < 1023; ii += 3) {
+        memset(val_buf.data + ii, 'a' + (ii % ('z' - 'a')), 3);
+    }
+    val_buf.data[1023] = 0;
+
+    const size_t NUM = 2048;
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        sprintf(key_buf, "key%05zu", ii);
+        sprintf((char*)val_buf.data, "val%05zu", ii);
+
+        jungle::Record rec;
+        rec.kv.key = key_buf;
+        rec.kv.value = val_buf;
+
+        CHK_Z( bb.set(rec) );
+    }
+
+    CHK_Z( bb.commit() );
+    CHK_Z( bb.close() );
+
+    jungle::DB* db = nullptr;
+    CHK_Z( jungle::DB::open(&db, path, d_conf) );
+
+    for (size_t ii = 0; ii < NUM; ++ii) {
+        sprintf(key_buf, "key%05zu", ii);
+        sprintf((char*)val_buf.data, "val%05zu", ii);
+
+        jungle::SizedBuf value_out;
+        jungle::SizedBuf::Holder h_value_out(value_out);
+        CHK_Z( db->get(jungle::SizedBuf(strlen(key_buf), key_buf), value_out) );
+
+        CHK_EQ(val_buf.toString(), value_out.toString());
+    }
+
+    // Iteration from the middle of sequence number should work.
+    jungle::Status s;
+    jungle::Iterator itr;
+    CHK_Z( itr.initSN(db, NUM / 2) );
+    uint64_t seqnum_cnt = NUM / 2;
+    do {
+        jungle::Record rec_out;
+        jungle::Record::Holder h_rec_out(rec_out);
+        s = itr.get(rec_out);
+        if (!s.ok()) break;
+
+        CHK_EQ(seqnum_cnt, rec_out.seqNum);
+        seqnum_cnt++;
+    } while (itr.next().ok());
+    CHK_Z( itr.close() );
+    CHK_EQ(NUM + 1, seqnum_cnt);
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace builder_test;
 
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
     ts.doTest("build from table files test", build_from_table_files_test);
     ts.doTest("build an empty db test", build_an_empty_db_test);
+    ts.doTest("builder api test", builder_api_test, TestRange<bool>({false, true}));
 
     return 0;
 }

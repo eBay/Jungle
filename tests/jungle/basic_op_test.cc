@@ -17,10 +17,11 @@ limitations under the License.
 #include "jungle_test_common.h"
 
 #include <numeric>
-#include <random>
 #include <vector>
 
 #include <stdio.h>
+
+namespace basic_op_test {
 
 int basic_operations_test() {
     std::string filename;
@@ -1335,291 +1336,6 @@ int meta_test_table() {
     return 0;
 }
 
-int async_flush_test_cb(size_t* counter,
-                        size_t expected_count,
-                        jungle::Status s,
-                        void* ctx)
-{
-    CHK_Z(s);
-
-    (*counter)++;
-    if (*counter == expected_count) {
-        EventAwaiter* ea = reinterpret_cast<EventAwaiter*>(ctx);
-        ea->invoke();
-    }
-    return 0;
-}
-
-int async_flush_test() {
-    std::string filename;
-    TEST_SUITE_PREPARE_PATH(filename);
-
-    jungle::Status s;
-    jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config);
-    jungle::DB* db;
-
-    jungle::GlobalConfig g_config;
-    g_config.numFlusherThreads = 1;
-    g_config.flusherSleepDuration_ms = 1000;
-    jungle::init(g_config);
-
-    CHK_Z(jungle::DB::open(&db, filename, config));
-
-    // Set KV pairs.
-    int n = 10;
-    std::vector<jungle::KV> kv(n);
-    CHK_Z(_init_kv_pairs(n, kv, "key", "value"));
-    CHK_Z(_set_byseq_kv_pairs(0, n, 0, db, kv));
-
-    // Sync and async flush.
-    CHK_Z(db->sync());
-
-    size_t counter = 0;
-    size_t expected_count = 5;
-    EventAwaiter ea;
-
-    for (size_t ii=0; ii<expected_count; ++ii) {
-        CHK_Z( db->flushLogsAsync
-                   ( jungle::FlushOptions(),
-                     std::bind( async_flush_test_cb,
-                                &counter,
-                                expected_count,
-                                std::placeholders::_1,
-                                std::placeholders::_2 ),
-                     &ea ) );
-    }
-    // Wait for handler.
-    ea.wait();
-
-    // All callbacks should have been invoked.
-    CHK_EQ( expected_count, counter );
-
-    // Get.
-    CHK_Z(_get_bykey_check(0, n, db, kv));
-
-    // Invoke async flush and close DB without waiting.
-    CHK_Z(db->flushLogsAsync(jungle::FlushOptions(), nullptr, nullptr));
-
-    CHK_Z(jungle::DB::close(db));
-    CHK_Z(jungle::shutdown());
-    _free_kv_pairs(n, kv);
-
-    TEST_SUITE_CLEANUP_PATH();
-    return 0;
-}
-
-int async_flush_verbose_test(bool debug_level) {
-    std::string filename;
-    TEST_SUITE_PREPARE_PATH(filename);
-
-    jungle::Status s;
-    jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config);
-    jungle::DB* db;
-
-    jungle::GlobalConfig g_config;
-    g_config.numFlusherThreads = 1;
-    g_config.flusherSleepDuration_ms = 1000;
-    jungle::init(g_config);
-
-    config.logSectionOnly = true;
-    CHK_Z(jungle::DB::open(&db, filename, config));
-
-    // Set KV pairs.
-    size_t NUM = 1000;
-    std::vector<jungle::KV> kv(NUM);
-    CHK_Z(_init_kv_pairs(NUM, kv, "key", "value"));
-
-    CHK_EQ(4, db->getLogLevel());
-    if (debug_level) {
-        db->setLogLevel(5);
-        CHK_EQ(5, db->getLogLevel());
-    }
-
-    const size_t EXP_COUNT = 11;
-    for (size_t ii=0; ii<NUM; ii+=EXP_COUNT) {
-        size_t counter = 0;
-        EventAwaiter ea;
-
-        size_t upto = std::min(ii+EXP_COUNT, NUM);
-        for (size_t jj = ii; jj < upto; ++jj) {
-            CHK_Z( db->setSN(jj+1, kv[jj]) );
-
-            jungle::FlushOptions f_opt;
-            f_opt.syncOnly = true;
-            f_opt.callFsync = false;
-            CHK_Z( db->flushLogsAsync
-                       ( f_opt,
-                         std::bind( async_flush_test_cb,
-                                    &counter,
-                                    upto - ii,
-                                    std::placeholders::_1,
-                                    std::placeholders::_2 ),
-                         &ea,
-                         jj ) );
-        }
-
-        // Wait for handler.
-        ea.wait();
-        // All callbacks should have been invoked.
-        CHK_EQ( upto - ii, counter );
-    }
-
-    CHK_Z(jungle::DB::close(db));
-    CHK_Z(jungle::shutdown());
-    _free_kv_pairs(NUM, kv);
-
-    TEST_SUITE_CLEANUP_PATH();
-    return 0;
-}
-
-int async_flush_verbose_with_delay_test(bool debug_level) {
-    std::string filename;
-    TEST_SUITE_PREPARE_PATH(filename);
-
-    jungle::Status s;
-    jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config);
-    jungle::DB* db;
-
-    jungle::GlobalConfig g_config;
-    g_config.numFlusherThreads = 1;
-    g_config.flusherSleepDuration_ms = 500;
-    jungle::init(g_config);
-
-    config.logSectionOnly = true;
-    CHK_Z(jungle::DB::open(&db, filename, config));
-
-    // Set KV pairs.
-    size_t NUM = 10000;
-    std::vector<jungle::KV> kv(NUM);
-    CHK_Z(_init_kv_pairs(NUM, kv, "key", "value"));
-
-    CHK_EQ(4, db->getLogLevel());
-    if (debug_level) {
-        db->setLogLevel(5);
-        CHK_EQ(5, db->getLogLevel());
-    }
-
-    TestSuite::Timer timer(1050);
-    TestSuite::WorkloadGenerator wg(1000);
-    for (size_t ii=0; ii<NUM; ) {
-        if (timer.timeout()) break;
-
-        size_t todo = wg.getNumOpsToDo();
-        if (!todo) {
-            TestSuite::sleep_ms(1);
-            continue;
-        }
-
-        CHK_Z( db->setSN(ii+1, kv[ii]) );
-
-        jungle::FlushOptions f_opt;
-        f_opt.syncOnly = true;
-        f_opt.callFsync = false;
-        f_opt.execDelayUs = 100*1000;
-        CHK_Z( db->flushLogsAsync( f_opt, nullptr, nullptr ) );
-
-        wg.addNumOpsDone(1);
-        ii += 1;
-    }
-    CHK_Z(jungle::DB::close(db));
-
-    // Wait one more second to see if flusher can handle stale request.
-    TestSuite::sleep_ms(1000);
-
-    CHK_Z(jungle::shutdown());
-    _free_kv_pairs(NUM, kv);
-
-    TEST_SUITE_CLEANUP_PATH();
-    return 0;
-}
-
-int flush_beyond_sync_test() {
-    std::string filename;
-    TEST_SUITE_PREPARE_PATH(filename);
-
-    jungle::DB* db;
-    jungle::Status s;
-
-    // Open DB.
-    jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config);
-    config.maxEntriesInLogFile = 7;
-    CHK_Z( jungle::DB::open(&db, filename, config) );
-
-    size_t NUM = 100;
-    for (size_t ii=0; ii<NUM; ++ii) {
-        std::string key_str = "key" + std::to_string(ii);
-        std::string val_str = "val" + std::to_string(ii);
-        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
-        if (ii == NUM/2) {
-            // Sync logs in the middle.
-            CHK_Z( db->sync(false) );
-        }
-    }
-
-    for (size_t ii=0; ii<NUM; ++ii) {
-        TestSuite::setInfo("ii=%zu", ii);
-        std::string key_str = "key" + std::to_string(ii);
-        jungle::SizedBuf value_out;
-        jungle::SizedBuf::Holder h_value_out(value_out);
-        std::string value_exp = "val" + std::to_string(ii);
-        CHK_Z( db->get( key_str, value_out) );
-        CHK_EQ( value_exp, value_out.toString() );
-    }
-
-    // Normal flush (upto last sync).
-    jungle::FlushOptions f_opt;
-    CHK_Z( db->flushLogs(f_opt) );
-
-    // Flush should have done upto the last sync.
-    uint64_t seq_num_out = 0;
-    CHK_Z( db->getLastFlushedSeqNum(seq_num_out) );
-    CHK_EQ(NUM/2 + 1, seq_num_out);
-
-    // Flush beyond sync (upto the latest).
-    f_opt.beyondLastSync = true;
-    CHK_Z( db->flushLogs(f_opt) );
-
-    // Flush should have done upto the latest.
-    CHK_Z( db->getLastFlushedSeqNum(seq_num_out) );
-    CHK_EQ(NUM, seq_num_out);
-
-    // Close DB without sync.
-    CHK_Z( jungle::DB::close(db) );
-
-    // Reopen.
-    CHK_Z( jungle::DB::open(&db, filename, config) );
-
-    // Put more logs.
-    for (size_t ii=NUM; ii<NUM+3; ++ii) {
-        std::string key_str = "key" + std::to_string(ii);
-        std::string val_str = "val" + std::to_string(ii);
-        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
-    }
-
-    // Check, all data should exist.
-    for (size_t ii=0; ii<NUM+3; ++ii) {
-        TestSuite::setInfo("ii=%zu", ii);
-        std::string key_str = "key" + std::to_string(ii);
-        jungle::SizedBuf value_out;
-        jungle::SizedBuf::Holder h_value_out(value_out);
-        std::string value_exp = "val" + std::to_string(ii);
-        CHK_Z( db->get( key_str, value_out) );
-        CHK_EQ( value_exp, value_out.toString() );
-    }
-
-    CHK_Z( jungle::DB::close(db) );
-
-    // Free all resources for jungle.
-    jungle::shutdown();
-
-    TEST_SUITE_CLEANUP_PATH();
-    return 0;
-}
-
 int get_stat_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1778,42 +1494,65 @@ int different_l0_partitions() {
     config.numL0Partitions = 1;
     CHK_Z(jungle::DB::open(&db, filename, config));
     int n = 10;
+
+    // Insert, flush, and check
     std::vector<jungle::KV> kv(n);
-    CHK_Z(_init_kv_pairs(n, kv, "key", "value"));
+    CHK_Z(_init_kv_pairs(n, kv, "key1", "value1"));
     CHK_Z(_set_bykey_kv_pairs(0, n, db, kv));
     CHK_Z(db->sync());
     CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    CHK_Z(_get_bykey_check(0, n, db, kv));
     CHK_Z(jungle::DB::close(db));
 
-    // Change the number of partitions,
-    // but it should be ignored internally.
+    // Increase the number of partitions, it should be handle correctly internally.
     config.numL0Partitions = 4;
-
     // Reopen & check.
     CHK_Z(jungle::DB::open(&db, filename, config));
     CHK_Z(_get_bykey_check(0, n, db, kv));
 
-    // Insert more.
+    // Insert more, flush and check.
     std::vector<jungle::KV> kv2(n);
-    CHK_Z(_init_kv_pairs(n, kv2, "key_new", "value_new"));
+    CHK_Z(_init_kv_pairs(n, kv2, "key2", "value2"));
     CHK_Z(_set_bykey_kv_pairs(0, n, db, kv2));
+    std::vector<jungle::KV> kv3(n);
+    CHK_Z(_init_kv_pairs(n, kv3, "key3", "value3"));
+    CHK_Z(_set_bykey_kv_pairs(0, n, db, kv3));
+    std::vector<jungle::KV> kv4(n);
+    CHK_Z(_init_kv_pairs(n, kv4, "key4", "value4"));
+    CHK_Z(_set_bykey_kv_pairs(0, n, db, kv4));
     CHK_Z(db->sync());
     CHK_Z(db->flushLogs(jungle::FlushOptions()));
-
-    // Check both.
     CHK_Z(_get_bykey_check(0, n, db, kv));
     CHK_Z(_get_bykey_check(0, n, db, kv2));
+    CHK_Z(_get_bykey_check(0, n, db, kv3));
+    CHK_Z(_get_bykey_check(0, n, db, kv4));
     CHK_Z(jungle::DB::close(db));
 
+    // Decrease the number of partitions, it should be handle correctly internally.
+    config.numL0Partitions = 2;
     // Reopen & check.
     CHK_Z(jungle::DB::open(&db, filename, config));
     CHK_Z(_get_bykey_check(0, n, db, kv));
     CHK_Z(_get_bykey_check(0, n, db, kv2));
+    CHK_Z(_get_bykey_check(0, n, db, kv3));
+    CHK_Z(_get_bykey_check(0, n, db, kv4));
+
+    // Insert more, flush and check
+    std::vector<jungle::KV> kv5(n);
+    CHK_Z(_init_kv_pairs(n, kv5, "key5", "value5"));
+    CHK_Z(_set_bykey_kv_pairs(0, n, db, kv5));
+    CHK_Z(db->sync());
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    CHK_Z(_get_bykey_check(0, n, db, kv5));
+
     CHK_Z(jungle::DB::close(db));
 
     CHK_Z(jungle::shutdown());
     _free_kv_pairs(n, kv);
     _free_kv_pairs(n, kv2);
+    _free_kv_pairs(n, kv3);
+    _free_kv_pairs(n, kv4);
+    _free_kv_pairs(n, kv5);
 
     TEST_SUITE_CLEANUP_PATH();
     return 0;
@@ -2433,292 +2172,6 @@ int discard_test(PARAM_BASE) {
     return 0;
 }
 
-int get_nearest_test(int flush_options) {
-    // flush_options:
-    //   0: all in the log.
-    //   1: 3/4 in the log and 1/4 in the table.
-    //   2: 1/2 in the log and 1/2 in the table.
-    //   3: 1/4 in the log and 3/4 in the table.
-    //   4: all in the table.
-
-    std::string filename;
-    TEST_SUITE_PREPARE_PATH(filename);
-
-    jungle::Status s;
-    jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config);
-    jungle::DB* db;
-
-    config.maxEntriesInLogFile = 20;
-    CHK_Z(jungle::DB::open(&db, filename, config));
-
-    const size_t NUM = 100;
-
-    // Shuffle (0 -- 99).
-    std::vector<size_t> idx_arr(NUM);
-    std::iota(idx_arr.begin(), idx_arr.end(), 0);
-    /*
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(idx_arr.begin(), idx_arr.end(), g);
-    */
-    for (size_t ii = 0; ii < NUM; ++ii) {
-        size_t jj = std::rand() % NUM;
-        std::swap(idx_arr[ii], idx_arr[jj]);
-    }
-
-    for (size_t kk = 0; kk < 2; ++kk) {
-        for (size_t ii = 0; ii < NUM; ++ii) {
-            size_t idx = idx_arr[ii] * 10;
-            std::string key_str = "key" + TestSuite::lzStr(5, idx);
-            std::string val_str = "val" + TestSuite::lzStr(2, kk) +
-                                  "_" + TestSuite::lzStr(5, idx);
-            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
-
-            if ( (kk == 0 && ii == NUM/2 - 1 && flush_options == 1) ||
-                 (kk == 1 && ii == NUM/2 - 1 && flush_options == 3) ) {
-                CHK_Z( db->sync(false) );
-                CHK_Z( db->flushLogs() );
-            }
-        }
-        CHK_Z( db->sync(false) );
-        if (kk == 0 && flush_options == 2) {
-            CHK_Z( db->flushLogs() );
-        }
-    }
-    CHK_Z( db->sync(false) );
-    if (flush_options == 4) {
-        CHK_Z( db->flushLogs() );
-    }
-
-    auto verify_func = [&]( size_t ii,
-                            jungle::SearchOptions s_opt,
-                            bool exact_query ) -> int {
-        TestSuite::setInfo("ii %zu, s_opt %d, exact_query %d",
-                           ii, s_opt, exact_query);
-
-        int64_t idx = exact_query ? ii * 10 : ii * 10 + (s_opt.isGreater() ? 1 : -1);
-        int64_t exp_idx = 0;
-
-        if (exact_query) {
-            if (s_opt.isExactMatchAllowed()) {
-                exp_idx = idx;
-            } else {
-                exp_idx = (ii + (s_opt.isGreater() ? 1 : -1)) * 10;
-            }
-        } else {
-            exp_idx = (ii + (s_opt.isGreater() ? 1 : -1)) * 10;
-        }
-
-        std::string key_str;
-        if (idx >= 0) {
-            key_str = "key" + TestSuite::lzStr(5, idx);
-        } else {
-            key_str = "000";
-        }
-        std::string val_str = "val" + TestSuite::lzStr(2, 1) +
-                              "_" + TestSuite::lzStr(5, exp_idx);
-
-        jungle::Record rec_out;
-        jungle::Record::Holder h_rec_out(rec_out);
-        s = db->getNearestRecordByKey(jungle::SizedBuf(key_str), rec_out, s_opt);
-        if (s_opt == jungle::SearchOptions::EQUAL) {
-            // EQUAL should be denied.
-            CHK_NOT(s);
-            return 0;
-        }
-
-        bool exp_succ = false;
-        if (exact_query) {
-            if ( s_opt.isExactMatchAllowed() ||
-                 (s_opt.isGreater() && ii < NUM - 1) ||
-                 (s_opt.isSmaller() && ii > 0) ) {
-                exp_succ = true;
-            }
-        } else {
-            if ( (s_opt.isGreater() && ii < NUM - 1) ||
-                 (s_opt.isSmaller() && ii > 0) ) {
-                exp_succ = true;
-            }
-        }
-
-        if (exp_succ) {
-            CHK_Z(s);
-            CHK_EQ( jungle::SizedBuf(val_str), rec_out.kv.value );
-        } else  {
-            CHK_NOT(s);
-        }
-        return 0;
-    };
-
-    using jungle::SearchOptions;
-    for (size_t ii = 0; ii < NUM; ++ii) {
-        for (bool exact_query: {true, false}) {
-            for (SearchOptions s_opt: { SearchOptions::GREATER_OR_EQUAL,
-                                        SearchOptions::GREATER,
-                                        SearchOptions::SMALLER_OR_EQUAL,
-                                        SearchOptions::SMALLER,
-                                        SearchOptions::EQUAL }) {
-                CHK_Z( verify_func(ii, s_opt, exact_query) );
-            }
-        }
-    }
-
-    CHK_Z(jungle::DB::close(db));
-    CHK_Z(jungle::shutdown());
-
-    TEST_SUITE_CLEANUP_PATH();
-    return 0;
-}
-
-int get_by_prefix_test(size_t hash_len) {
-    std::string filename;
-    TEST_SUITE_PREPARE_PATH(filename);
-
-    jungle::Status s;
-    jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config);
-    jungle::DB* db;
-
-    config.maxEntriesInLogFile = 20;
-    config.customLenForHash = [hash_len](const jungle::HashKeyLenParams& p) -> size_t {
-        return hash_len;
-    };
-    config.bloomFilterBitsPerUnit = 10;
-    CHK_Z(jungle::DB::open(&db, filename, config));
-
-    const size_t NUM = 100;
-
-    // Shuffle (0 -- 99).
-    std::vector<size_t> idx_arr(NUM);
-    std::iota(idx_arr.begin(), idx_arr.end(), 0);
-#if 0
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(idx_arr.begin(), idx_arr.end(), g);
-#else
-    for (size_t ii = 0; ii < NUM; ++ii) {
-        size_t jj = std::rand() % NUM;
-        std::swap(idx_arr[ii], idx_arr[jj]);
-    }
-#endif
-
-    const size_t ROUND_MAX = 10;
-    for (size_t round = 0; round < ROUND_MAX; ++round) {
-        for (size_t ii = 0; ii < NUM; ++ii) {
-            size_t idx = idx_arr[ii];
-            std::string key_str = "key" + TestSuite::lzStr(5, idx) + "_" +
-                                  TestSuite::lzStr(2, ROUND_MAX - round);
-            std::string val_str = "val" + TestSuite::lzStr(5, idx) + "_" +
-                                  TestSuite::lzStr(2, ROUND_MAX - round);
-            CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
-        }
-        CHK_Z( db->sync(false) );
-        if (round == 0) {
-            CHK_Z( db->flushLogs() );
-        } else if (round >= 1 && round % 2 == 0 && round < ROUND_MAX - 2) {
-            for (size_t hh = 0; hh < config.numL0Partitions; ++hh) {
-                CHK_Z( db->compactL0(jungle::CompactOptions(), hh) );
-            }
-            CHK_Z( db->flushLogs() );
-        }
-    }
-
-    // Get all records with the given prefix.
-    for (size_t ii = 0; ii < NUM; ++ii) {
-        TestSuite::setInfo("ii = %zu", ii);
-        size_t idx = ii;
-        std::string prefix_str = "key" + TestSuite::lzStr(5, idx);
-        std::list<jungle::Record> recs_out;
-        auto cb_func = [&](const jungle::SearchCbParams& params) ->
-                       jungle::SearchCbDecision {
-            jungle::Record dst;
-            params.rec.copyTo(dst);
-            recs_out.push_back(dst);
-            return jungle::SearchCbDecision::NEXT;
-        };
-        CHK_Z( db->getRecordsByPrefix(jungle::SizedBuf(prefix_str), cb_func) );
-
-        CHK_EQ(ROUND_MAX, recs_out.size());
-        for (jungle::Record& rec: recs_out) rec.free();
-    }
-
-    // Same but stop in the middle.
-    const size_t STOP_AT = 5;
-    for (size_t ii = 0; ii < NUM; ++ii) {
-        TestSuite::setInfo("ii = %zu", ii);
-        size_t idx = ii;
-        std::string prefix_str = "key" + TestSuite::lzStr(5, idx);
-        std::list<jungle::Record> recs_out;
-        auto cb_func = [&](const jungle::SearchCbParams& params) ->
-                       jungle::SearchCbDecision {
-            jungle::Record dst;
-            params.rec.copyTo(dst);
-            recs_out.push_back(dst);
-            if (recs_out.size() >= STOP_AT) return jungle::SearchCbDecision::STOP;
-            return jungle::SearchCbDecision::NEXT;
-        };
-        CHK_Z( db->getRecordsByPrefix(jungle::SizedBuf(prefix_str), cb_func) );
-
-        CHK_EQ(STOP_AT, recs_out.size());
-        for (jungle::Record& rec: recs_out) rec.free();
-    }
-
-    // Exact match should work.
-    for (size_t round = 0; round < ROUND_MAX; ++round) {
-        for (size_t ii = 0; ii < NUM; ++ii) {
-            TestSuite::setInfo("round = %zu, ii = %zu", round, ii);
-            size_t idx = idx_arr[ii];
-            std::string key_str = "key" + TestSuite::lzStr(5, idx) + "_" +
-                                  TestSuite::lzStr(2, ROUND_MAX - round);
-            std::string val_str = "val" + TestSuite::lzStr(5, idx) + "_" +
-                                  TestSuite::lzStr(2, ROUND_MAX - round);
-            jungle::SizedBuf value_out;
-            jungle::SizedBuf::Holder h(value_out);
-            CHK_Z( db->get( jungle::SizedBuf(key_str), value_out ) );
-            CHK_EQ( val_str, value_out.toString() );
-        }
-    }
-
-    {   // Insert a record with new prefix, and keep it in log section.
-        std::string key_str = "key_newprefix";
-        std::string val_str = "val_newprefix";
-        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
-        CHK_Z( db->sync(false) );
-
-        // Search keys with the new prefix, the API should return OK.
-        bool cb_invoked = false;
-        auto cb_func = [&](const jungle::SearchCbParams& params) ->
-                       jungle::SearchCbDecision {
-            cb_invoked = true;
-            return jungle::SearchCbDecision::NEXT;
-        };
-        CHK_Z( db->getRecordsByPrefix(jungle::SizedBuf(key_str), cb_func) );
-        CHK_TRUE( cb_invoked );
-
-        // Flush it to table, now log section is empty.
-        CHK_Z( db->flushLogs() );
-
-        cb_invoked = false;
-        CHK_Z( db->getRecordsByPrefix(jungle::SizedBuf(key_str), cb_func) );
-        CHK_TRUE( cb_invoked );
-
-        // Find non-existing key.
-        std::string ne_key_str = "non_existing_key";
-        cb_invoked = false;
-        s = db->getRecordsByPrefix(jungle::SizedBuf(ne_key_str), cb_func);
-        CHK_EQ( jungle::Status::KEY_NOT_FOUND, s.getValue() );
-        CHK_FALSE( cb_invoked );
-
-    }
-
-    CHK_Z(jungle::DB::close(db));
-    CHK_Z(jungle::shutdown());
-
-    TEST_SUITE_CLEANUP_PATH();
-    return 0;
-}
-
 int kmv_get_memory_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -2933,118 +2386,6 @@ int compaction_by_fast_scan_test() {
     return 0;
 }
 
-int common_prefix_l1_flush_by_fast_scan_test() {
-    std::string filename;
-    TEST_SUITE_PREPARE_PATH(filename);
-
-    jungle::Status s;
-    jungle::DBConfig config;
-    TEST_CUSTOM_DB_CONFIG(config);
-    jungle::DB* db;
-
-    config.maxEntriesInLogFile = 1000;
-    config.bloomFilterBitsPerUnit = 10;
-    config.minFileSizeToCompact = 65536;
-    CHK_Z(jungle::DB::open(&db, filename, config));
-
-    const size_t NUM = 10000;
-
-    auto get_key = [&](size_t idx) -> std::string {
-        std::string key_str;
-        if (idx < 2500) {
-            key_str = "prefix1_user_transaction_" + TestSuite::lzStr(9, idx);
-        } else if (idx < 5000) {
-            key_str = "prefix2_user_sessions_2021-01-01_" +
-                      TestSuite::lzStr(9, idx);
-        } else if (idx < 7500) {
-            key_str = "prefix2_user_sessions_2021-01-02_" +
-                      TestSuite::lzStr(9, idx);
-        } else {
-            key_str = "prefix2_user_sessions_2021-01-03_" +
-                      TestSuite::lzStr(9, idx);
-        }
-        return key_str;
-    };
-
-    // Insert key-value pair.
-    for (size_t ii = 0; ii < NUM; ++ii) {
-        size_t idx = ii;
-        std::string key_str = get_key(idx);
-        std::string val_str = "val" + TestSuite::lzStr(9, idx);
-        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
-    }
-
-    auto verify_func = [&](bool verify_new_key) -> int {
-        for (size_t ii = 0; ii < NUM; ++ii) {
-            TestSuite::setInfo("old key %zu", ii);
-            std::string key_str = get_key(ii);;
-            std::string val_str = "val" + TestSuite::lzStr(9, ii);
-
-            jungle::SizedBuf value_out;
-            jungle::SizedBuf::Holder h(value_out);
-            CHK_Z( db->get(key_str, value_out) );
-            CHK_EQ(val_str, value_out.toString());
-        }
-
-        if (verify_new_key) {
-            for (size_t ii = 0; ii < NUM; ++ii) {
-                TestSuite::setInfo("new key %zu", ii);
-                std::string key_str = "prefix2_user_sessions_2021-01-04_" +
-                                      TestSuite::lzStr(9, ii);
-                std::string val_str = "val" + TestSuite::lzStr(9, ii);
-
-                jungle::SizedBuf value_out;
-                jungle::SizedBuf::Holder h(value_out);
-                CHK_Z( db->get(key_str, value_out) );
-                CHK_EQ(val_str, value_out.toString());
-            }
-        }
-
-        return 0;
-    };
-
-    // Flush to L0.
-    db->sync(false);
-    db->flushLogs();
-
-    // Flush to L1 and verify.
-    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
-        CHK_Z( db->compactL0(jungle::CompactOptions(), ii) );
-    }
-    // Verify keys.
-    CHK_Z(verify_func(false));
-
-    // Close and reopen with fast index scan option.
-    CHK_Z(jungle::DB::close(db));
-    config.fastIndexScan = true;
-    CHK_Z(jungle::DB::open(&db, filename, config));
-
-    // Insert new key sets with newer date.
-    for (size_t ii = 0; ii < NUM; ++ii) {
-        size_t idx = ii;
-        std::string key_str = "prefix2_user_sessions_2021-01-04_" +
-                              TestSuite::lzStr(9, idx);
-        std::string val_str = "val" + TestSuite::lzStr(9, idx);
-        CHK_Z( db->set( jungle::KV(key_str, val_str) ) );
-    }
-    // Flush to L0.
-    db->sync(false);
-    db->flushLogs();
-
-    // Flush to L1 and verify.
-    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
-        CHK_Z( db->compactL0(jungle::CompactOptions(), ii) );
-    }
-    // Verify keys, including newly inserted ones.
-    CHK_Z(verify_func(true));
-
-    CHK_Z(jungle::DB::close(db));
-    CHK_Z(jungle::shutdown());
-
-    TEST_SUITE_CLEANUP_PATH();
-    return 0;
-}
-
 int key_length_limit_for_hash_test(size_t hash_len) {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -3216,6 +2557,9 @@ int sample_key_test() {
     return 0;
 }
 
+}
+using namespace basic_op_test;
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -3239,13 +2583,6 @@ int main(int argc, char** argv) {
     ts.doTest("purge only test", purge_only_test);
     ts.doTest("meta test log", meta_test_log);
     ts.doTest("meta test table", meta_test_table);
-    ts.doTest("async flush test", async_flush_test);
-    ts.doTest("async flush verbose test", async_flush_verbose_test,
-              TestRange<bool>( {false, true} ) );
-    ts.doTest("async flush verbose with delay test",
-              async_flush_verbose_with_delay_test,
-              TestRange<bool>( { true } ) );
-    ts.doTest("flush beyond sync test", flush_beyond_sync_test);
     ts.doTest("get stat test", get_stat_test);
     ts.doTest("double shutdown test", double_shutdown_test);
     ts.doTest("reopen empty db test", reopen_empty_db_test);
@@ -3261,16 +2598,9 @@ int main(int argc, char** argv) {
     SET_PARAMS(discard_test_args);
     ts.doTest("discard dirty test", discard_test, discard_test_args);
 
-    ts.doTest("get nearest test",
-              get_nearest_test,
-              TestRange<int>(0, 4, 1, StepType::LINEAR));
-    ts.doTest("get by prefix test",
-              get_by_prefix_test, TestRange<size_t>( {0, 8, 16} ));
     ts.doTest("kmv get memory test", kmv_get_memory_test);
     ts.doTest("immediate purging test", immediate_purging_test);
     ts.doTest("compaction by fast scan test", compaction_by_fast_scan_test);
-    ts.doTest("common prefix L1 flush by fast scan test",
-              common_prefix_l1_flush_by_fast_scan_test);
     ts.doTest("key length limit for hash test",
               key_length_limit_for_hash_test, TestRange<size_t>( {24, 8, 7, 0} ));
     ts.doTest("sample key test", sample_key_test);

@@ -98,9 +98,15 @@ endif()
 
 if (TESTSUITE_NO_COLOR GREATER 0)
     add_definitions(-DTESTSUITE_NO_COLOR=1)
+    message(STATUS "---- MONOCOLOR TESTSUITE ----")
 endif()
 
-file(COPY ${CMAKE_SOURCE_DIR}/scripts/runtests.sh
+if (LOGGER_NO_BACKTRACE GREATER 0)
+    add_definitions(-DLOGGER_NO_BACKTRACE=1)
+    message(STATUS "---- NO BACKTRACE BY LOGGER ----")
+endif()
+
+file(COPY ${PROJECT_SOURCE_DIR}/scripts/runtests.sh
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 # === CUSTOM LOGGER ===
@@ -108,7 +114,7 @@ file(COPY ${CMAKE_SOURCE_DIR}/scripts/runtests.sh
 if (LOGGER_PATH)
     set(LOGGER_CC_FILE "${LOGGER_PATH}/logger.cc")
     set(LOGGER_HEADER_FILE "${LOGGER_PATH}/logger.h")
-else ()
+elseif (NOT LOGGER_CC_FILE)
     set(LOGGER_CC_FILE "${ROOT_SRC}/logger.cc")
     set(LOGGER_HEADER_FILE "${ROOT_SRC}/logger.h")
 endif ()
@@ -150,6 +156,7 @@ set(JUNGLE_CORE
     ${ROOT_SRC}/internal_helper.cc
     ${ROOT_SRC}/iterator.cc
     ${ROOT_SRC}/jungle.cc
+    ${ROOT_SRC}/jungle_builder.cc
     ${ROOT_SRC}/log_file.cc
     ${ROOT_SRC}/log_iterator.cc
     ${ROOT_SRC}/log_manifest.cc
@@ -187,6 +194,7 @@ set(JUNGLE_DEPS
     ${LIBDL})
 
 add_library(static_lib ${JUNGLE_CORE})
+target_include_directories(static_lib PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(static_lib ${JUNGLE_DEPS})
 set_target_properties(static_lib PROPERTIES OUTPUT_NAME jungle
                       CLEAN_DIRECT_OUTPUT 1)
@@ -207,7 +215,10 @@ if (CODE_COVERAGE GREATER 0)
                      fileops_test
                      fileops_directio_test
                      memtable_test
+                     table_test
                      basic_op_test
+                     sync_and_flush_test
+                     nearest_search_test
                      seq_itr_test
                      key_itr_test
                      snapshot_test

@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include "internal_helper.h"
 #include "worker_mgr.h"
 
 #include <libjungle/jungle.h>
@@ -72,16 +73,22 @@ private:
 
 class Flusher : public WorkerBase {
 public:
+    enum FlusherType { GENERIC = 0x0, FLUSH_ON_DEMAND = 0x1, FLUSH_ON_CONDITION = 0x2 };
+
     struct FlusherOptions : public WorkerOptions {
     };
 
-    Flusher(const std::string& _w_name,
-            const GlobalConfig& _config);
+    Flusher(const std::string& w_name,
+            const GlobalConfig& g_config,
+            FlusherType f_type = FlusherType::GENERIC);
     ~Flusher();
     void work(WorkerOptions* opt_base);
 
+    void calcGlobalThrottling(size_t total_num_log_files);
+
     GlobalConfig gConfig;
     size_t lastCheckedFileIndex;
+    FlusherType type;
 };
 
 

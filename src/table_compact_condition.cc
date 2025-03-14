@@ -49,7 +49,7 @@ Status TableMgr::pickVictimTable(size_t level,
     bool d_params_effective = db_mgr->isDebugParamEffective();
 
     const DBConfig* db_config = getDbConfig();
-    uint64_t MAX_TABLE_SIZE = db_config->getMaxTableSize(level);
+    const uint64_t MAX_TABLE_SIZE = db_config->getMaxTableSize(level);
 
     std::list<TableInfo*> tables;
     SizedBuf empty_key;
@@ -94,7 +94,6 @@ Status TableMgr::pickVictimTable(size_t level,
 
         uint64_t w_size = t_stats.workingSetSizeByte;
         uint64_t t_size = t_stats.totalSizeByte;
-        size_t stack_size = 1;
 
         // If stack exists, sum up all.
         TableStack* stack = t_info->stack;
@@ -107,7 +106,6 @@ Status TableMgr::pickVictimTable(size_t level,
 
                 w_size += t_stats.workingSetSizeByte;
                 t_size += t_stats.totalSizeByte;
-                stack_size++;
             }
         }
 
@@ -200,12 +198,12 @@ Status TableMgr::pickVictimTable(size_t level,
         bool do_merge = false;
         if (min_wss < std::numeric_limits<uint64_t>::max()) {
             if (honor_limit) {
-                if(min_wss < wss_avg * 0.2) {
+                if(min_wss <= wss_avg * 0.2) {
                     // If we honor the limit, merge the table if the smallest
                     // table's WSS is smaller than 20% of average.
                     do_merge = true;
                 }
-                if (wss_avg < MAX_TABLE_SIZE * 0.4) {
+                if (wss_avg <= MAX_TABLE_SIZE * 0.4) {
                     // If average WSS is smaller than 40% of max table size,
                     // there are more tables than expected.
                     // Merge tables whose size is lower than average, ONLY WHEN
@@ -223,10 +221,15 @@ Status TableMgr::pickVictimTable(size_t level,
                             TableStats src_stats, dst_stats;
                             tt->file->getStats(src_stats);
                             dst_table->file->getStats(dst_stats);
-                            if ( src_stats.workingSetSizeByte &&
-                                 dst_stats.workingSetSizeByte &&
-                                 src_stats.workingSetSizeByte < wss_avg &&
-                                 dst_stats.workingSetSizeByte < wss_avg * 1.6 ) {
+                            if ( src_stats.totalSizeByte &&
+                                 dst_stats.totalSizeByte &&
+                                 ( ( src_stats.workingSetSizeByte <= wss_avg &&
+                                     dst_stats.workingSetSizeByte <= wss_avg * 1.6 ) ||
+                                   ( db_config->minWssToMerge &&
+                                     src_stats.workingSetSizeByte <=
+                                         db_config->minWssToMerge )
+                                 )
+                               ) {
                                 _log_info(
                                     myLog, "merge by small level average, "
                                     "victim table %zu, wss %zu (%s), "

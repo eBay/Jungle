@@ -30,6 +30,11 @@ add_executable(memtable_test ${MEMTABLE_TEST})
 target_link_libraries(memtable_test ${JUNGLE_TEST_DEPS})
 add_dependencies(memtable_test static_lib)
 
+set(TABLE_TEST ${TEST_DIR}/unit/table_test.cc)
+add_executable(table_test ${TABLE_TEST})
+target_link_libraries(table_test ${JUNGLE_TEST_DEPS})
+add_dependencies(table_test static_lib)
+
 set(CRC32_TEST ${TEST_DIR}/unit/crc32_test.cc)
 add_executable(crc32_test ${CRC32_TEST})
 target_link_libraries(crc32_test ${JUNGLE_TEST_DEPS})
@@ -51,6 +56,16 @@ set(BASIC_OP_TEST ${TEST_DIR}/jungle/basic_op_test.cc)
 add_executable(basic_op_test ${BASIC_OP_TEST})
 target_link_libraries(basic_op_test ${JUNGLE_TEST_DEPS})
 add_dependencies(basic_op_test static_lib)
+
+set(SYNC_AND_FLUSH_TEST ${TEST_DIR}/jungle/sync_and_flush_test.cc)
+add_executable(sync_and_flush_test ${SYNC_AND_FLUSH_TEST})
+target_link_libraries(sync_and_flush_test ${JUNGLE_TEST_DEPS})
+add_dependencies(sync_and_flush_test static_lib)
+
+set(NEAREST_SEARCH_TEST ${TEST_DIR}/jungle/nearest_search_test.cc)
+add_executable(nearest_search_test ${NEAREST_SEARCH_TEST})
+target_link_libraries(nearest_search_test ${JUNGLE_TEST_DEPS})
+add_dependencies(nearest_search_test static_lib)
 
 set(BUILDER_TEST ${TEST_DIR}/jungle/builder_test.cc)
 add_executable(builder_test ${BUILDER_TEST})

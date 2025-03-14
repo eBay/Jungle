@@ -34,12 +34,12 @@ LogMgr::Iterator::~Iterator() {
     close();
 }
 
-void LogMgr::Iterator::addLogFileItr(LogFileInfo* l_info) {
+void LogMgr::Iterator::addLogFileItr(LogFileInfo* l_info, bool is_log_store_snapshot) {
     LogFile::Iterator* l_itr = new LogFile::Iterator();
     if (type == BY_SEQ) {
-        l_itr->initSN(l_info->file, minSeqSnap, maxSeqSnap);
+        l_itr->initSN(l_info->file, minSeqSnap, maxSeqSnap, is_log_store_snapshot);
     } else if (type == BY_KEY) {
-        l_itr->init(l_info->file, startKey, endKey, maxSeqSnap);
+        l_itr->init(l_info->file, startKey, endKey, minSeqSnap, maxSeqSnap);
     }
 
     ItrItem* ctx = new ItrItem();
@@ -93,8 +93,6 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
     // No log yet.
     if (!s) return s;
 
-    if (valid_number(min_seq) && minSeqSnap < min_seq) minSeqSnap = min_seq;
-    if (valid_number(max_seq) && max_seq < maxSeqSnap) maxSeqSnap = max_seq;
     if (snap_handle) {
         assert(snap_handle->sn);
         if (maxSeqSnap > snap_handle->sn->chkNum) {
@@ -104,6 +102,8 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
             minSeqSnap = snap_handle->sn->lastFlush;
         }
     }
+    if (valid_number(min_seq) && minSeqSnap < min_seq) minSeqSnap = min_seq;
+    if (valid_number(max_seq) && max_seq < maxSeqSnap) maxSeqSnap = max_seq;
 
     // WARNING:
     //   The same as the comment in `LogMgr::get()`,
@@ -136,7 +136,14 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
         assert(snap_handle->sn->logList);
         for (auto& entry: *snap_handle->sn->logList) {
             LogFileInfo* l_info = entry;
-            addLogFileItr(l_info);
+            if (lMgr->getDbConfig()->logSectionOnly) {
+                if ( l_info->file->getMinSeqNum() > maxSeqSnap ||
+                     l_info->file->getMaxSeqNum() < minSeqSnap ) {
+                    continue;
+                }
+                l_info->grab(true);
+            }
+            addLogFileItr(l_info, lMgr->getDbConfig()->logSectionOnly);
         }
         snapLogList = snap_handle->sn->logList;
     }
@@ -159,7 +166,11 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
             uint64_t max_seq_log;
             s = lMgr->mani->getLogFileNumBySeq(maxSeqSnap, max_seq_log);
             if (s) {
-                l_num_max=  max_seq_log;
+                // WARNING:
+                //   `l_num_max` should always be equal to or greater than
+                //   `l_num_min`. The inversion can happen when there are
+                //   2 files, and `l_num_min` file contains nothing.
+                l_num_max = std::max(l_num_min, max_seq_log);
             }
         }
 
@@ -190,7 +201,7 @@ Status LogMgr::Iterator::initInternal(DB* snap_handle,
                 avl_init(&curWindow, curWindow.aux);
                 break;
             }
-            addLogFileItr(l_info);
+            addLogFileItr(l_info, false);
         }
 
         if (retry_init) continue;
@@ -593,8 +604,8 @@ Status LogMgr::Iterator::close() {
         ItrItem* ctx = entry;
         ctx->lItr->close();
         delete ctx->lItr;
-        if (!snapLogList) {
-            // Only when not a snapshot.
+        if (!snapLogList || lMgr->getDbConfig()->logSectionOnly) {
+            // When 1) not a snapshot, or 2) snapshot in log store mode.
             ctx->lInfo->done();
         }
         delete ctx;

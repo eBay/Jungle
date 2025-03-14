@@ -268,6 +268,17 @@ TableFile::~TableFile() {
     DELETE(tlbByKey);
 }
 
+Status TableFile::toJungleStatus(fdb_status fdb_s) {
+    switch (fdb_s) {
+    case FDB_RESULT_CHECKSUM_ERROR:
+        return Status::CHECKSUM_ERROR;
+    case FDB_RESULT_FILE_CORRUPTION:
+        return Status::FILE_CORRUPTION;
+    default:
+        return Status::ERROR;
+    }
+}
+
 std::string TableFile::getTableFileName(const std::string& path,
                                         uint64_t prefix_num,
                                         uint64_t table_file_num)
@@ -892,7 +903,7 @@ Status TableFile::setSingle(uint32_t key_hash_val,
         // Immediate purging option,
         // only for the bottom-most non-zero level.
         InternalMeta i_meta_from_rec;
-        readInternalMeta(rec.meta, i_meta_from_rec);
+        readInternalMeta(SizedBuf(doc.metalen, doc.meta), i_meta_from_rec);
         if (i_meta_from_rec.isTombstone || force_delete) {
             fs = fdb_del(kvs_db, &doc);
             deletion_executed = true;
@@ -1146,7 +1157,12 @@ Status TableFile::get(DB* snap_handle,
         }
     }
     if (fs != FDB_RESULT_SUCCESS) {
-        return Status::KEY_NOT_FOUND;
+        if (fs == FDB_RESULT_KEY_NOT_FOUND) {
+            return Status::KEY_NOT_FOUND;
+        }
+        // Otherwise, error.
+        _log_err(myLog, "fdb_get failed: %d", fs);
+        return toJungleStatus(fs);
     }
 
    try {
@@ -1274,7 +1290,12 @@ Status TableFile::getNearest(DB* snap_handle,
         }
     }
     if (fs != FDB_RESULT_SUCCESS) {
-        return Status::KEY_NOT_FOUND;
+        if (fs == FDB_RESULT_KEY_NOT_FOUND) {
+            return Status::KEY_NOT_FOUND;
+        }
+        // Otherwise, error.
+        _log_err(myLog, "fdb_get failed: %d", fs);
+        return toJungleStatus(fs);
     }
 
    try {
@@ -1367,7 +1388,12 @@ Status TableFile::getPrefix(DB* snap_handle,
                              doc,
                              nearest_opt);
         if (fs != FDB_RESULT_SUCCESS) {
-            return Status::KEY_NOT_FOUND;
+            if (fs == FDB_RESULT_KEY_NOT_FOUND) {
+                return Status::KEY_NOT_FOUND;
+            }
+            // Otherwise, error.
+            _log_err(myLog, "fdb_get failed: %d", fs);
+            return toJungleStatus(fs);
         }
 
         // Find next greater key.

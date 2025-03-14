@@ -35,7 +35,7 @@ TableMgr::Iterator::~Iterator() {
     close();
 }
 
-void TableMgr::Iterator::addTableItr(DB* snap_handle, TableInfo* t_info) {
+Status TableMgr::Iterator::addTableItr(DB* snap_handle, TableInfo* t_info) {
     // Open iterator.
     TableFile::Iterator* t_itr = new TableFile::Iterator();
     if (type == BY_SEQ) {
@@ -47,6 +47,8 @@ void TableMgr::Iterator::addTableItr(DB* snap_handle, TableInfo* t_info) {
     ItrItem* ctx = new ItrItem();
     ctx->tInfo = t_info;
     ctx->tItr = t_itr;
+    tables[t_info->level].push_back(ctx);
+
     // If this iterator is out-of-range, `lastRec` will be empty.
     Status s = t_itr->get(ctx->lastRec);
     if (s) {
@@ -55,8 +57,11 @@ void TableMgr::Iterator::addTableItr(DB* snap_handle, TableInfo* t_info) {
                                  ? (ItrItem::cmpSeq)
                                  : (ItrItem::cmpKey);
         avl_insert(&curWindow, &ctx->an, cmp_func);
+    } else if (s == Status::CHECKSUM_ERROR || s == Status::FILE_CORRUPTION) {
+        // Intolerable error.
+        return s;
     }
-    tables[t_info->level].push_back(ctx);
+    return Status::OK;
 }
 
 Status TableMgr::Iterator::init(DB* snap_handle,
@@ -112,17 +117,28 @@ Status TableMgr::Iterator::initInternal(DB* snap_handle,
     endKey.alloc(end_key);
 
    try {
+    Status s;
     size_t n_levels = tMgr->mani->getNumLevels();
     tables.resize(n_levels);
 
     if (snap_handle) {
         // Snapshot
         assert(snap_handle->sn->tableList);
+        Status failed;
         for (auto& entry: *snap_handle->sn->tableList) {
             TableInfo* t_info = entry;
-            addTableItr(snap_handle, t_info);
+            // WARNING:
+            //   We should do `addTableItr` for all tables in `t_info_ret`,
+            //   to let them be closed during `close()` call.
+            s = addTableItr(snap_handle, t_info);
+            if (failed.ok() && !s.ok()) failed = s;
         }
         snapTableList = snap_handle->sn->tableList;
+
+        if (!failed.ok()) {
+            TC(failed);
+        }
+
     } else {
         // Normal
         for (size_t ii=0; ii<n_levels; ++ii) {
@@ -134,9 +150,18 @@ Status TableMgr::Iterator::initInternal(DB* snap_handle,
                 tMgr->mani->getTablesRange(ii, start_key, end_key, t_info_ret);
             }
 
+            Status failed;
             for (auto& entry: t_info_ret) {
                 TableInfo* t_info = entry;
-                addTableItr(snap_handle, t_info);
+                // WARNING:
+                //   We should do `addTableItr` for all tables in `t_info_ret`,
+                //   to let them be closed during `close()` call.
+                s = addTableItr(snap_handle, t_info);
+                if (failed.ok() && !s.ok()) failed = s;
+            }
+
+            if (!failed.ok()) {
+                TC(failed);
             }
         }
     }
@@ -146,13 +171,13 @@ Status TableMgr::Iterator::initInternal(DB* snap_handle,
     return Status();
 
    } catch (Status s) {
-    startKey.free();
-    endKey.free();
+    close();
     return s;
    }
 }
 
 Status TableMgr::Iterator::get(Record& rec_out) {
+    if (!fatalError.ok()) return fatalError;
     if (!windowCursor) return Status::KEY_NOT_FOUND;
 
     ItrItem* item = _get_entry(windowCursor, ItrItem, an);
@@ -161,6 +186,8 @@ Status TableMgr::Iterator::get(Record& rec_out) {
 }
 
 Status TableMgr::Iterator::prev() {
+    if (!fatalError.ok()) return fatalError;
+
     Status s;
 
     ItrItem* cur_item = _get_entry(windowCursor, ItrItem, an);
@@ -187,13 +214,23 @@ Status TableMgr::Iterator::prev() {
             item->flags = ItrItem::none;
             item->lastRec.free();
             s = item->tItr->get(item->lastRec);
-            assert(s);
 
             avl_cmp_func* cmp_func = (type == BY_SEQ)
                                      ? (ItrItem::cmpSeq)
                                      : (ItrItem::cmpKey);
             avl_insert(&curWindow, &item->an, cmp_func);
             cursor = avl_last(&curWindow);
+
+            if (s == Status::CHECKSUM_ERROR || s == Status::FILE_CORRUPTION) {
+                // Intolerable error.
+                fatalError = s;
+                cur_key.free();
+
+                // To make next `get()` call return error,
+                // return this function without error.
+                return Status();
+            }
+
         } else {
             item->flags |= ItrItem::no_more_prev;
             cursor = avl_prev(&item->an);
@@ -234,6 +271,8 @@ Status TableMgr::Iterator::prev() {
 }
 
 Status TableMgr::Iterator::next() {
+    if (!fatalError.ok()) return fatalError;
+
     Status s;
 
     ItrItem* cur_item = _get_entry(windowCursor, ItrItem, an);
@@ -260,13 +299,23 @@ Status TableMgr::Iterator::next() {
             item->flags = ItrItem::none;
             item->lastRec.free();
             s = item->tItr->get(item->lastRec);
-            assert(s);
 
             avl_cmp_func* cmp_func = (type == BY_SEQ)
                                      ? (ItrItem::cmpSeq)
                                      : (ItrItem::cmpKey);
             avl_insert(&curWindow, &item->an, cmp_func);
             cursor = avl_first(&curWindow);
+
+            if (s == Status::CHECKSUM_ERROR || s == Status::FILE_CORRUPTION) {
+                // Intolerable error.
+                fatalError = s;
+                cur_key.free();
+
+                // To make next `get()` call return error,
+                // return this function without error.
+                return Status();
+            }
+
         } else {
             item->flags |= ItrItem::no_more_next;
             cursor = avl_next(&item->an);
@@ -295,7 +344,7 @@ Status TableMgr::Iterator::next() {
     cur_key.free();
     if (!windowCursor) {
         // Reached the end.
-        windowCursor = avl_last(&curWindow);
+        moveToLastValid();
         return Status::OUT_OF_RANGE;
     }
     return Status();
@@ -320,6 +369,39 @@ Status TableMgr::Iterator::gotoEnd() {
     return seekInternal(empty_key, 0, SMALLER, true);
 }
 
+Status TableMgr::Iterator::moveToLastValid() {
+    windowCursor = avl_last(&curWindow);
+    while (windowCursor) {
+        // Find *LAST* valid item (only for BY_KEY).
+        //
+        // e.g.)
+        //  ... Del K9 (seq 100), Ins K9 (seq 99)
+        //  We should pick up `Del K9`.
+        ItrItem* item = _get_entry(windowCursor, ItrItem, an);
+
+        if (type == BY_KEY) {
+            ItrItem* prev_item = nullptr;
+            avl_node* prev_cursor = avl_prev(windowCursor);
+            if (prev_cursor) prev_item = _get_entry(prev_cursor, ItrItem, an);
+
+            if (prev_item) {
+                int cmp = cmpSizedBuf( item->lastRec.kv.key,
+                                       prev_item->lastRec.kv.key );
+                if (cmp == 0) {
+                    // Same key, should take previous one.
+                    windowCursor = prev_cursor;
+                    continue;
+                }
+            }
+        }
+        break;
+#if 0
+        if (item->flags == ItrItem::none) break;
+        else windowCursor = avl_prev(windowCursor);
+#endif
+    }
+    return Status();
+}
 
 Status TableMgr::Iterator::seekInternal
        ( const SizedBuf& key,
@@ -405,14 +487,7 @@ Status TableMgr::Iterator::seekInternal
             else windowCursor = avl_next(windowCursor);
         }
     } else { // SMALLER
-        windowCursor = avl_last(&curWindow);
-        while (windowCursor) {
-            // Find *LAST* valid item (only for BY_KEY).
-            ItrItem* item = _get_entry(windowCursor, ItrItem, an);
-
-            if (item->flags == ItrItem::none) break;
-            else windowCursor = avl_prev(windowCursor);
-        }
+        moveToLastValid();
     }
 
     if (!windowCursor) {

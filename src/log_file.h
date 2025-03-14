@@ -93,7 +93,7 @@ public:
                      bool allow_flushed_log,
                      bool allow_tombstone);
 
-    Status flushMemTable(uint64_t upto = NOT_INITIALIZED);
+    Status flushMemTable(uint64_t upto, uint64_t& flushed_seq_out);
 
     Status purgeMemTable();
 
@@ -166,10 +166,12 @@ public:
         Status init(LogFile* l_file,
                     const SizedBuf& start_key,
                     const SizedBuf& end_key,
+                    const uint64_t seq_from,
                     const uint64_t seq_upto);
         Status initSN(LogFile* l_file,
                       const uint64_t min_seq,
-                      const uint64_t max_seq);
+                      const uint64_t max_seq,
+                      bool is_log_store_snapshot);
         Status get(Record& rec_out);
         Status prev(bool allow_tombstone = false);
         Status next(bool allow_tombstone = false);

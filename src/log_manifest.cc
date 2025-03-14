@@ -153,6 +153,7 @@ LogManifest::LogManifest(LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops)
     : fOps(_f_ops)
     , fLogOps(_f_l_ops)
     , mFile(nullptr)
+    , mBackupFile(nullptr)
     , lastFlushedLog(NOT_INITIALIZED)
     , lastSyncedLog(NOT_INITIALIZED)
     , maxLogFileNum(NOT_INITIALIZED)
@@ -173,6 +174,10 @@ LogManifest::~LogManifest() {
 
     if (mFile) {
         delete mFile;
+    }
+
+    if (mBackupFile) {
+        delete mBackupFile;
     }
     // NOTE: Skip `logFilesBySeq` as they share the actual memory.
     skiplist_node* cursor = skiplist_begin(&logFiles);
@@ -475,8 +480,9 @@ Status LogManifest::clone(const std::string& dst_path) {
 Status LogManifest::store(bool call_fsync) {
     if (mFileName.empty() || !fOps) return Status::NOT_INITIALIZED;
 
-    if (call_fsync) {
-        // `fsync` is required: calls by multiple threads should be serialized.
+    if (call_fsync || logMgr->getDbConfig()->serializeMultiThreadedLogFlush) {
+        // `fsync` is required, or serialize option is on:
+        // calls by multiple threads should be serialized.
         std::unique_lock<std::mutex> l(mFileWriteLock);
         return storeInternal(call_fsync);
     } else {
@@ -558,6 +564,7 @@ Status LogManifest::storeInternal(bool call_fsync) {
     // We will skip the common data and write different part only,
     // to reduce disk IOs (assuming that memory comparison is faster than disk write).
     uint32_t first_diff_pos = 0;
+    bool need_truncate = !lenCachedManifest || lenCachedManifest > ss.pos();
 
     if (lenCachedManifest) {
         uint32_t min_len = std::min(cachedManifest.size, (uint32_t)ss.pos());
@@ -591,7 +598,9 @@ Status LogManifest::storeInternal(bool call_fsync) {
     lenCachedManifest = ss.pos();
 
     // Should truncate tail.
-    fOps->ftruncate(mFile, ss.pos());
+    if (need_truncate) {
+        fOps->ftruncate(mFile, ss.pos());
+    }
 
     bool backup_done = false;
     if (call_fsync) {
@@ -607,7 +616,7 @@ Status LogManifest::storeInternal(bool call_fsync) {
             // using the latest data.
             // Same as above, tolerate backup failure.
             Status s_backup = BackupRestore::backup
-                              ( fOps, mFileName, mani_buf,
+                              ( fOps, &mBackupFile, mFileName, mani_buf,
                                 ss.pos(),
                                 fullBackupRequired ? 0 : first_diff_pos,
                                 call_fsync );
@@ -670,6 +679,21 @@ Status LogManifest::getLogFileInfo(const uint64_t log_num,
     } else {
         info_out->grab(isLogReclaimerActive());
     }
+    skiplist_release_node(cursor);
+    return Status();
+}
+
+Status LogManifest::getLogFileInfoSnapshot(const uint64_t log_num,
+                                       LogFileInfo*& info_out)
+{
+    LogFileInfo query(log_num);
+    skiplist_node* cursor = skiplist_find(&logFiles, &query.snode);
+    if (!cursor) {
+        return Status::LOG_FILE_NOT_FOUND;
+    }
+    info_out = _get_entry(cursor, LogFileInfo, snode);
+    info_out->grabForSnapshot();
+
     skiplist_release_node(cursor);
     return Status();
 }

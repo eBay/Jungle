@@ -159,6 +159,8 @@ public:
 
     Status init(const TableMgrOptions& _options);
 
+    Status adjustNumL0Partitions();
+
     Status removeStaleFiles();
 
     Status shutdown();
@@ -285,7 +287,9 @@ public:
 
     uint64_t getBoosterLimit(size_t level) const;
 
-    bool isCompactionAllowed() const { return allowCompaction; }
+    bool isCompactionAllowed() const {
+        return allowCompaction || tableAdjInProgress;
+    }
 
     void setTableFile(std::list<Record*>& batch,
                       std::list<uint64_t>& checkpoints,
@@ -411,7 +415,7 @@ public:
             Record lastRec;
         };
 
-        void addTableItr(DB* snap_handle, TableInfo* t_info);
+        Status addTableItr(DB* snap_handle, TableInfo* t_info);
         Status initInternal(DB* snap_handle,
                             TableMgr* table_mgr,
                             uint64_t min_seq,
@@ -423,6 +427,7 @@ public:
                             const uint64_t seqnum,
                             SeekOption opt,
                             bool goto_end = false);
+        Status moveToLastValid();
         inline int cmpSizedBuf(const SizedBuf& l, const SizedBuf& r);
         bool checkValidBySeq(ItrItem* item,
                              const uint64_t cur_seq,
@@ -441,6 +446,9 @@ public:
         SizedBuf endKey;
         avl_tree curWindow;
         avl_node* windowCursor;
+
+        // Intolerable error detected. If set, we cannot proceed iteration.
+        Status fatalError;
     };
 
 protected:
@@ -514,14 +522,23 @@ protected:
     bool isLevelLocked(uint64_t l_number);
 
 // === VARIABLES
-    const size_t APPROX_META_SIZE;
+    static const size_t APPROX_META_SIZE;
 
     /**
      * Backward pointer to parent DB instance.
      */
     DB* parentDb;
 
+    /**
+     * If `false`, compaction is not allowed.
+     */
     std::atomic<bool> allowCompaction;
+
+    /**
+     * If `true`, internal adjustment is in progress. Temporarily allow
+     * compaction or other mutations, even though `allowCompaction == false`.
+     */
+    std::atomic<bool> tableAdjInProgress;
 
     TableMgrOptions opt;
     TableManifest* mani;

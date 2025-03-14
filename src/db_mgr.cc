@@ -23,6 +23,8 @@ limitations under the License.
 #include "internal_helper.h"
 #include "log_reclaimer.h"
 
+#include "libjungle/db_config.h"
+
 #include <set>
 
 #include _MACRO_TO_STR(LOGGER_H)
@@ -68,9 +70,40 @@ void DBMgr::printGlobalConfig() {
         _log_info(myLog, "idle time compaction disabled");
     }
 
+    if (gConfig.ltOpt.maxSleepTimeMs) {
+        _log_info(myLog, "global log throttling enabled, "
+                  "start and limit: %u, %u, "
+                  "max sleep time %u ms",
+                  gConfig.ltOpt.startNumLogs,
+                  gConfig.ltOpt.limitNumLogs,
+                  gConfig.ltOpt.maxSleepTimeMs);
+    } else {
+        _log_info(myLog, "global log throttling disabled");
+    }
+
     _log_info(myLog, "compaction throttling resolution %zu ms factor %zu",
               gConfig.ctOpt.resolution_ms,
               gConfig.ctOpt.throttlingFactor);
+
+    _log_info(myLog, "num flusher threads %zu, sleep time %zu ms, "
+              "dedicated flusher for async reqs %zu, "
+              "min records to flush %zu, min log files to flush %zu",
+              gConfig.numFlusherThreads,
+              gConfig.flusherSleepDuration_ms,
+              gConfig.numDedicatedFlusherForAsyncReqs,
+              gConfig.flusherMinRecordsToTrigger,
+              gConfig.flusherMinLogFilesToTrigger);
+
+    _log_info(myLog, "num compactor threads %zu, "
+              "num table writers %zu, "
+              "sleep time %zu ms",
+              gConfig.numCompactorThreads,
+              gConfig.numTableWriters,
+              gConfig.compactorSleepDuration_ms);
+
+    _log_info(myLog, "fdb cache size %zu, memtable flush buffer size %zu",
+              gConfig.fdbCacheSize,
+              gConfig.memTableFlushBufferSize);
 }
 
 void DBMgr::initInternal(const GlobalConfig& config) {
@@ -86,9 +119,35 @@ void DBMgr::initInternal(const GlobalConfig& config) {
 
     printGlobalConfig();
 
+    bool dedicated_async_flusher =
+        config.numDedicatedFlusherForAsyncReqs &&
+        config.numFlusherThreads > config.numDedicatedFlusherForAsyncReqs;
+
     for (size_t ii=0; ii<config.numFlusherThreads; ++ii) {
-        std::string t_name = "flusher_" + std::to_string(ii);
-        Flusher* flusher = new Flusher(t_name, config);
+        // If dedicated flusher is enabled, only the first
+        // `numDedicatedFlusherForAsyncReqs` flushers will handle async reqs.
+        Flusher::FlusherType flusher_type = Flusher::FlusherType::GENERIC;
+        if (dedicated_async_flusher) {
+            if (ii < config.numDedicatedFlusherForAsyncReqs) {
+                flusher_type = Flusher::FlusherType::FLUSH_ON_DEMAND;
+            } else {
+                flusher_type = Flusher::FlusherType::FLUSH_ON_CONDITION;
+            }
+        }
+        std::string t_name;
+        switch (flusher_type) {
+        case Flusher::FlusherType::FLUSH_ON_DEMAND:
+            t_name = "flusher_od_" + std::to_string(ii);
+            break;
+        case Flusher::FlusherType::FLUSH_ON_CONDITION:
+            t_name = "flusher_oc_" + std::to_string(ii);
+            break;
+        default:
+            t_name = "flusher_gen_" + std::to_string(ii);
+            break;
+        }
+
+        Flusher* flusher = new Flusher(t_name, config, flusher_type);
         wMgr->addWorker(flusher);
         flusher->run();
     }
@@ -159,7 +218,9 @@ DBMgr::DBMgr()
     , twMgr(new TableWriterMgr())
     , gbExecutor(new GlobalBatchExecutor())
     , debugCbEnabled(false)
+    , globalTime(0)
     , idleTraffic(false)
+    , globalThrottlingMs(0)
     , myLog(nullptr)
 {
     updateGlobalTime();

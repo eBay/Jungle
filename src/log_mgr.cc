@@ -43,6 +43,7 @@ LogMgr::LogMgr(DB* parent_db, const LogMgrOptions& lm_opt)
     , fwdVisibleSeqBarrier(0)
     , globalBatchStatus(nullptr)
     , numMemtables(0)
+    , needSkippedManiSync(false)
     , myLog(nullptr)
     , vlSync(VERBOSE_LOG_SUPPRESS_MS)
     {}
@@ -86,6 +87,13 @@ Status LogMgr::init(const LogMgrOptions& lm_opt) {
     }
 
    try {
+    // WARNING:
+    //   This flag should be set to `false` before doing initialization or load.
+    //   For the first time creation, the very first log file will be created,
+    //   and it should be synced to the disk. `addNewLogFile()` will set this
+    //   flag to `true`. It should not be set to `false` after that.
+    needSkippedManiSync = false;
+
     std::string m_filename;
     if (opt.dbConfig->customManifestPath.empty()) {
         // Normal open: manifest file in the same path.
@@ -144,6 +152,7 @@ Status LogMgr::init(const LogMgrOptions& lm_opt) {
             l_file->setSyncedSeqNum(opt.startSeqnum - 1);
         }
         TC(mani->addNewLogFile(log_num, l_file, 1));
+        needSkippedManiSync = true;
 
        } catch (Status s) {
         delete l_file;
@@ -202,10 +211,16 @@ void LogMgr::logMgrSettings() {
 
     _log_info( myLog,
                "initialized log manager, memtable flush buffer %zu, "
-               "direct-IO %s, custom hash length function %s",
+               "direct-IO %s, custom hash length function %s, "
+               "sync multi-threaded log flush %s, "
+               "skip manifest sync %s, "
+               "auto log flush %s",
                g_conf->memTableFlushBufferSize,
                get_on_off_str(opt.dbConfig->directIoOpt.enabled),
-               get_on_off_str((bool)opt.dbConfig->customLenForHash) );
+               get_on_off_str((bool)opt.dbConfig->customLenForHash),
+               get_on_off_str(opt.dbConfig->serializeMultiThreadedLogFlush),
+               get_on_off_str(opt.dbConfig->skipManifestSync),
+               get_on_off_str(opt.dbConfig->autoLogFlush) );
 }
 
 Status LogMgr::rollback(uint64_t seq_upto) {
@@ -215,7 +230,8 @@ Status LogMgr::rollback(uint64_t seq_upto) {
     DebugParams d_params = mgr->getDebugParams();
 
     // Return error in read-only mode.
-    if (getDbConfig()->readOnly) return Status::WRITE_VIOLATION;
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->readOnly) return Status::WRITE_VIOLATION;
 
     // WARNING:
     //   Both syncing (memtable -> log) and flushing (log -> table)
@@ -225,7 +241,7 @@ Status LogMgr::rollback(uint64_t seq_upto) {
     const size_t MAX_RETRY_MS = 1000; // 1 second.
     tt.setDurationMs(MAX_RETRY_MS);
 
-    OpSemaWrapper ow_sync(&syncSema);
+    OpSemaWrapper ow_sync(&syncSema, db_config->serializeMultiThreadedLogFlush);
     while (!ow_sync.acquire()) {
         if (tt.timeout()) {
             _log_err(myLog, "rollback timeout due to sync");
@@ -233,9 +249,9 @@ Status LogMgr::rollback(uint64_t seq_upto) {
         }
         Timer::sleepMs(10);
     }
-    assert(ow_sync.op_sema->enabled);
+    assert(ow_sync.opSema->enabled);
 
-    OpSemaWrapper ow_flush(&flushSema);
+    OpSemaWrapper ow_flush(&flushSema, db_config->serializeMultiThreadedLogFlush);
     while (!ow_flush.acquire()) {
         if (tt.timeout()) {
             _log_err(myLog, "rollback timeout due to flush");
@@ -243,9 +259,9 @@ Status LogMgr::rollback(uint64_t seq_upto) {
         }
         Timer::sleepMs(10);
     }
-    assert(ow_flush.op_sema->enabled);
+    assert(ow_flush.opSema->enabled);
 
-    OpSemaWrapper ow_reclaim(&reclaimSema);
+    OpSemaWrapper ow_reclaim(&reclaimSema, db_config->serializeMultiThreadedLogFlush);
     while (!ow_reclaim.acquire()) {
         if (tt.timeout()) {
             _log_err(myLog, "rollback timeout due to reclaim");
@@ -253,7 +269,7 @@ Status LogMgr::rollback(uint64_t seq_upto) {
         }
         Timer::sleepMs(10);
     }
-    assert(ow_reclaim.op_sema->enabled);
+    assert(ow_reclaim.opSema->enabled);
 
     _log_info(myLog, "[ROLLBACK] upto %zu", seq_upto);
 
@@ -391,19 +407,34 @@ Status LogMgr::openSnapshot(DB* snap_handle,
     EP( mani->getMinLogFileNum(l_num_min) );
     EP( mani->getLogFileNumBySeq(checkpoint, l_num_max) );
 
+    bool log_store_mode = getDbConfig()->logSectionOnly;
     bool retry_init = false;
     for (uint64_t ii = l_num_min; ii <= l_num_max; ++ii) {
         LogFileInfo* l_info = nullptr;
-        s = mani->getLogFileInfo(ii, l_info);
+        if (log_store_mode) {
+            s = mani->getLogFileInfoSnapshot(ii, l_info);
+        } else {
+            s = mani->getLogFileInfo(ii, l_info);
+        }
 
         if (!s || l_info->isRemoved()) {
             // `l_num_min` is invalid. Retry.
             // Free all resources.
             for (auto& entry: *l_list) {
                 LogFileInfo* item = entry;
-                item->done();
+                if (log_store_mode) {
+                    item->doneForSnapshot();
+                } else {
+                    item->done();
+                }
             }
-            if (s) l_info->done();
+            if (s) {
+                if (log_store_mode) {
+                    l_info->doneForSnapshot();
+                } else {
+                    l_info->done();
+                }
+            }
 
             retry_init = true;
             break;
@@ -420,6 +451,7 @@ Status LogMgr::openSnapshot(DB* snap_handle,
 
 Status LogMgr::closeSnapshot(DB* snap_handle) {
     Status s;
+    bool log_store_mode = getDbConfig()->logSectionOnly;
     LogFileList* l_list = nullptr;
     {   mGuard l(sMapLock);
         auto entry = sMap.find(snap_handle);
@@ -430,7 +462,11 @@ Status LogMgr::closeSnapshot(DB* snap_handle) {
 
     for (auto& entry: *l_list) {
         LogFileInfo* info = entry;
-        info->done();
+        if (log_store_mode) {
+            info->doneForSnapshot();
+        } else {
+            info->done();
+        }
     }
     delete l_list;
     return Status();
@@ -453,6 +489,8 @@ Status LogMgr::cloneManifest(DB* snap_handle,
 Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
                              LogFileInfoGuard& new_log_file_info)
 {
+    const DBConfig* db_config = getDbConfig();
+
     std::unique_lock<std::mutex> ll(addNewLogFileMutex);
     Status s;
 
@@ -488,8 +526,10 @@ Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
         _log_info(myLog, "moved to a new log file %ld, start seq %s",
                   new_log_num, _seq_str(start_seqnum).c_str());
 
-        // Sync manifest file.
-        mani->store(false);
+        if (!db_config->skipManifestSync) {
+            // Sync manifest file.
+            mani->store(false);
+        }
 
     } else {
         // Otherwise, other thread already added a new log file.
@@ -504,40 +544,53 @@ Status LogMgr::addNewLogFile(LogFileInfoGuard& cur_log_file_info,
 
     new_log_file_info = LogFileInfoGuard(lf_info);
 
+    // Next `sync()` call should sync manifest file, regardless of `skipManifestSync`.
+    needSkippedManiSync = true;
     return Status();
 }
 
 void LogMgr::execBackPressure(uint64_t elapsed_us) {
-    if (throttlingRate > 0) {
-        DBMgr* mgr = DBMgr::getWithoutInit();
-        GlobalConfig* g_config = mgr->getGlobalConfig();
+    DBMgr* mgr = DBMgr::getWithoutInit();
+    GlobalConfig* g_config = mgr->getGlobalConfig();
 
-        // Throttling.
-        double exp_us = 1000000.0 / throttlingRate.load();
-
-        size_t effective_time_ms =
-            std::min( lastFlushIntervalMs.load(),
-                      (int64_t)THROTTLING_EFFECTIVE_TIME_MS );
-        size_t num_log_files = mani->getNumLogFiles();
-        size_t log_files_limit = g_config->flusherMinLogFilesToTrigger * 2;
-        if (num_log_files > log_files_limit) {
-            effective_time_ms *= (num_log_files - log_files_limit);
+    if (g_config->ltOpt.maxSleepTimeMs) {
+        uint32_t global_throttling_ms = mgr->getGlobalThrottling();
+        if (global_throttling_ms) {
+            // Global throttling is enabled.
+            // Do not apply local throttling.
+            _log_trace(myLog, "global throttling %u ms", global_throttling_ms);
+            Timer::sleepMs(global_throttling_ms);
+            return;
         }
+    }
 
-        uint64_t throttle_age_ms = throttlingRateTimer.getUs() / 1000;
-        if ( effective_time_ms &&
-             throttle_age_ms < effective_time_ms ) {
-            // Should consider age.
-            exp_us *= (effective_time_ms - throttle_age_ms);
-            exp_us /= effective_time_ms;
+    if (throttlingRate == 0) return;
 
-            double cur_us = elapsed_us;
-            if ( exp_us > cur_us ) {
-                // Throttle incoming writes.
-                double remaining_us = exp_us - cur_us;
-                if (remaining_us > 1.0) {
-                    Timer::sleepUs((uint64_t)remaining_us);
-                }
+    // Throttling.
+    double exp_us = 1000000.0 / throttlingRate.load();
+
+    size_t effective_time_ms =
+        std::min( lastFlushIntervalMs.load(),
+                  (int64_t)THROTTLING_EFFECTIVE_TIME_MS );
+    size_t num_log_files = mani->getNumLogFiles();
+    size_t log_files_limit = g_config->flusherMinLogFilesToTrigger * 2;
+    if (num_log_files > log_files_limit) {
+        effective_time_ms *= (num_log_files - log_files_limit);
+    }
+
+    uint64_t throttle_age_ms = throttlingRateTimer.getUs() / 1000;
+    if ( effective_time_ms &&
+         throttle_age_ms < effective_time_ms ) {
+        // Should consider age.
+        exp_us *= (effective_time_ms - throttle_age_ms);
+        exp_us /= effective_time_ms;
+
+        double cur_us = elapsed_us;
+        if ( exp_us > cur_us ) {
+            // Throttle incoming writes.
+            double remaining_us = exp_us - cur_us;
+            if (remaining_us > 1.0) {
+                Timer::sleepUs((uint64_t)remaining_us);
             }
         }
     }
@@ -1023,6 +1076,8 @@ Status LogMgr::getNearest(const uint64_t chk,
     return Status();
 }
 
+#if 0
+// Deprecated: naive implementation without ordering.
 Status LogMgr::getPrefix(const uint64_t chk,
                          std::list<LogFileInfo*>* l_list,
                          const SizedBuf& prefix,
@@ -1097,6 +1152,49 @@ Status LogMgr::getPrefix(const uint64_t chk,
     return Status::OK;
 }
 
+#else
+// Iterator based implementation, which provides snapshot and key ordering.
+Status LogMgr::getPrefix(const uint64_t chk,
+                         std::list<LogFileInfo*>* l_list,
+                         const SizedBuf& prefix,
+                         SearchCbFunc cb_func)
+{
+    Status s;
+    Iterator itr;
+    SizedBuf dummy;
+
+    auto prefix_match = [prefix](const SizedBuf& key) -> bool {
+        if (key.size < prefix.size) return false;
+        return (SizedBuf::cmp( SizedBuf(prefix.size, key.data),
+                               prefix ) == 0);
+    };
+
+    // Create an iterator, starting from prefix.
+    s = itr.init(nullptr, this, prefix, dummy);
+    do {
+        Record rec;
+        s = itr.get(rec);
+        if (!s.ok()) {
+            break;
+        }
+
+        // Check if prefix matches.
+        if (!prefix_match(rec.kv.key)) {
+            break;
+        }
+
+        SearchCbDecision dec = cb_func({rec});
+        if (dec == SearchCbDecision::STOP) {
+            return Status::OPERATION_STOPPED;
+        }
+
+    } while (itr.next().ok());
+
+    return Status::OK;
+}
+
+#endif
+
 Status LogMgr::sync(bool call_fsync) {
     std::lock_guard<std::mutex> l(syncMutex);
     return syncNoWait(call_fsync);
@@ -1104,21 +1202,32 @@ Status LogMgr::sync(bool call_fsync) {
 
 Status LogMgr::syncNoWait(bool call_fsync) {
     // Return error in read-only mode.
-    if (getDbConfig()->readOnly) return Status::WRITE_VIOLATION;
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->readOnly) return Status::WRITE_VIOLATION;
 
     // Only one sync operation at a time.
-    OpSemaWrapper ow(&syncSema);
+    OpSemaWrapper ow(&syncSema, db_config->serializeMultiThreadedLogFlush);
     if (!ow.acquire()) {
         _log_debug(myLog, "Sync failed. Other thread is working on it.");
         return Status::OPERATION_IN_PROGRESS;
     }
-    assert(ow.op_sema->enabled);
+    assert(ow.opSema->enabled);
     return syncInternal(call_fsync);
 }
 
 Status LogMgr::syncInternal(bool call_fsync) {
     Status s;
     uint64_t ln_from, ln_to;
+
+    DBMgr* dbm = DBMgr::getWithoutInit();
+    if (dbm && dbm->isDebugCallbackEffective()) {
+        DebugParams dp = dbm->getDebugParams();
+        if (dp.syncCb) {
+            DebugParams::GenericCbParams p;
+            dp.syncCb(p);
+        }
+    }
+
     s = mani->getMaxLogFileNum(ln_to);
     if (!s) {
         // No log, do nothing.
@@ -1156,8 +1265,20 @@ Status LogMgr::syncInternal(bool call_fsync) {
         if (li.empty() || li.ptr->isRemoved()) continue;
 
         uint64_t before_sync = li->file->getSyncedSeqNum();
-        EP( li->file->flushMemTable( seq_barrier ? seq_barrier : NOT_INITIALIZED ) );
-        uint64_t after_sync = li->file->getSyncedSeqNum();
+        uint64_t after_sync = NOT_INITIALIZED;
+        EP( li->file->flushMemTable( (seq_barrier ? seq_barrier : NOT_INITIALIZED),
+                                     after_sync ) );
+        if (call_fsync) {
+            EP( li->file->sync() );
+        }
+
+        // WARNING:
+        //   We should update the syncedSeqNum after the sync() operation.
+        //   If sync() fails and we update syncedSeqNum beforehand, there's a
+        //   risk that the manifest might write an incorrect syncedSeqNum in
+        //   another call stack (e.g., addNewLogFile()). This could lead to
+        //   data loss in the event of a crash.
+        li->file->setSyncedSeqNum(after_sync);
         _log_( log_level, myLog, "synced log file %zu, min seq %s, "
                "flush seq %s, sync seq %s -> %s, max seq %s",
                ii,
@@ -1166,9 +1287,7 @@ Status LogMgr::syncInternal(bool call_fsync) {
                _seq_str( before_sync ).c_str(),
                _seq_str( after_sync ).c_str(),
                _seq_str( li->file->getMaxSeqNum() ).c_str() );
-        if (call_fsync) {
-            EP( li->file->sync() );
-        }
+
         if (valid_number(after_sync)) {
             last_synced_log = ii;
         }
@@ -1180,23 +1299,28 @@ Status LogMgr::syncInternal(bool call_fsync) {
 
     // Sync up manifest file next
     mani->setLastSyncedLog(last_synced_log);
-    EP( mani->store(call_fsync) );
-    _log_(log_level, myLog, "updated log manifest file.");
 
+    const DBConfig* db_config = getDbConfig();
+    if (!db_config->skipManifestSync || needSkippedManiSync) {
+        EP( mani->store(call_fsync) );
+        _log_(log_level, myLog, "updated log manifest file.");
+        needSkippedManiSync = false;
+    }
     return Status();
 }
 
 Status LogMgr::discardDirty(uint64_t seq_begin) {
     // Return error in read-only mode.
-    if (getDbConfig()->readOnly) return Status::WRITE_VIOLATION;
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->readOnly) return Status::WRITE_VIOLATION;
 
     // Should not race with sync.
-    OpSemaWrapper ow(&syncSema);
+    OpSemaWrapper ow(&syncSema, db_config->serializeMultiThreadedLogFlush);
     if (!ow.acquire()) {
         _log_debug(myLog, "discard failed. Other thread is working on it.");
         return Status::OPERATION_IN_PROGRESS;
     }
-    assert(ow.op_sema->enabled);
+    assert(ow.opSema->enabled);
 
     Status s;
     uint64_t ln_from, ln_to;
@@ -1243,12 +1367,13 @@ Status LogMgr::flush(const FlushOptions& options,
         return Status::INVALID_SEQNUM;
     }
 
-    OpSemaWrapper ow(&flushSema);
+    const DBConfig* db_config = getDbConfig();
+    OpSemaWrapper ow(&flushSema, db_config->serializeMultiThreadedLogFlush);
     if (!ow.acquire()) {
         _log_debug(myLog, "Flush skipped. Other thread is working on it.");
         return Status::OPERATION_IN_PROGRESS;
     }
-    assert(ow.op_sema->enabled);
+    assert(ow.opSema->enabled);
 
     Status s;
     Timer tt;
@@ -1288,11 +1413,31 @@ Status LogMgr::flush(const FlushOptions& options,
 
     if (seq_num_local == NOT_INITIALIZED) {
         // Purge all synced (checkpointed) logs.
-        LogFileInfoGuard ll(mani->getLogFileInfoP(ln_to, true));
-        if (options.beyondLastSync) {
-            seq_num_local = ll->file->getMaxSeqNum();
-        } else {
-            seq_num_local = ll->file->getSyncedSeqNum();
+
+        // WARNING:
+        //   `seq_num_local` shouldn't be `NOT_INITIALIZED`.
+        //   Otherwise, `setSyncedSeqNum(seq_num_local)` may store
+        //   incorrect sequence number.
+        while (true) {
+            LogFileInfoGuard ll(mani->getLogFileInfoP(ln_to, true));
+            if (options.beyondLastSync) {
+                seq_num_local = ll->file->getMaxSeqNum();
+            } else {
+                seq_num_local = ll->file->getSyncedSeqNum();
+            }
+            if (seq_num_local == NOT_INITIALIZED) {
+                if (ln_to > ln_from) {
+                    _log_warn(myLog, "invalid seq_num_local, rewind ln_to from "
+                              "%lu to %lu", ln_to, ln_to - 1);
+                    ln_to--;
+                } else {
+                    _log_warn(myLog, "invalid seq_num_local, nothing to be flushed: "
+                              "ln_from %lu ln_to %lu", ln_from, ln_to);
+                    return Status::LOG_NOT_SYNCED;
+                }
+            } else {
+                break;
+            }
         }
 
     } else {
@@ -1368,6 +1513,15 @@ Status LogMgr::flush(const FlushOptions& options,
             //   as we need to purge log files properly.
         }
 
+        DBMgr* dbm = DBMgr::getWithoutInit();
+        if (dbm && dbm->isDebugCallbackEffective()) {
+            DebugParams dp = dbm->getDebugParams();
+            if (dp.logFlushCb) {
+                DebugParams::GenericCbParams p;
+                dp.logFlushCb(p);
+            }
+        }
+
         // Set flush log & seq number.
         for (uint64_t ii = ln_from; ii <= ln_to; ++ii) {
             LogFileInfoGuard ll(mani->getLogFileInfoP(ii));
@@ -1390,7 +1544,15 @@ Status LogMgr::flush(const FlushOptions& options,
               _seq_str(seq_num).c_str(), seq_num_local, ln_from, ln_to);
 
     if (options.beyondLastSync) {
-        mani->setLastSyncedLog(ln_to);
+        // WARNING:
+        //   Update last synced log only if it is beyond the last sync.
+        //   Due to `FlushOptions::numFilesLimit`, `ln_to` could be
+        //   less than `last_synced_log`.
+        uint64_t last_synced_log = 0;
+        mani->getLastSyncedLog(last_synced_log);
+        if (ln_to > last_synced_log) {
+            mani->setLastSyncedLog(ln_to);
+        }
     }
     mani->setLastFlushedLog(ln_to);
     // Remove log file except for ln_to.
@@ -1550,12 +1712,13 @@ void LogMgr::adjustThrottlingExtreme() {
 }
 
 Status LogMgr::doLogReclaim() {
-    OpSemaWrapper ow(&reclaimSema);
+    const DBConfig* db_config = getDbConfig();
+    OpSemaWrapper ow(&reclaimSema, db_config->serializeMultiThreadedLogFlush);
     if (!ow.acquire()) {
         _log_debug(myLog, "Reclaim skipped. Other thread is working on it.");
         return Status::OPERATION_IN_PROGRESS;
     }
-    assert(ow.op_sema->enabled);
+    assert(ow.opSema->enabled);
 
     mani->reclaimExpiredLogFiles();
     return Status();
@@ -1792,6 +1955,10 @@ Status LogMgr::getLastSyncedSeqNum(uint64_t& seq_num_out) {
     LogFileInfoGuard li(mani->getLogFileInfoP(ln_sync, true));
     if (li.empty() || li.ptr->isRemoved()) continue;
     sync_seq = li->file->getSyncedSeqNum();
+
+    // NOTE: `sync_seq` can be INVALID, if the DB does not contain any data.
+    //       It is not a bug.
+#if 0
     if (!valid_number(sync_seq)) {
         // This should be a bug.
         _log_err( myLog, "log file %zu returned invalid seq number, "
@@ -1802,6 +1969,7 @@ Status LogMgr::getLastSyncedSeqNum(uint64_t& seq_num_out) {
                   li->file->isMemTablePurged() );
         assert(0);
     }
+#endif
     break;
    }
 
@@ -1813,6 +1981,21 @@ Status LogMgr::getLastSyncedSeqNum(uint64_t& seq_num_out) {
     return Status();
 }
 
+Status LogMgr::getLastFlushedLogFileNum(uint64_t& log_file_num_out) {
+    Status s;
+    uint64_t ln_flush = 0;
+    EP( mani->getLastFlushedLog(ln_flush) );
+    log_file_num_out = ln_flush;
+    return Status();
+}
+
+Status LogMgr::getLastSyncedLogFileNum(uint64_t& log_file_num_out) {
+    Status s;
+    uint64_t ln_sync = 0;
+    EP( mani->getLastSyncedLog(ln_sync) );
+    log_file_num_out = ln_sync;
+    return Status();
+}
 
 bool LogMgr::checkTimeToFlush(const GlobalConfig& config) {
     Status s;
@@ -1821,10 +2004,12 @@ bool LogMgr::checkTimeToFlush(const GlobalConfig& config) {
     uint64_t seq_last_flush = NOT_INITIALIZED;
     uint64_t seq_max = NOT_INITIALIZED;
 
-    if (getDbConfig()->readOnly) return false;
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->readOnly) return false;
     if (syncSema.grabbed) return false;
     if (flushSema.grabbed) return false;
-    if (getDbConfig()->logSectionOnly) return false;
+    if (db_config->logSectionOnly) return false;
+    if (!db_config->autoLogFlush) return false;
 
     const size_t MAX_TRY = 10;
     size_t num_try = 0;
@@ -1859,8 +2044,19 @@ bool LogMgr::checkTimeToFlush(const GlobalConfig& config) {
     if (seq_max > seq_last_flush + config.flusherMinRecordsToTrigger) {
         return true;
     }
+
+    size_t min_log_files = config.flusherMinLogFilesToTrigger;
+    DBMgr* dbm = DBMgr::getWithoutInit();
+    if (dbm && dbm->getGlobalThrottling()) {
+        // If global throttling is active, we should flush more often.
+        _log_trace(myLog, "global throttling is active, flush more often. "
+                   "l_max %lu, l_last_flush %lu, seq_max %lu, seq_last_flush %lu",
+                   l_max, l_last_flush, seq_max, seq_last_flush);
+        min_log_files = 1;
+    }
+
     // If the number of log files exceeds the limit.
-    if (l_max > l_last_flush + config.flusherMinLogFilesToTrigger) {
+    if (l_max > l_last_flush + min_log_files) {
         return true;
     }
 
@@ -1872,7 +2068,8 @@ Status LogMgr::close() {
 
     // If sync() or flush() is running,
     // wait until they finish their jobs.
-    OpSemaWrapper op_sync(&syncSema);
+    const DBConfig* db_config = getDbConfig();
+    OpSemaWrapper op_sync(&syncSema, db_config->serializeMultiThreadedLogFlush);
     _log_info(myLog, "Wait for on-going sync operation.");
 
     uint64_t ticks = 0;
@@ -1883,15 +2080,16 @@ Status LogMgr::close() {
     syncSema.enabled = false;
     _log_info(myLog, "Disabled syncing for %p, %zu ticks", this, ticks);
 
-    if (!getDbConfig()->readOnly) {
+    if (!db_config->readOnly) {
         // Last sync before close (not in read-only mode).
+        needSkippedManiSync = true;
         syncInternal(false);
         _log_info(myLog, "Last sync done");
     } else {
         _log_info(myLog, "read-only mode: skip the last sync");
     }
 
-    OpSemaWrapper op_flush(&flushSema);
+    OpSemaWrapper op_flush(&flushSema, db_config->serializeMultiThreadedLogFlush);
     _log_info(myLog, "Wait for on-going flush operation.");
     ticks = 0;
     while (!op_flush.acquire()) {
@@ -1902,7 +2100,7 @@ Status LogMgr::close() {
     flushSema.enabled = false;
     _log_info(myLog, "Disabled flushing for %p, %zu ticks", this, ticks);
 
-    OpSemaWrapper op_reclaim(&reclaimSema);
+    OpSemaWrapper op_reclaim(&reclaimSema, db_config->serializeMultiThreadedLogFlush);
     _log_info(myLog, "Wait for on-going log reclaim operation.");
     ticks = 0;
     while (!op_reclaim.acquire()) {

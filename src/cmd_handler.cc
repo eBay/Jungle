@@ -291,7 +291,7 @@ std::string CmdHandler::hDumpKv(DBWrap* target_dbw,
         ss << "[" << count << "]" << std::endl;
         ss << "key: " << HexDump::toString(rec_out.kv.key) << std::endl;
         ss << "sequence number: " << rec_out.seqNum << std::endl;
-        ss << "type: " << rec_out.type << std::endl;
+        ss << "type: " << (int)rec_out.type << std::endl;
         ss << "meta: " << HexDump::toString(rec_out.meta) << std::endl;
         if (tokens[0] == "getmeta") {
             ss << "value: " << rec_out.kv.value.size << " bytes" << std::endl;
@@ -463,7 +463,7 @@ std::string CmdHandler::hTableInfo(DBWrap* target_dbw,
             ss << "      space by index: " << t_stats.numIndexNodes << " nodes, "
                << t_stats.numIndexNodes * 4096 << " / " << t_stats.workingSetSizeByte
                << ", " << std::fixed << std::setprecision(1) << space_perc
-               << "%%\n";
+               << "%\n";
 
             ss << "      block reuse cycle: " << t_stats.blockReuseCycle << "\n";
             ss << "      status: " << t_info->status.load() << "\n";

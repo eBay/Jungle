@@ -534,6 +534,145 @@ int compaction_cancel_test() {
     return 0;
 }
 
+int compaction_cancel_and_adjust_l0_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    // Open DB with compaction callback function.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.numL0Partitions = 4;
+    config.nextLevelExtension = true;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    size_t num = 100;
+    CHK_Z( _set_keys(db, 0, num, 1, "k%06zu", "v%06zu") );
+
+    // Sync & flush.
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+
+    // Set delay for compaction.
+    jungle::DebugParams d_params;
+    d_params.compactionDelayUs = 500000; // 0.5 sec per record.
+    jungle::setDebugParams(d_params);
+
+    // Do compaction in background.
+    CompactorArgs c_args;
+    c_args.db = db;
+    TestSuite::ThreadHolder h(&c_args, compactor, nullptr);
+
+    TestSuite::sleep_sec(1, "Wait for compaction to start");
+
+    // Put more keys.
+    CHK_Z( _set_keys(db, num, 2 * num, 1, "k%06zu", "v%06zu") );
+
+    // Sync & flush.
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+
+    // Close DB while copmaction is in progress,
+    // compaction should be cancelled immediately.
+    CHK_Z(jungle::DB::close(db));
+
+    h.join();
+    CHK_Z(h.getResult());
+
+    // Remove compaction delay.
+    d_params.compactionDelayUs = 0;
+    jungle::setDebugParams(d_params);
+
+    // Re-open with different num L0.
+    config.numL0Partitions = 1;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+    CHK_Z( _get_keys(db, 0, 2 * num, 1, "k%06zu", "v%06zu") );
+
+    // Compaction should work this time.
+    c_args.db = db;
+    c_args.expResult = jungle::Status::OK;
+    CHK_Z( compactor(&c_args) );
+
+    // All keys should be there.
+    CHK_Z( _get_keys(db, 0, 2 * num, 1, "k%06zu", "v%06zu") );
+
+    CHK_Z( jungle::DB::close(db) );
+
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int adjust_l0_crash_and_retry_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    // Open DB with compaction callback function.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.numL0Partitions = 4;
+    config.nextLevelExtension = true;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    size_t num = 100;
+    CHK_Z( _set_keys(db, 0, num, 1, "k%06zu", "v%06zu") );
+
+    // Sync & flush.
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    CHK_Z(jungle::DB::close(db));
+
+    // Set callback for adjusting L0.
+    size_t count = 0;
+    std::string backup_path = filename + "_backup";
+    std::string backup_path2 = filename + "_backup2";
+
+    jungle::DebugParams d_params;
+    d_params.adjustL0Cb =
+        [&](const jungle::DebugParams::GenericCbParams& params) -> void {
+        if (count == 0) {
+            // Copy the DB file to mimic crash.
+            TestSuite::copyfile(filename, backup_path);
+            TestSuite::copyfile(filename, backup_path2);
+        }
+        count++;
+    };
+    jungle::setDebugParams(d_params);
+
+    // Re-open with different L0.
+    config.numL0Partitions = 1;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+    CHK_Z( _get_keys(db, 0, num, 1, "k%06zu", "v%06zu") );
+    CHK_Z( jungle::DB::close(db) );
+
+    // Open the backup file with different num L0.
+    config.numL0Partitions = 2;
+    CHK_Z( jungle::DB::open(&db, backup_path, config) );
+
+    // All keys should be there.
+    CHK_Z( _get_keys(db, 0, num, 1, "k%06zu", "v%06zu") );
+    CHK_Z( jungle::DB::close(db) );
+
+    // Open the backup file with the original num L0 to mimic cancelling adjustment.
+    config.numL0Partitions = 4;
+    CHK_Z( jungle::DB::open(&db, backup_path2, config) );
+
+    // All keys should be there.
+    CHK_Z( _get_keys(db, 0, num, 1, "k%06zu", "v%06zu") );
+    CHK_Z( jungle::DB::close(db) );
+
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int merge_compaction_cancel_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -938,6 +1077,12 @@ int main(int argc, char** argv) {
 
     ts.doTest("compaction cancel test",
               compaction_cancel_test);
+
+    ts.doTest("compaction cancel and adjust L0 test",
+              compaction_cancel_and_adjust_l0_test);
+
+    ts.doTest("adjust L0 crash and retry test",
+              adjust_l0_crash_and_retry_test);
 
     ts.doTest("merge-compaction cancel test",
               merge_compaction_cancel_test);

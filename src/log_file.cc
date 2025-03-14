@@ -401,7 +401,7 @@ Status LogFile::getPrefix(const uint64_t chk,
     return Status();
 }
 
-Status LogFile::flushMemTable(uint64_t upto) {
+Status LogFile::flushMemTable(uint64_t upto, uint64_t& flushed_seq_out) {
    touch();
    // Skip unnecessary flushing
    if (immutable && !fHandle && isSynced()) {
@@ -509,7 +509,7 @@ Status LogFile::flushMemTable(uint64_t upto) {
 
     RwSerializer rws(fOps, fHandle, true);
 
-    TC( mTable->flush(rws, upto) );
+    TC( mTable->flush(rws, upto, flushed_seq_out) );
     TC( mTable->appendFlushMarker(rws) );
 
     TC( fOps->flush(fHandle) );
@@ -798,20 +798,22 @@ LogFile::Iterator::~Iterator() {}
 Status LogFile::Iterator::init(LogFile* l_file,
                                const SizedBuf& start_key,
                                const SizedBuf& end_key,
+                               const uint64_t seq_from,
                                const uint64_t seq_upto)
 {
     lFile = l_file;
     lFile->touch();
-    return mItr.init(lFile->mTable, start_key, end_key, seq_upto);
+    return mItr.init(lFile->mTable, start_key, end_key, seq_from, seq_upto);
 }
 
 Status LogFile::Iterator::initSN(LogFile* l_file,
                                  const uint64_t min_seq,
-                                 const uint64_t max_seq)
+                                 const uint64_t max_seq,
+                                 bool is_log_store_snapshot)
 {
     lFile = l_file;
     lFile->touch();
-    return mItr.initSN(lFile->mTable, min_seq, max_seq);
+    return mItr.initSN(lFile->mTable, min_seq, max_seq, is_log_store_snapshot);
 }
 
 

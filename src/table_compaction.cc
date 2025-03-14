@@ -28,8 +28,7 @@ namespace jungle {
 //
 Status TableMgr::compactLevelItr(const CompactOptions& options,
                                  TableInfo* victim_table,
-                                 size_t level)
-{
+                                 size_t level) {
     if (level >= mani->getNumLevels()) return Status::INVALID_LEVEL;
 
     Status s;
@@ -512,7 +511,9 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
         //
         //   Hence, all threads who are going to write data to the same level
         //   should hold `mani->getLock()`.
-        mani->removeTableFile(level, local_victim);
+        if (!options.doNotRemoveOldFile) {
+            mani->removeTableFile(level, local_victim);
+        }
 
         // NOTE:
         //   As an optimization, if this level is neither zero nor last one,
@@ -751,7 +752,7 @@ Status TableMgr::compactL0(const CompactOptions& options,
                            uint32_t hash_num)
 {
     if (!allowCompaction) {
-        _log_warn(myLog, "compaction is now allowed");
+        _log_warn(myLog, "compaction is not allowed");
         return Status::COMPACTION_IS_NOT_ALLOWED;
     }
 

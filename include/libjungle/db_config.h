@@ -17,6 +17,7 @@ limitations under the License.
 #pragma once
 
 #include "record.h"
+#include "status.h"
 
 #include <functional>
 #include <vector>
@@ -103,6 +104,7 @@ public:
     DBConfig()
         : allowOverwriteSeqNum(false)
         , logSectionOnly(false)
+        , autoLogFlush(true)
         , truncateInconsecutiveLogs(true)
         , logFileTtl_sec(0)
         , maxKeepingMemtables(0)
@@ -120,6 +122,7 @@ public:
         , numL0Partitions(4)
         , minNumTablesPerLevel(8)
         , minFileSizeToCompact(16777216)    // 16 MiB
+        , minWssToMerge(64 * 1024)          // 64 KiB
         , minBlockReuseCycleToCompact(0)
         , maxBlockReuseCycle(1)
         , compactionFactor(300)             // 300%
@@ -140,6 +143,9 @@ public:
         , purgeDeletedDocImmediately(true)
         , fastIndexScan(false)
         , seqLoadingDelayFactor(0)
+        , safeMode(false)
+        , serializeMultiThreadedLogFlush(false)
+        , skipManifestSync(false)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -175,10 +181,20 @@ public:
      */
     bool allowOverwriteSeqNum;
 
-    /*
+    /**
      * Disable table section and use logging part only.
      */
     bool logSectionOnly;
+
+    /**
+     * If it is normal DB instance (`readOnly = false` and `logSectionOnly = false`),
+     * background flusher thread will automatically flush logs to L0 tables.
+     *
+     * WARNING:
+     *   If it is set to `false`, users should manually call `flushLogs()`.
+     *   The more unflushed logs, the more memory consumption.
+     */
+    bool autoLogFlush;
 
     /*
      * (Only when `logSectionOnly == true`)
@@ -277,6 +293,13 @@ public:
      * Minimum file size that can be compacted.
      */
     uint64_t minFileSizeToCompact;
+
+    /**
+     * Working set size threshold for merge.
+     * If this value is non-zero, and if the size of active data of a table file
+     * is below this threshold, that file will be merged to the adjacent table file.
+     */
+    uint64_t minWssToMerge;
 
     /**
      * Minimum block re-use cycle to trigger compaction.
@@ -392,8 +415,8 @@ public:
     struct DirectIoOptions{
         DirectIoOptions()
             : enabled(false)
-            , bufferSize(16384)
-            , alignSize(512)
+            , bufferSize(4096)
+            , alignSize(4096)
             , readaheadSize(65536)
             {}
 
@@ -557,6 +580,33 @@ public:
      * The custom manifest files should be created by `cloneManifest()` API.
      */
     std::string customManifestPath;
+
+    /**
+     * If DB files are corrupted, Jungle will try to avoid the process crash
+     * as much as possible.
+     * This mode will slow down operations, thus should not be used in
+     * real production environment.
+     */
+    bool safeMode;
+
+    /**
+     * If `true`, `sync` and `flushLogs` calls by multiple threads will be serialized,
+     * and executed one by one.
+     * If `false`, only one thread will execute `sync` and `flushLogs` calls, while
+     * the other concurrent threads will get `OPERATION_IN_PROGRESS` status.
+     */
+    bool serializeMultiThreadedLogFlush;
+
+    /**
+     * [EXPERIMENTAL]
+     * If `true`, when `sync()` is invoked, only the actual log files will be synced,
+     * not the manifest file. The manifest file is synced when 1) a new log file is
+     * added, or 2) the DB is closed.
+     *
+     * Even without syncing the manifest file, Jungle can recover the last synced
+     * data by scanning the log files.
+     */
+    bool skipManifestSync;
 };
 
 class GlobalConfig {
@@ -564,6 +614,7 @@ public:
     GlobalConfig()
         : globalLogPath("./")
         , numFlusherThreads(1)
+        , numDedicatedFlusherForAsyncReqs(0)
         , flusherSleepDuration_ms(500)
         , flusherMinRecordsToTrigger(65536)
         , flusherMinLogFilesToTrigger(16)
@@ -574,8 +625,7 @@ public:
         , fdbCacheSize(0)
         , numTableWriters(8)
         , memTableFlushBufferSize(32768)
-        , shutdownLogger(true)
-        {}
+        , shutdownLogger(true) {}
 
     /**
      * Path where Jungle's global log will be located.
@@ -586,6 +636,12 @@ public:
      * Max number of flusher threads.
      */
     size_t numFlusherThreads;
+
+    /**
+     * Create dedicated flushers for async request. Only effective when it is
+     * not 0 and `numFlusherThreads` > `numDedicatedFlusherForAsyncReqs`.
+     */
+    size_t numDedicatedFlusherForAsyncReqs;
 
     /**
      * Fluhser thread sleep time in ms.
@@ -731,6 +787,53 @@ public:
      * Log flushing (to L0 tables) will have no effect.
      */
     CompactionThrottlingOptions ctOpt;
+
+    /**
+     * Settings for Log Throttling. When there is heavy incoming traffic
+     * and the flush speed cannot keep up with the incoming write speed,
+     * the number of log files increases. If the total number of log files
+     * across all open database instances exceeds `startNumLogs`, user threads
+     * calling the write API will be temporarily blocked for a certain period
+     * of time.
+     *
+     * Once the total number of log files reaches `limitNumLogs`, each write API
+     * call will be blocked for `maxSleepTimeMs`, and the background flushers
+     * will immediately flush the log files. The sleep time will not exceed
+     * `maxSleepTimeMs`.
+     *
+     * If `maxSleepTimeMs` is set to zero, this feature will be disabled.
+     */
+    struct LogThrottlingOptions {
+        LogThrottlingOptions()
+            : startNumLogs(256)
+            , limitNumLogs(512)
+            , maxSleepTimeMs(0)
+            {}
+
+        /**
+         * The minimum number of log files initiates the throttling.
+         */
+        uint32_t startNumLogs;
+
+        /**
+         * The number of log files that will cause user threads to
+         * sleep for `maxSleepTimeMs`.
+         */
+        uint32_t limitNumLogs;
+
+        /**
+         * The maximum duration of sleep time.
+         */
+        uint32_t maxSleepTimeMs;
+    };
+
+    /**
+     * Log throttling option.
+     *
+     * It can be used to limit the overall memory consumption of the
+     * process occupied by memory tables corresponding to each log file.
+     */
+    LogThrottlingOptions ltOpt;
 
     /**
      * Shutdown system logger on shutdown of Jungle.
