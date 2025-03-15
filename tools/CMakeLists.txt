@@ -4,8 +4,7 @@ set(JUNGLE_TOOLS_DEPS
     static_lib
     ${LIBSIMPLELOGGER}
     ${FORESTDB}
-    ${LIBSNAPPY}
-    ${LIBDL})
+    ${LIBSNAPPY})
 
 set(BF_GEN ${TOOLS_DIR}/bloomfilter_generator.cc)
 add_executable(bloomfilter_generator ${BF_GEN})

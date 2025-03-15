@@ -7,8 +7,7 @@ set(JUNGLE_TEST_DEPS
     static_lib
     ${LIBSIMPLELOGGER}
     ${FORESTDB}
-    ${LIBSNAPPY}
-    ${LIBDL})
+    ${LIBSNAPPY})
 
 
 function(unit_test)

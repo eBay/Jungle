@@ -65,6 +65,7 @@ if(SNAPPY_OPTION)
 endif()
 
 set(LIBDL dl)
+set(LIBPTHREAD pthread)
 
 # Includes
 include_directories(BEFORE
@@ -218,6 +219,7 @@ set(JUNGLE_CORE
 set(JUNGLE_DEPS
     ${FORESTDB}
     ${LIBSNAPPY}
+    ${LIBPTHREAD}
     ${LIBDL})
 
 add_library(static_lib ${JUNGLE_CORE})

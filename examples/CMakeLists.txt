@@ -4,8 +4,7 @@ set(JUNGLE_TEST_DEPS
     static_lib
     ${LIBSIMPLELOGGER}
     ${FORESTDB}
-    ${LIBSNAPPY}
-    ${LIBDL})
+    ${LIBSNAPPY})
 
 set(GET_SET_DEL ${EXAMPLES_DIR}/example_get_set_del.cc)
 add_executable(get_set_del ${GET_SET_DEL})
