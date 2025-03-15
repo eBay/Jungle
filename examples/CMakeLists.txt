@@ -3,7 +3,7 @@ set(EXAMPLES_DIR ${PROJECT_SOURCE_DIR}/examples)
 set(JUNGLE_TEST_DEPS
     static_lib
     ${LIBSIMPLELOGGER}
-    ${FDB_LIB_DIR}/libforestdb.a
+    ${FORESTDB}
     ${LIBSNAPPY}
     ${LIBDL})
 
@@ -36,4 +36,9 @@ set(LOG_STORE ${EXAMPLES_DIR}/example_log_store_mode.cc)
 add_executable(log_store ${LOG_STORE})
 target_link_libraries(log_store ${JUNGLE_TEST_DEPS})
 add_dependencies(log_store static_lib)
- 
+
+install(TARGETS
+    get_set_del iterator iterator_adv snapshot_checkpoint snapshot_instant
+    log_store
+    RUNTIME DESTINATION bin
+)

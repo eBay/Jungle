@@ -81,10 +81,13 @@ limitations under the License.
 
     #define MOR                         __ATOMIC_RELAXED
     #define ATM_GET(var)                (var)
-    #define ATM_LOAD(var, val)          __atomic_load(&(var), &(val), MOR)
-    #define ATM_STORE(var, val)         __atomic_store(&(var), &(val), MOR)
+    #define ATM_LOAD(var, val)          __atomic_load(&(var), reinterpret_cast<decltype(&(var))>(&(val)), MOR)
+    #define ATM_STORE(var, val)         __atomic_store(&(var), reinterpret_cast<decltype(&(var))>(&(val)), MOR)
     #define ATM_CAS(var, exp, val)      \
-            __atomic_compare_exchange(&(var), &(exp), &(val), 1, MOR, MOR)
+            __atomic_compare_exchange(&(var), \
+                reinterpret_cast<decltype(&(var))>(&(exp)), \
+                reinterpret_cast<decltype(&(var))>(&(val)), \
+                1, MOR, MOR)
     #define ATM_FETCH_ADD(var, val)     __atomic_fetch_add(&(var), (val), MOR)
     #define ATM_FETCH_SUB(var, val)     __atomic_fetch_sub(&(var), (val), MOR)
     #define ALLOC_(type, var, count)    \
