@@ -21,7 +21,7 @@ limitations under the License.
 #include "internal_helper.h"
 #include "table_mgr.h"
 
-#include <third_party/forestdb/include/libforestdb/fdb_types.h>
+#include <libforestdb/fdb_types.h>
 
 #include _MACRO_TO_STR(LOGGER_H)
 

@@ -22,7 +22,7 @@ limitations under the License.
 #include "skiplist.h"
 #include "table_mgr.h"
 
-#include <third_party/forestdb/include/libforestdb/forestdb.h>
+#include <libforestdb/forestdb.h>
 
 #include <iostream>
 #include <sstream>

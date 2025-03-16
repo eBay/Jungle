@@ -76,6 +76,17 @@ Run unit tests:
 jungle/build$ ./runtests.sh
 ```
 
+Alternative build method - with Conan
+----------
+1. Install conan using one of the methods desribed here: https://conan.io/downloads
+1. `conan build .` - builds Release configuration
+1. `conan build . -s build_type=Debug` builds an alternative configuration supported by CMake
+1. Since Jungle depends on ForestDB, you need to do the same with ForestDB first and use it in **editable** mode
+1. You can control supported build options via command line as well, ex:
+    `conan build . -o build_tests=True` 
+
+
+
 
 How to Use
 ----------

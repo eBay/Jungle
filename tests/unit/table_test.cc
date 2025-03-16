@@ -17,7 +17,7 @@ limitations under the License.
 #include "db_mgr.h"
 #include "fileops_posix.h"
 #include "table_file.h"
-#include "tools/mutable_table_mgr.h"
+#include "mutable_table_mgr.h"
 
 #include "libjungle/jungle.h"
 
