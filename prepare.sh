@@ -31,7 +31,7 @@ if [ ${RECOMPILE_FDB} == true ]; then
     rm -rf ./build
     mkdir build
     cd build
-    cmake -DSNAPPY_OPTION=Disable ../
+    cmake ../
     make static_lib $1    
     cd ..
     echo $(git rev-parse HEAD) > ./build/last_compiled_commit
