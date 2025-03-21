@@ -2,7 +2,7 @@ import os
 
 from conan import ConanFile
 from conan.tools.cmake import cmake_layout, CMake, CMakeToolchain
-from conan.tools.files import copy
+from conan.tools.files import copy,save,load
 from conan.tools.scm import Git
 
 required_conan_version = ">=2.12.2"
@@ -34,7 +34,16 @@ class JungleConan(ConanFile):
         "build_examples":False
     }
 
-    exports_sources = "CMakeLists.txt", "src/*", "include/*", "cmake/*", "tools/*" "LICENSE"
+    exports_sources = "CMakeLists.txt", "src/*", "include/*", "cmake/*", "tools/*", "scripts/*", "tests/*", "examples/*", "LICENSE"
+
+    def set_version(self):
+        if self.version:
+            return
+        
+        git = Git(self, folder=self.recipe_folder)
+        self.version = git.run(cmd="describe --tags --long")
+        if self.version.startswith("v"):
+            self.version = self.version[1:]
 
     def requirements(self):
         self.requires("forestdb/[*]")
@@ -42,13 +51,28 @@ class JungleConan(ConanFile):
         if self.options.with_snappy:
             self.requires("snappy/[~1]")
 
+    def _computeCommitHash(self):
+        hash_file = os.path.join(self.recipe_folder, "COMMIT_HASH")
+        if (os.path.exists(hash_file)):
+            hash = load(self,path=hash_file)
+            self.output.info(f"Fetched commit hash from {hash_file}")
+        else: # we are building from local source, i.e. in editable mode
+            git = Git(self, folder=self.recipe_folder)
+            hash = git.get_commit()
+            diff = git.run(cmd="diff --stat")
+            if diff:
+                hash +="-dirty"
+            self.output.info(f"Fetched commit hash {hash} from local Git in {self.recipe_folder}")
+        return hash
+
+    def export(self):
+        save(self, path=os.path.join(self.export_folder, "COMMIT_HASH"), content=self._computeCommitHash())
+
     def layout(self):
         cmake_layout(self, generator="CMakeDeps")
         self.cpp.package.libs = [self.name, "simplelogger"]
         self.cpp.source.includedirs = ["include", "src"]
-
-        hash = Git(self).get_commit()
-        self.cpp.package.defines = self.cpp.build.defines = ["_JUNGLE_COMMIT_HASH=%s" % hash]
+        self.cpp.package.defines = self.cpp.build.defines = ["_JUNGLE_COMMIT_HASH=%s" % self._computeCommitHash()]
 
     
     def generate(self):
