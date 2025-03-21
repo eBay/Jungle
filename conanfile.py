@@ -18,19 +18,19 @@ class JungleConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
 
     options = {
-        "shared": [True, False], 
+        "shared": [True, False],
         "fPIC": [True, False],
-        "coverage": [True, False], 
+        "coverage": [True, False],
         "with_snappy" : [True, False],
         "build_tests": [True, False],
         "build_examples": [True, False]
     }
     default_options = {
-        "shared": False, 
+        "shared": False,
         "fPIC": True,
         "with_snappy" : False,
         "coverage": False,
-        "build_tests": False, 
+        "build_tests": False,
         "build_examples":False
     }
 
@@ -39,14 +39,14 @@ class JungleConan(ConanFile):
     def set_version(self):
         if self.version:
             return
-        
+
         git = Git(self, folder=self.recipe_folder)
         self.version = git.run(cmd="describe --tags --long")
         if self.version.startswith("v"):
             self.version = self.version[1:]
 
     def requirements(self):
-        self.requires("forestdb/[*]")
+        self.requires("forestdb/[~1]", transitive_headers=True)
         self.requires("zlib/[~1]")
         if self.options.with_snappy:
             self.requires("snappy/[~1]")
@@ -74,7 +74,7 @@ class JungleConan(ConanFile):
         self.cpp.source.includedirs = ["include", "src"]
         self.cpp.package.defines = self.cpp.build.defines = ["_JUNGLE_COMMIT_HASH=%s" % self._computeCommitHash()]
 
-    
+
     def generate(self):
         tc = CMakeToolchain(self)
         tc.variables["WITH_CONAN"] = True
