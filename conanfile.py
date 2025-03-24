@@ -46,7 +46,7 @@ class JungleConan(ConanFile):
             self.version = self.version[1:]
 
     def requirements(self):
-        self.requires("forestdb/[~1]", transitive_headers=True)
+        self.requires(f"forestdb/[~1]@{self.user if self.user else ''}", transitive_headers=True)
         self.requires("zlib/[~1]")
         if self.options.with_snappy:
             self.requires("snappy/[~1]")
