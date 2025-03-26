@@ -161,6 +161,14 @@ if(DETACH_LOGGER)
     add_library(simplelogger_lib ${LOGGER_SRC})
     set_target_properties(simplelogger_lib PROPERTIES OUTPUT_NAME simplelogger
         CLEAN_DIRECT_OUTPUT 1)
+    get_filename_component(ABSOLUTE_LOGGER_HEADER_FILE ${LOGGER_HEADER_FILE}
+                           REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
+    get_filename_component(LOGGER_HEADER_DIRECTORY ${ABSOLUTE_LOGGER_HEADER_FILE}
+                           DIRECTORY)
+    message(STATUS "Simple logger header directory: ${LOGGER_HEADER_DIRECTORY}")
+    set_target_properties(simplelogger_lib PROPERTIES INCLUDE_DIRECTORIES
+                          "${LOGGER_HEADER_DIRECTORY}")
+
 
 else()
     set(LOGGER_SRC_TO_CORE ${LOGGER_SRC})
