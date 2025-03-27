@@ -1,22 +1,33 @@
-/************************************************************************
-Modifications Copyright 2017-2019 eBay Inc.
-
-Original Copyright 2017 Jung-Sang Ahn
-See URL: https://github.com/greensky00/simple_logger
-         (v0.3.25)
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    https://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-**************************************************************************/
+/**
+ * Copyright (C) 2017-present Jung-Sang Ahn <jungsang.ahn@gmail.com>
+ * All rights reserved.
+ *
+ * https://github.com/greensky00
+ *
+ * Simple Logger
+ * Version: 0.4.0
+ *
+ * Permission is hereby granted, free of charge, to any person
+ * obtaining a copy of this software and associated documentation
+ * files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use,
+ * copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following
+ * conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
 
 #include "logger.h"
 
@@ -27,8 +38,6 @@ limitations under the License.
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
-
-#include <assert.h>
 
 #if defined(__linux__) || defined(__APPLE__)
     #include <dirent.h>
@@ -103,8 +112,8 @@ limitations under the License.
 #endif
 
 std::atomic<SimpleLoggerMgr*> SimpleLoggerMgr::instance(nullptr);
-std::mutex SimpleLoggerMgr::instanceLock;
-std::mutex SimpleLoggerMgr::displayLock;
+std::mutex SimpleLoggerMgr::instance_lock;
+std::mutex SimpleLoggerMgr::display_lock;
 
 // Number of digits to represent thread IDs (Linux only).
 std::atomic<int> tid_digits(2);
@@ -157,7 +166,7 @@ SimpleLoggerMgr::TimeInfo::TimeInfo(std::chrono::system_clock::time_point now) {
 SimpleLoggerMgr* SimpleLoggerMgr::init() {
     SimpleLoggerMgr* mgr = instance.load(SimpleLogger::MOR);
     if (!mgr) {
-        std::lock_guard<std::mutex> l(instanceLock);
+        std::lock_guard<std::mutex> l(instance_lock);
         mgr = instance.load(SimpleLogger::MOR);
         if (!mgr) {
             mgr = new SimpleLoggerMgr();
@@ -179,7 +188,7 @@ SimpleLoggerMgr* SimpleLoggerMgr::getWithoutInit() {
 }
 
 void SimpleLoggerMgr::destroy() {
-    std::lock_guard<std::mutex> l(instanceLock);
+    std::lock_guard<std::mutex> l(instance_lock);
     SimpleLoggerMgr* mgr = instance.load(SimpleLogger::MOR);
     if (mgr) {
         mgr->flushAllLoggers();
@@ -228,10 +237,10 @@ void SimpleLoggerMgr::flushCriticalInfo() {
     }
 }
 
-void SimpleLoggerMgr::_flushStackTraceBuffer(size_t buffer_len,
-                                             uint32_t tid_hash,
-                                             uint64_t kernel_tid,
-                                             bool crash_origin)
+void SimpleLoggerMgr::flushStackTraceBufferInternal(size_t buffer_len,
+                                                    uint32_t tid_hash,
+                                                    uint64_t kernel_tid,
+                                                    bool crash_origin)
 {
     std::string msg;
     char temp_buf[256];
@@ -262,10 +271,10 @@ void SimpleLoggerMgr::flushStackTraceBuffer(RawStackInfo& stack_info) {
     size_t len = _stack_interpret(&stack_info.stackPtrs[0],
                                   stack_info.stackPtrs.size(),
                                   stackTraceBuffer,
-                                  stackTraceBufferSize);
+                                  STACK_TRACE_BUFFER_SIZE);
     if (!len) return;
 
-    _flushStackTraceBuffer(len,
+    flushStackTraceBufferInternal(len,
                            stack_info.tidHash,
                            stack_info.kernelTid,
                            stack_info.crashOrigin);
@@ -581,7 +590,7 @@ SimpleLoggerMgr::SimpleLoggerMgr()
         oldSigSegvHandler = signal(SIGSEGV, SimpleLoggerMgr::handleSegFault);
         oldSigAbortHandler = signal(SIGABRT, SimpleLoggerMgr::handleSegAbort);
     }
-    stackTraceBuffer = (char*)malloc(stackTraceBufferSize);
+    stackTraceBuffer = (char*)malloc(STACK_TRACE_BUFFER_SIZE);
 
 #endif
     tFlush = std::thread(SimpleLoggerMgr::flushWorker);
@@ -760,12 +769,12 @@ bool SimpleLogger::LogElem::available() {
     return s == CLEAN || s == DIRTY;
 }
 
-int SimpleLogger::LogElem::write(size_t _len, char* msg) {
+int SimpleLogger::LogElem::write(size_t ll, char* msg) {
     Status exp = CLEAN;
     Status val = WRITING;
     if (!status.compare_exchange_strong(exp, val)) return -1;
 
-    len = (_len > MSG_SIZE) ? MSG_SIZE : _len;
+    len = (ll > MSG_SIZE) ? MSG_SIZE : ll;
     memcpy(ctx, msg, len);
 
     status.store(LogElem::DIRTY);
@@ -800,6 +809,8 @@ SimpleLogger::SimpleLogger(const std::string& file_path,
     , tzGap( SimpleLoggerMgr::getTzGap() )
     , cursor(0)
     , logs(max_log_elems)
+    , globalPreCallback(nullptr)
+    , globalCallback(nullptr)
 {
     findMinMaxRevNum(minRevnum, curRevnum);
 }
@@ -1043,9 +1054,6 @@ void SimpleLogger::put(int level,
                        const char* format,
                        ...)
 {
-    if (level > curLogLevel.load(MOR)) return;
-    if (!fs) return;
-
     static const char* lv_names[7] = {"====",
                                       "FATL", "ERRO", "WARN",
                                       "INFO", "DEBG", "TRAC"};
@@ -1059,13 +1067,79 @@ void SimpleLogger::put(int level,
     thread_local uint32_t tid_hash = std::hash<std::thread::id>{}(tid) % 0x10000;
 #endif
 
+    auto ts_now = std::chrono::system_clock::now();
+    uint64_t epoch_us = std::chrono::duration_cast<std::chrono::microseconds>
+                        (ts_now.time_since_epoch()).count();
+
+    // Callback function part, regardless of original log visibility.
+    auto& local_cb_list = getLocalCbList();
+    do {    // Dummy loop to use break.
+        CbType local_cb;
+        if (local_cb_list.size() && *local_cb_list.begin()) {
+            local_cb = *local_cb_list.begin();
+        }
+        if (!globalCallback && !local_cb) {
+            // No callback exists.
+            break;
+        }
+
+        auto& local_ctx_map = getLocalCtxMap();
+        auto& local_pre_cb_list = getLocalPreCbList();
+        PreCbType local_pre_cb;
+        if (local_pre_cb_list.size() && *local_pre_cb_list.begin()) {
+            local_pre_cb = *local_pre_cb_list.begin();
+        }
+
+        // Local callback overrides the global callback.
+        if (local_pre_cb) {
+            if (!local_pre_cb(level, source_file, func_name, line_number,
+                              local_ctx_map)) {
+                break;
+            }
+        } else if (globalPreCallback) {
+            if (!globalPreCallback(level, source_file, func_name, line_number,
+                                   local_ctx_map)) {
+                break;
+            }
+        } else {
+            // No callback exists.
+            break;
+        }
+
+        // Generate a separate message without timestamp, tid.
+        char cb_msg[MSG_SIZE];
+        size_t cb_cur_len = 0;
+        size_t cb_avail_len = MSG_SIZE;
+        size_t cb_msg_len = 0;
+        va_list args;
+        va_start(args, format);
+        _vsnprintf(cb_msg, cb_avail_len, cb_cur_len, cb_msg_len, format, args);
+        va_end(args);
+
+        // Call global callback first.
+        bool ret = true;
+        if (local_cb) {
+            ret = local_cb(level, source_file, func_name, line_number,
+                epoch_us, tid_hash, cb_msg_len, cb_msg,
+                getLocalCtxMap());
+        } else if (globalCallback) {
+            ret = globalCallback(level, source_file, func_name, line_number,
+                                 epoch_us, tid_hash, cb_msg_len, cb_msg,
+                                 getLocalCtxMap());
+        }
+        if (!ret) return;
+    } while (false);
+
+    if (level > curLogLevel.load(MOR)) return;
+    if (!fs) return;
+
     // Print filename part only (excluding directory path).
     size_t last_slash = 0;
     for (size_t ii=0; source_file && source_file[ii] != 0; ++ii) {
         if (source_file[ii] == '/' || source_file[ii] == '\\') last_slash = ii;
     }
 
-    SimpleLoggerMgr::TimeInfo lt( std::chrono::system_clock::now() );
+    SimpleLoggerMgr::TimeInfo lt( ts_now );
     int tz_gap_abs = (tzGap < 0) ? (tzGap * -1) : (tzGap);
 
     // [time] [tid] [log type] [user msg] [stack info]
@@ -1192,7 +1266,7 @@ void SimpleLogger::put(int level,
     va_end(args);
     (void)cur_len;
 
-    std::unique_lock<std::mutex> l(SimpleLoggerMgr::displayLock);
+    std::unique_lock<std::mutex> l(SimpleLoggerMgr::display_lock);
     std::cout << msg << std::endl;
     l.unlock();
 }
@@ -1280,3 +1354,114 @@ void SimpleLogger::flushAll() {
     flush(start_pos);
 }
 
+SimpleLogger::CtxMap& SimpleLogger::getLocalCtxMap() {
+    thread_local SimpleLogger::CtxMap ctx_map;
+    return ctx_map;
+}
+
+std::list<SimpleLogger::CbType>& SimpleLogger::getLocalCbList() {
+    thread_local std::list<SimpleLogger::CbType> cb_list;
+    return cb_list;
+}
+
+std::list<SimpleLogger::PreCbType>& SimpleLogger::getLocalPreCbList() {
+    thread_local std::list<SimpleLogger::PreCbType> pre_cb_list;
+    return pre_cb_list;
+}
+
+void SimpleLogger::setGlobalCallback(PreCbType pre_cb, CbType cb) {
+    globalPreCallback = pre_cb;
+    globalCallback = cb;
+}
+
+bool SimpleLogger::checkWhetherToLog(int level,
+                                     const char* source_file,
+                                     const char* func_name,
+                                     size_t line_number) {
+    if (getLogLevel() >= level) {
+        return true;
+    }
+
+    if (globalPreCallback &&
+        globalPreCallback(level, source_file, func_name, line_number,
+                          getLocalCtxMap())) {
+        return true;
+    }
+
+    auto& local_pre_cb_list = getLocalPreCbList();
+    if (local_pre_cb_list.size()) {
+        auto entry = local_pre_cb_list.begin();
+        if (*entry &&
+            (*entry)(level, source_file, func_name, line_number, getLocalCtxMap())) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+SimpleLoggerLocalCtx::SimpleLoggerLocalCtx(
+    SimpleLogger* l,
+    const SimpleLogger::CtxMap& ctx,
+    SimpleLogger::PreCbType pre_cb,
+    SimpleLogger::CbType cb)
+    : logger(l)
+    , callback(cb)
+    , preCallback(pre_cb)
+    , localCtx(ctx)
+{
+    if (!logger) return;
+
+    auto& local_ctx_map = logger->getLocalCtxMap();
+    for (auto& entry: localCtx) {
+        auto ee = local_ctx_map.find(entry.first);
+        if (ee == local_ctx_map.end()) {
+            local_ctx_map.insert(entry);
+        } else {
+            auto eee = entry.second.rbegin();
+            while (eee != entry.second.rend()) {
+                ee->second.push_front(*eee);
+                eee++;
+            }
+        }
+    }
+
+    if (preCallback) {
+        auto& local_pre_cb_list = logger->getLocalPreCbList();
+        local_pre_cb_list.push_front(preCallback);
+    }
+
+    if (callback) {
+        auto& local_cb_list = logger->getLocalCbList();
+        local_cb_list.push_front(callback);
+    }
+}
+
+SimpleLoggerLocalCtx::~SimpleLoggerLocalCtx() {
+    if (!logger) return;
+
+    auto& local_ctx_map = logger->getLocalCtxMap();
+    for (auto& entry: localCtx) {
+        auto ee = local_ctx_map.find(entry.first);
+        if (ee != local_ctx_map.end()) {
+            // Remove elements same as the size of entry.second.
+            for (size_t ii=0; ii<entry.second.size(); ++ii) {
+                ee->second.pop_front();
+            }
+        }
+        // If empty, remove it.
+        if (ee->second.empty()) {
+            local_ctx_map.erase(ee);
+        }
+    }
+
+    if (preCallback) {
+        auto& local_pre_cb_list = logger->getLocalPreCbList();
+        local_pre_cb_list.pop_front();
+    }
+
+    if (callback) {
+        auto& local_cb_list = logger->getLocalCbList();
+        local_cb_list.pop_front();
+    }
+}

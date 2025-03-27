@@ -1,22 +1,33 @@
-/************************************************************************
-Modifications Copyright 2017-2019 eBay Inc.
-
-Original Copyright 2017 Jung-Sang Ahn
-See URL: https://github.com/greensky00/simple_logger
-         (v0.3.25)
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    https://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-**************************************************************************/
+/**
+ * Copyright (C) 2017-present Jung-Sang Ahn <jungsang.ahn@gmail.com>
+ * All rights reserved.
+ *
+ * https://github.com/greensky00
+ *
+ * Simple Logger
+ * Version: 0.4.0
+ *
+ * Permission is hereby granted, free of charge, to any person
+ * obtaining a copy of this software and associated documentation
+ * files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use,
+ * copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following
+ * conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
 
 #pragma once
 
@@ -24,11 +35,13 @@ limitations under the License.
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
+#include <functional>
 #include <list>
 #include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -52,8 +65,8 @@ limitations under the License.
 
 
 // printf style log macro
-#define _log_(level, l, ...)        \
-    if (l && l->getLogLevel() >= level) \
+#define _log_(level, l, ...)                                            \
+    if (l && l->checkWhetherToLog(level, __FILE__, __func__, __LINE__)) \
         (l)->put(level, __FILE__, __func__, __LINE__, __VA_ARGS__)
 
 #define _log_sys(l, ...)    _log_(SimpleLogger::SYS,     l, __VA_ARGS__)
@@ -66,8 +79,8 @@ limitations under the License.
 
 
 // stream log macro
-#define _stream_(level, l)              \
-    if (l && l->getLogLevel() >= level) \
+#define _stream_(level, l)                                              \
+    if (l && l->checkWhetherToLog(level, __FILE__, __func__, __LINE__)) \
         l->eos() = l->stream(level, l, __FILE__, __func__, __LINE__)
 
 #define _s_sys(l)   _stream_(SimpleLogger::SYS,     l)
@@ -108,7 +121,7 @@ limitations under the License.
     std::chrono::system_clock::time_point cur =                         \
         std::chrono::system_clock::now();                               \
     bool timeout = false;                                               \
-    {   std::lock_guard<std::mutex> l(timer_lock);                      \
+    {   std::lock_guard<std::mutex> __ll__(timer_lock);                 \
         std::chrono::duration<double> elapsed = cur - last_timeout;     \
         if ( elapsed.count() * 1000 > interval_ms ||                    \
              !first_event_fired ) {                                     \
@@ -127,13 +140,38 @@ limitations under the License.
         _log_(lv1, l, __VA_ARGS__);                                     \
     }
 
-
-class SimpleLoggerMgr;
 class SimpleLogger {
     friend class SimpleLoggerMgr;
+    friend class SimpleLoggerLocalCtx;
 public:
     static const int MSG_SIZE = 4096;
     static const std::memory_order MOR = std::memory_order_relaxed;
+
+    using CtxMap = std::unordered_map<std::string, std::list<std::string>>;
+
+    // This callback determines whether to log or not.
+    // If it returns `false`, the log will be skipped.
+    using PreCbType = std::function<bool(
+        int level,
+        const char* source_file,
+        const char* func_name,
+        size_t line_number,
+        const CtxMap& ctx_map
+    )>;
+
+    // This callback is called before the log is written.
+    // If this callback returns `false`, the log will not be written.
+    using CbType = std::function<bool(
+        int level,
+        const char* source_file,
+        const char* func_name,
+        size_t line_number,
+        uint64_t time_since_epoch_us,
+        uint32_t tid,
+        size_t msg_len,
+        const char* msg,
+        const CtxMap& ctx_map
+    )>;
 
     enum Levels {
         SYS         = 0,
@@ -171,18 +209,18 @@ public:
             }
         }
 
-        inline void setLogInfo(int _level,
-                               SimpleLogger* _logger,
-                               const char* _file,
-                               const char* _func,
-                               size_t _line)
+        inline void setLogInfo(int lv,
+                               SimpleLogger* lg,
+                               const char* fl,
+                               const char* fc,
+                               size_t ln)
         {
             sStream.str(std::string());
-            level = _level;
-            logger = _logger;
-            file = _file;
-            func = _func;
-            line = _line;
+            level = lv;
+            logger = lg;
+            file = fl;
+            func = fc;
+            line = ln;
         }
 
     private:
@@ -213,8 +251,8 @@ public:
     }
 
     EndOfStmt& eos() {
-        thread_local EndOfStmt _eos;
-        return _eos;
+        thread_local EndOfStmt eos_inst;
+        return eos_inst;
     }
 
 private:
@@ -234,7 +272,7 @@ private:
         // True if no other thread is working on it.
         bool available();
 
-        int write(size_t _len, char* msg);
+        int write(size_t len, char* msg);
         int flush(std::ofstream& fs);
 
         size_t len;
@@ -281,6 +319,13 @@ public:
              ...);
     void flushAll();
 
+    void setGlobalCallback(PreCbType pre_cb, CbType cb);
+
+    bool checkWhetherToLog(int level,
+                           const char* source_file,
+                           const char* func_name,
+                           size_t line_number);
+
 private:
     void calcTzGap();
     void findMinMaxRevNum(size_t& min_revnum_out,
@@ -293,6 +338,10 @@ private:
     void execCmd(const std::string& cmd);
     void doCompression(size_t file_num);
     bool flush(size_t start_pos);
+
+    CtxMap& getLocalCtxMap();
+    std::list<CbType>& getLocalCbList();
+    std::list<PreCbType>& getLocalPreCbList();
 
     std::string filePath;
     size_t minRevnum;
@@ -318,6 +367,9 @@ private:
     std::atomic<uint64_t> cursor;
     std::vector<LogElem> logs;
     std::mutex flushingLogs;
+
+    PreCbType globalPreCallback;
+    CbType globalCallback;
 };
 
 // Singleton class
@@ -391,26 +443,26 @@ public:
 
     const std::string& getCriticalInfo() const;
 
-    static std::mutex displayLock;
+    static std::mutex display_lock;
 
 private:
     // Copy is not allowed.
     SimpleLoggerMgr(const SimpleLoggerMgr&) = delete;
     SimpleLoggerMgr& operator=(const SimpleLoggerMgr&) = delete;
 
-    static const size_t stackTraceBufferSize = 65536;
+    static const size_t STACK_TRACE_BUFFER_SIZE = 65536;
 
     // Singleton instance and lock.
     static std::atomic<SimpleLoggerMgr*> instance;
-    static std::mutex instanceLock;
+    static std::mutex instance_lock;
 
     SimpleLoggerMgr();
     ~SimpleLoggerMgr();
 
-    void _flushStackTraceBuffer(size_t buffer_len,
-                                uint32_t tid_hash,
-                                uint64_t kernel_tid,
-                                bool crash_origin);
+    void flushStackTraceBufferInternal(size_t buffer_len,
+                                       uint32_t tid_hash,
+                                       uint64_t kernel_tid,
+                                       bool crash_origin);
     void flushStackTraceBuffer(RawStackInfo& stack_info);
     void flushRawStack(RawStackInfo& stack_info);
     void addRawStackInfo(bool crash_origin = false);
@@ -480,3 +532,18 @@ private:
     std::vector<RawStackInfo> crashDumpThreadStacks;
 };
 
+class SimpleLoggerLocalCtx {
+public:
+    SimpleLoggerLocalCtx(SimpleLogger* l,
+                         const SimpleLogger::CtxMap& ctx,
+                         SimpleLogger::PreCbType pre_cb = nullptr,
+                         SimpleLogger::CbType cb = nullptr);
+
+    ~SimpleLoggerLocalCtx();
+
+private:
+    SimpleLogger* logger;
+    SimpleLogger::CbType callback;
+    SimpleLogger::PreCbType preCallback;
+    SimpleLogger::CtxMap localCtx;
+};
