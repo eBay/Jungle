@@ -49,7 +49,21 @@ enum CompactionCbDecision : int {
 
 struct CompactionCbParams {
     CompactionCbParams() {}
+
+    /**
+     * Record to be compacted.
+     */
     Record rec;
+
+    /**
+     * The smallest key in the table that is being compacted.
+     */
+    SizedBuf minKey;
+
+    /**
+     * The biggest key in the table that is being compacted.
+     */
+    SizedBuf maxKey;
 };
 
 using CompactionCbFunc =

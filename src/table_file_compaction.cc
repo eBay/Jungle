@@ -40,10 +40,10 @@ Status TableFile::compactTo(const std::string& dst_filename,
     FdbHandle* compact_handle = new FdbHandle(this, db_config, myOpt);
     EP( openFdbHandle(db_config, filename, compact_handle) );
 
-    s = compactToManully( compact_handle,
-                          dst_filename,
-                          options,
-                          dst_handle_out );
+    s = compactToManually( compact_handle,
+                           dst_filename,
+                           options,
+                           dst_handle_out );
 
     delete compact_handle;
     return s;
@@ -52,7 +52,7 @@ Status TableFile::compactTo(const std::string& dst_filename,
 // Check
 //   1) Jungle's own meta section, and
 //   2) User defined custom tombstone checking function.
-bool TableFile::isFdbDocTombstone(fdb_doc* doc)
+bool TableFile::isFdbDocTombstone(SizedBuf min_key, SizedBuf max_key, fdb_doc* doc)
 {
     const DBConfig* db_config = tableMgr->getDbConfig();
 
@@ -75,6 +75,9 @@ bool TableFile::isFdbDocTombstone(fdb_doc* doc)
         params.rec.meta = SizedBuf(user_meta_out.size, user_meta_out.data);
         params.rec.seqNum = doc->seqnum;
 
+        params.minKey = min_key;
+        params.maxKey = max_key;
+
         CompactionCbDecision dec = db_config->compactionCbFunc(params);
         if (dec == CompactionCbDecision::DROP) {
             i_meta.isTombstone = true;
@@ -83,10 +86,10 @@ bool TableFile::isFdbDocTombstone(fdb_doc* doc)
     return i_meta.isTombstone;
 }
 
-Status TableFile::compactToManully(FdbHandle* compact_handle,
-                                   const std::string& dst_filename,
-                                   const CompactOptions& options,
-                                   void*& dst_handle_out)
+Status TableFile::compactToManually(FdbHandle* compact_handle,
+                                    const std::string& dst_filename,
+                                    const CompactOptions& options,
+                                    void*& dst_handle_out)
 {
     Timer tt;
     Status s;
@@ -134,6 +137,38 @@ Status TableFile::compactToManully(FdbHandle* compact_handle,
     const GlobalConfig::CompactionThrottlingOptions& t_opt =
         global_config->ctOpt;
 
+    // Get min and max key for the source table.
+    SizedBuf min_key;
+    SizedBuf max_key;
+    SizedBuf::Holder h_min_key(min_key);
+    SizedBuf::Holder h_max_key(max_key);
+    {
+        TableFile::Iterator itr;
+        EP( itr.init(nullptr, this, SizedBuf(), SizedBuf()) );
+        do {
+            Record rec_out;
+            Record::Holder h_rec_out(rec_out);
+            s = itr.get(rec_out);
+            if (!s.ok()) {
+                break;
+            }
+            rec_out.kv.key.moveTo(min_key);
+            rec_out.free();
+
+            s = itr.gotoEnd();
+            if (!s.ok()) {
+                break;
+            }
+            s = itr.get(rec_out);
+            if (!s.ok()) {
+                break;
+            }
+            rec_out.kv.key.moveTo(max_key);
+            rec_out.free();
+        } while (false); // dummy loop to use break;
+        itr.close();
+    }
+
     // Flush block cache for every given second.
     Timer sync_timer;
     Timer throttling_timer(t_opt.resolution_ms);
@@ -161,7 +196,7 @@ Status TableFile::compactToManully(FdbHandle* compact_handle,
             check_tombstone = false;
         }
         if (check_tombstone) {
-            is_tombstone_out = isFdbDocTombstone(ret_doc);
+            is_tombstone_out = isFdbDocTombstone(min_key, max_key, ret_doc);
         }
 
         if (is_tombstone_out) {
@@ -451,7 +486,7 @@ Status TableFile::mergeCompactTo(const std::string& file_to_merge,
 
         bool is_tombstone_out = false;
         if (!options.preserveTombstone) {
-            is_tombstone_out = isFdbDocTombstone(doc_chosen);
+            is_tombstone_out = isFdbDocTombstone(SizedBuf(), SizedBuf(), doc_chosen);
         }
         if (is_tombstone_out) {
             // Tombstone.
