@@ -191,7 +191,7 @@ public:
 
     Status getCheckpointSeqnum(uint64_t chk, uint64_t& seqnum_out);
 
-    bool isFdbDocTombstone(fdb_doc* doc);
+    bool isFdbDocTombstone(SizedBuf min_key, SizedBuf max_key, fdb_doc* doc);
 
     Status compactTo(const std::string& dst_filename,
                      const CompactOptions& options,
@@ -396,10 +396,10 @@ private:
                          std::list<uint64_t>& checkpoints,
                          bool remaining_all = false);
 
-    Status compactToManully(FdbHandle* compact_handle,
-                            const std::string& dst_filename,
-                            const CompactOptions& options,
-                            void*& dst_handle_out);
+    Status compactToManually(FdbHandle* compact_handle,
+                             const std::string& dst_filename,
+                             const CompactOptions& options,
+                             void*& dst_handle_out);
 
 // === VARIABLES
     // File name.
