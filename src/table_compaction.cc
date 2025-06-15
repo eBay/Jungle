@@ -689,6 +689,8 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
     std::string dst_filename;
     EP( mani->issueTableNumber(dst_table_num) );
     dst_filename = TableFile::getTableFileName(opt.path, opt.prefixNum, dst_table_num);
+    _log_info(myLog, "destination table number %zu, filename %s",
+              dst_table_num, dst_filename.c_str());
 
     if (opt.fOps->exist(dst_filename)) {
         // Previous file exists, which means that there is a legacy log file.
@@ -707,8 +709,14 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
     // Open newly compacted file, and add it to manifest.
     TableFile* newly_compacted_file = new TableFile(this);
     newly_compacted_file->setLogger(myLog);
-    newly_compacted_file->load( level, dst_table_num, dst_filename,
-                                opt.fOps, TableFileOptions() );
+    s = newly_compacted_file->load( level, dst_table_num, dst_filename,
+                                    opt.fOps, TableFileOptions() );
+    if (!s.ok()) {
+        _log_err(myLog, "failed to load newly compacted file %s: %d",
+                 dst_filename.c_str(), (int)s);
+        delete newly_compacted_file;
+        throw s;
+    }
     mani->addTableFile(level, 0, local_victim->minKey, newly_compacted_file);
 
     // Add special checkpoint 0, for base snapshot.
