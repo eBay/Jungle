@@ -353,6 +353,92 @@ int log_manifest_corruption_across_file_test() {
     return 0;
 }
 
+int discontinued_stale_log_file_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.maxEntriesInLogFile = 10;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    std::string key_prefix = "key";
+    std::string val_prefix = "val";
+
+    // Insert 55 keys.
+    for (size_t ii = 0; ii < 55; ++ii) {
+        std::string key_str = key_prefix + TestSuite::lzStr(3, ii);;
+        std::string val_str = val_prefix + TestSuite::lzStr(3, ii);
+        CHK_Z(db->set(jungle::KV(key_str, val_str)));
+    }
+
+    // Flush into table.
+    // Log files is no longer alive, but not removed due to iterator.
+    CHK_Z(db->sync(false));
+
+    EventAwaiter ea;
+    auto user_handler = [&](jungle::Status s, void* ctx) {
+        ea.invoke();
+    };
+
+    jungle::DebugParams dp;
+    std::string clone_path = filename + "_clone";
+    dp.logFlushBeforeRemoveCb = [&](const jungle::DebugParams::GenericCbParams& p) {
+        db->sync(true);
+
+        // Copy file at this moment to mimic crash.
+        TestSuite::copyfile(filename, clone_path);
+    };
+    jungle::DB::setDebugParams(dp);
+    jungle::DB::enableDebugCallbacks(true);
+
+    db->flushLogsAsync(jungle::FlushOptions(), user_handler, nullptr);
+    ea.wait();
+
+    CHK_Z(jungle::DB::close(db));
+
+    // Now disable debug callbacks.
+    jungle::DB::enableDebugCallbacks(false);
+
+    // Open clone.
+    jungle::DB* db2 = nullptr;
+    CHK_Z(jungle::DB::open(&db2, clone_path, config));
+
+    // Insert 25 more keys.
+    for (size_t ii = 55; ii < 80; ++ii) {
+        std::string key_str = key_prefix + TestSuite::lzStr(3, ii);;
+        std::string val_str = val_prefix + TestSuite::lzStr(3, ii);
+        CHK_Z(db2->set(jungle::KV(key_str, val_str)));
+    }
+
+    // Flush into table.
+    // The middle log files should be removed.
+    CHK_Z(db2->sync(false));
+    CHK_Z(db2->flushLogs());
+
+    // Insert 25 more keys.
+    for (size_t ii = 80; ii < 105; ++ii) {
+        std::string key_str = key_prefix + TestSuite::lzStr(3, ii);;
+        std::string val_str = val_prefix + TestSuite::lzStr(3, ii);
+        CHK_Z(db2->set(jungle::KV(key_str, val_str)));
+    }
+    CHK_Z(db2->sync(false));
+    CHK_Z(jungle::DB::close(db2));
+
+    // Re-open the clone, it should be ok.
+    CHK_Z(jungle::DB::open(&db2, clone_path, config));
+    CHK_Z(jungle::DB::close(db2));
+
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int restore_from_backup_log_manifest() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1513,6 +1599,9 @@ int main(int argc, char** argv) {
 
     ts.doTest("log manifest corruption across multi log files test",
               log_manifest_corruption_across_file_test);
+
+    ts.doTest("discontinued stale log file test",
+              discontinued_stale_log_file_test);
 
     ts.doTest("restore from backup log manifest",
               restore_from_backup_log_manifest);
