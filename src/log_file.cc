@@ -78,8 +78,8 @@ std::string LogFile::getLogFileName(const std::string& path,
     // Log file name example: log0001_00000001
     //                        log0001_00000002
     //                        ...
-    char p_num[16];
-    char l_num[16];
+    char p_num[128];
+    char l_num[128];
     sprintf(p_num, "%04" PRIu64, prefix_num);
     sprintf(l_num, "%08" PRIu64, log_file_num);
     std::string l_filename = path + "/log" + p_num + "_" + l_num;

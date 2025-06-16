@@ -286,8 +286,8 @@ std::string TableFile::getTableFileName(const std::string& path,
     // Table file name example: table0001_00000001
     //                          table0001_00000002
     //                          ...
-    char p_num[16];
-    char t_num[16];
+    char p_num[128];
+    char t_num[128];
     sprintf(p_num, "%04" PRIu64, prefix_num);
     sprintf(t_num, "%08" PRIu64, table_file_num);
     std::string t_filename = path + "/table" + p_num + "_" + t_num;
