@@ -1367,6 +1367,7 @@ Status LogMgr::flush(const FlushOptions& options,
         return Status::INVALID_SEQNUM;
     }
 
+    DBMgr* dbm = DBMgr::getWithoutInit();
     const DBConfig* db_config = getDbConfig();
     OpSemaWrapper ow(&flushSema, db_config->serializeMultiThreadedLogFlush);
     if (!ow.acquire()) {
@@ -1513,7 +1514,6 @@ Status LogMgr::flush(const FlushOptions& options,
             //   as we need to purge log files properly.
         }
 
-        DBMgr* dbm = DBMgr::getWithoutInit();
         if (dbm && dbm->isDebugCallbackEffective()) {
             DebugParams dp = dbm->getDebugParams();
             if (dp.logFlushCb) {
@@ -1555,6 +1555,15 @@ Status LogMgr::flush(const FlushOptions& options,
         }
     }
     mani->setLastFlushedLog(ln_to);
+
+    if (dbm && dbm->isDebugCallbackEffective()) {
+        DebugParams dp = dbm->getDebugParams();
+        if (dp.logFlushBeforeRemoveCb) {
+            DebugParams::GenericCbParams p;
+            dp.logFlushBeforeRemoveCb(p);
+        }
+    }
+
     // Remove log file except for ln_to.
     for (uint64_t ii = ln_from; ii < ln_to; ++ii) {
         // Avoid loading memtable because of this call.
@@ -2080,15 +2089,6 @@ Status LogMgr::close() {
     syncSema.enabled = false;
     _log_info(myLog, "Disabled syncing for %p, %zu ticks", this, ticks);
 
-    if (!db_config->readOnly) {
-        // Last sync before close (not in read-only mode).
-        needSkippedManiSync = true;
-        syncInternal(false);
-        _log_info(myLog, "Last sync done");
-    } else {
-        _log_info(myLog, "read-only mode: skip the last sync");
-    }
-
     OpSemaWrapper op_flush(&flushSema, db_config->serializeMultiThreadedLogFlush);
     _log_info(myLog, "Wait for on-going flush operation.");
     ticks = 0;
@@ -2096,9 +2096,22 @@ Status LogMgr::close() {
         ticks++;
         Timer::sleepMs(1);
     }
-
     flushSema.enabled = false;
     _log_info(myLog, "Disabled flushing for %p, %zu ticks", this, ticks);
+
+    // WARNING:
+    //   The last `syncInternal` should be invoked after making sure
+    //   that no other thread is working on sync or flush.
+    //   Otherwise, it may write incomplete data to the manifest file,
+    //   which may cause data corruption.
+    if (!db_config->readOnly) {
+        // Last sync before close (not in read-only mode).
+        needSkippedManiSync = true;
+        syncInternal(true);
+        _log_info(myLog, "Last sync done");
+    } else {
+        _log_info(myLog, "read-only mode: skip the last sync");
+    }
 
     OpSemaWrapper op_reclaim(&reclaimSema, db_config->serializeMultiThreadedLogFlush);
     _log_info(myLog, "Wait for on-going log reclaim operation.");

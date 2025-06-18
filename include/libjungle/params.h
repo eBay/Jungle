@@ -308,6 +308,13 @@ struct DebugParams {
     std::function< void(const GenericCbParams&) > logFlushCb;
 
     /**
+     * Callback function that will be invoked right after
+     * the manifest's last flushed log file number, but before
+     * removing the stale log files.
+     */
+    std::function< void(const GenericCbParams&) > logFlushBeforeRemoveCb;
+
+    /**
      * Callback function that will be invoked at the beginning log sync
      * (reading memtable data and writing them into log files).
      */
