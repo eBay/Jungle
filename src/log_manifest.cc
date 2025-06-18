@@ -377,7 +377,7 @@ Status LogManifest::load(const std::string& path,
             synced_seq = last_synced_seq;
         }
 
-        if (l_file_num < lastFlushedLog) {
+        if (valid_number(lastFlushedLog) && l_file_num < lastFlushedLog) {
             // If the log file number is less than last flushed log,
             // it is not valid.
             _log_warn(myLog, "log file %zu is less than last flushed log %zu, "
