@@ -371,7 +371,7 @@ int discontinued_stale_log_file_test() {
 
     // Insert 55 keys.
     for (size_t ii = 0; ii < 55; ++ii) {
-        std::string key_str = key_prefix + TestSuite::lzStr(3, ii);;
+        std::string key_str = key_prefix + TestSuite::lzStr(3, ii);
         std::string val_str = val_prefix + TestSuite::lzStr(3, ii);
         CHK_Z(db->set(jungle::KV(key_str, val_str)));
     }
@@ -410,7 +410,7 @@ int discontinued_stale_log_file_test() {
 
     // Insert 25 more keys.
     for (size_t ii = 55; ii < 80; ++ii) {
-        std::string key_str = key_prefix + TestSuite::lzStr(3, ii);;
+        std::string key_str = key_prefix + TestSuite::lzStr(3, ii);
         std::string val_str = val_prefix + TestSuite::lzStr(3, ii);
         CHK_Z(db2->set(jungle::KV(key_str, val_str)));
     }
