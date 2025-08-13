@@ -38,3 +38,4 @@ $VALGRIND ./tests/level_extension_test --abort-on-failure
 $VALGRIND ./tests/compression_test --abort-on-failure
 $VALGRIND ./tests/atomic_batch_test --abort-on-failure
 $VALGRIND ./tests/builder_test --abort-on-failure
+$VALGRIND ./tests/disabling_seq_index_test --abort-on-failure

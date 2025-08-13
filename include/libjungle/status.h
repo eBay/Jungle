@@ -91,6 +91,7 @@ public:
         DECOMPRESSION_FAILED            = -64,
         OPERATION_STOPPED               = -65,
         MANIFEST_NOT_EXIST              = -66,
+        SEQINDEX_UNAVAILABLE            = -67,
 
         ERROR                           = -32768
     };

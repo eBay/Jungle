@@ -132,7 +132,8 @@ fdb_config TableFile::FdbHandle::getFdbSettings(const DBConfig* db_config) {
     }
     config.max_block_reusing_cycle = db_config->maxBlockReuseCycle;
     config.min_block_reuse_filesize = tFileOpt.minBlockReuseFileSize;
-    config.seqtree_opt = FDB_SEQTREE_USE;
+    config.seqtree_opt =
+        db_config->useSequenceIndex ? FDB_SEQTREE_USE : FDB_SEQTREE_NOT_USE;
     config.purging_interval = 0; // Disable.
     config.num_keeping_headers = 10;
     config.do_not_move_to_compacted_file = true;

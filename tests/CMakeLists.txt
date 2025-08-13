@@ -55,6 +55,8 @@ unit_test(NAME sync_and_flush_test SOURCES ${TEST_DIR}/jungle/sync_and_flush_tes
 
 unit_test(NAME nearest_search_test SOURCES ${TEST_DIR}/jungle/nearest_search_test.cc)
 
+unit_test(NAME disabling_seq_index_test SOURCES ${TEST_DIR}/jungle/disabling_seq_index_test.cc)
+
 unit_test(NAME builder_test SOURCES ${TEST_DIR}/jungle/builder_test.cc)
 
 unit_test(NAME seq_itr_test SOURCES ${TEST_DIR}/jungle/seq_itr_test.cc)
