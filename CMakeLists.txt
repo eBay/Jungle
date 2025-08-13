@@ -276,6 +276,7 @@ if(CODE_COVERAGE GREATER 0)
         compression_test
         atomic_batch_test
         builder_test
+        disabling_seq_index_test
     )
 endif()
 

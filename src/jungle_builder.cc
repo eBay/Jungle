@@ -13,9 +13,10 @@ namespace jungle {
 
 namespace builder {
 
-fdb_config get_fdb_config() {
+fdb_config get_fdb_config(const Builder& builder) {
     fdb_config config = fdb_get_default_config();
-    config.seqtree_opt = FDB_SEQTREE_USE;
+    config.seqtree_opt =
+        builder.getDBConfig().useSequenceIndex ? FDB_SEQTREE_USE : FDB_SEQTREE_NOT_USE;
     config.wal_flush_before_commit = false;
     config.bulk_load_mode = true;
     config.bottom_up_index_build = true;
@@ -155,7 +156,7 @@ Status Builder::set(const Record& rec) {
             }
         }
 
-        fdb_config f_conf = get_fdb_config();
+        fdb_config f_conf = get_fdb_config(*this);
         curTableIdx = tableIdxCounter++;
         curFileName = TableFile::getTableFileName(dstPath, 0, curTableIdx);
 

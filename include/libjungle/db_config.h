@@ -160,6 +160,7 @@ public:
         , safeMode(false)
         , serializeMultiThreadedLogFlush(false)
         , skipManifestSync(false)
+        , useSequenceIndex(true)
     {
         tableSizeRatio.push_back(2.5);
         levelSizeRatio.push_back(10.0);
@@ -621,6 +622,21 @@ public:
      * data by scanning the log files.
      */
     bool skipManifestSync;
+
+    /**
+     * [EXPERIMENTAL]
+     * If `false`, both disk size and operation costs will be reduced,
+     * but sequence iterator will not be available. It is `true` by default.
+     * Other APIs such as `getSN`, `getRecord`, `setSN`, etc. will still be usable.
+     *
+     * A DB instance with `useSequenceIndex = true` can be opened with
+     * `useSequenceIndex = false` without any issues.
+     *
+     * However, if a DB instance with `useSequenceIndex = false` is opened with
+     * `useSequenceIndex = true`, a full compaction should be executed before
+     * using sequence iterator. Otherwise, some data may not be accessible.
+     */
+    bool useSequenceIndex;
 };
 
 class GlobalConfig {

@@ -105,6 +105,10 @@ Status Iterator::initSN(DB* db,
     Status s;
     EP( db->p->checkHandleValidity() );
 
+    if (!db->p->dbConfig.useSequenceIndex) {
+        return Status::SEQINDEX_UNAVAILABLE;
+    }
+
     p->db = db;
     p->type = ItrInt::BY_SEQ;
     if (p->db->p->dbConfig.cmpFunc) {
