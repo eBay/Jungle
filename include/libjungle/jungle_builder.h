@@ -106,6 +106,10 @@ public:
 
     Status close();
 
+    const DBConfig& getDBConfig() const {
+        return dbConfig;
+    }
+
 private:
     Status finalizeFile();
 
