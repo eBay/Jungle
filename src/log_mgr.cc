@@ -1768,8 +1768,9 @@ Status LogMgr::checkpoint(uint64_t& seq_num_out, bool call_fsync) {
    }
     // Durable sync all.
     s = sync(call_fsync);
-    // Tolerate race condition, report error for all the others.
-    if (!s && s != Status::OPERATION_IN_PROGRESS) return s;
+    if (!s) {
+        return s;
+    }
 
     return Status();
 }

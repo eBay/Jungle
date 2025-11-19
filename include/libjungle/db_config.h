@@ -158,7 +158,7 @@ public:
         , fastIndexScan(false)
         , seqLoadingDelayFactor(0)
         , safeMode(false)
-        , serializeMultiThreadedLogFlush(false)
+        , serializeMultiThreadedLogFlush(true)
         , skipManifestSync(false)
         , useSequenceIndex(true)
     {
