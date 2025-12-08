@@ -81,6 +81,8 @@ unit_test(NAME compression_test SOURCES ${TEST_DIR}/jungle/compression_test.cc)
 
 unit_test(NAME mt_test SOURCES ${TEST_DIR}/jungle/mt_test.cc)
 
+unit_test(NAME mt_write_stress_test SOURCES ${TEST_DIR}/jungle/mt_write_stress_test.cc)
+
 unit_test(NAME large_test SOURCES ${TEST_DIR}/jungle/large_test.cc)
 
 unit_test(NAME atomic_batch_test SOURCES ${TEST_DIR}/jungle/atomic_batch_test.cc)
