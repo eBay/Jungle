@@ -36,16 +36,6 @@ void WorkerBase::updateGlobalConfig(const GlobalConfig& g_config) {
     newGConfig = std::make_unique<GlobalConfig>(g_config);
 }
 
-void WorkerBase::applyNewGlobalConfig(const GlobalConfig& g_config) {
-    gConfig = g_config;
-    WorkerOptions options;
-    options.sleepDurationMs = gConfig.flusherSleepDuration_ms;
-    options.worker = this;
-    curOptions = options;
-    _log_info(DBMgr::getWithoutInit()->getLogger(),
-              "worker %s applied new global config", workerName.c_str());
-}
-
 void WorkerBase::loop() {
     WorkerBase* worker = this;
 #ifdef __linux__
