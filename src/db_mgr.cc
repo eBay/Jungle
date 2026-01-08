@@ -184,6 +184,16 @@ void DBMgr::initInternal(const GlobalConfig& config) {
     twMgr->init();
 }
 
+Status DBMgr::updateGlobalConfig(const GlobalConfig& new_config) {
+    gConfig = new_config;
+    _log_info(myLog, "updating global config");
+    printGlobalConfig();
+    wMgr->updateGlobalConfig(new_config);
+    _log_info(myLog, "updated global config, each worker will apply it after "
+              "finishing current task");
+    return Status();
+}
+
 DBMgr* DBMgr::get() {
     DBMgr* mgr = instance.load(MOR);
     if (!mgr) {

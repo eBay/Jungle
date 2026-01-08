@@ -172,17 +172,31 @@ int auto_flusher_stress_test(size_t dur_sec) {
 
     TestSuite::Progress pp(dur_sec, "populating", "sec");
     TestSuite::Timer tt(dur_sec * 1000);
-    while (!tt.timeover()) {
-        std::string key = "k" + TestSuite::lzStr(7, idx);
-        std::string val = "v" + TestSuite::lzStr(7, idx);
-        CHK_Z(db->set(jungle::KV(key, val)));
-        idx++;
-        args.lastInsertedIdx = idx;
+    auto run_writes = [&]() {
+        while (!tt.timeover()) {
+            std::string key = "k" + TestSuite::lzStr(7, idx);
+            std::string val = "v" + TestSuite::lzStr(7, idx);
+            CHK_Z(db->set(jungle::KV(key, val)));
+            idx++;
+            args.lastInsertedIdx = idx;
 
-        uint64_t cur_sec = tt.getTimeUs() / 1000000;
-        pp.update(cur_sec);
-    }
-    TestSuite::_msg("%ld writes\n", idx);
+            uint64_t cur_sec = tt.getTimeUs() / 1000000;
+            pp.update(cur_sec);
+        }
+        TestSuite::_msg("%ld writes\n", idx);
+        return 0;
+    };
+    run_writes();
+
+    g_config.ltOpt.startNumLogs = 64;
+    g_config.ltOpt.limitNumLogs = 256;
+    g_config.ltOpt.maxSleepTimeMs = 500;
+    jungle::updateGlobalConfig(g_config);
+
+    TestSuite::sleep_sec(1, "waiting for the new global config to take effect");
+
+    tt.reset();
+    run_writes();
 
     args.termSignal = true;
     h.join();

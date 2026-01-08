@@ -27,14 +27,14 @@ public:
     struct LogReclaimerOptions : public WorkerOptions {
     };
 
-    LogReclaimer(const std::string& _w_name,
-                 const GlobalConfig& _config);
+    LogReclaimer(const std::string& wn,
+                 const GlobalConfig& c);
 
     ~LogReclaimer();
 
-    void work(WorkerOptions* opt_base);
+    void applyNewGlobalConfig(const GlobalConfig& g_config);
 
-    GlobalConfig gConfig;
+    void work();
 };
 
 

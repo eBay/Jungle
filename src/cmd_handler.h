@@ -28,12 +28,14 @@ public:
     struct CmdHandlerOptions : public WorkerOptions {
     };
 
-    CmdHandler(const std::string& _w_name,
-              const GlobalConfig& _config);
-    ~CmdHandler();
-    void work(WorkerOptions* opt_base);
+    CmdHandler(const std::string& wn,
+               const GlobalConfig& c);
 
-    GlobalConfig gConfig;
+    ~CmdHandler();
+
+    void applyNewGlobalConfig(const GlobalConfig& g_config);
+
+    void work();
 
 private:
     void handleCmd(DBWrap* target_dbw);

@@ -82,11 +82,12 @@ public:
             const GlobalConfig& g_config,
             FlusherType f_type = FlusherType::GENERIC);
     ~Flusher();
-    void work(WorkerOptions* opt_base);
+    void work();
+
+    void applyNewGlobalConfig(const GlobalConfig& g_config);
 
     void calcGlobalThrottling(size_t total_num_log_files);
 
-    GlobalConfig gConfig;
     size_t lastCheckedFileIndex;
     FlusherType type;
 };
