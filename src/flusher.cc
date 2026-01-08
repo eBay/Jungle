@@ -86,15 +86,19 @@ Flusher::Flusher(const std::string& w_name,
     : lastCheckedFileIndex(0xffff) // Any big number to start from 0.
     , type(f_type) {
     workerName = w_name;
-    gConfig = g_config;
-    FlusherOptions options;
-    options.sleepDuration_ms = gConfig.flusherSleepDuration_ms;
-    options.worker = this;
-    curOptions = options;
-    handle = std::thread(WorkerBase::loop, &curOptions);
+    applyNewGlobalConfig(g_config);
+    handle = std::thread(&WorkerBase::loop, this);
 }
 
 Flusher::~Flusher() {
+}
+
+void Flusher::applyNewGlobalConfig(const GlobalConfig& g_config) {
+    gConfig = g_config;
+    FlusherOptions options;
+    options.sleepDurationMs = gConfig.flusherSleepDuration_ms;
+    options.worker = this;
+    curOptions = options;
 }
 
 void Flusher::calcGlobalThrottling(size_t total_num_log_files) {
@@ -132,7 +136,7 @@ void Flusher::calcGlobalThrottling(size_t total_num_log_files) {
     }
 }
 
-void Flusher::work(WorkerOptions* opt_base) {
+void Flusher::work() {
     Status s;
 
     DBMgr* dbm = DBMgr::getWithoutInit();

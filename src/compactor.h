@@ -33,12 +33,13 @@ public:
     struct CompactorOptions : public WorkerOptions {
     };
 
-    Compactor(const std::string& _w_name,
-              const GlobalConfig& _config);
+    Compactor(const std::string& wn,
+              const GlobalConfig& c);
     ~Compactor();
-    void work(WorkerOptions* opt_base);
 
-    GlobalConfig gConfig;
+    void applyNewGlobalConfig(const GlobalConfig& g_config);
+
+    void work();
 
 private:
     bool chkLevel(size_t level,

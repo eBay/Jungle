@@ -29,18 +29,22 @@ limitations under the License.
 
 namespace jungle {
 
-Compactor::Compactor( const std::string& _w_name,
-                      const GlobalConfig& _config )
+Compactor::Compactor( const std::string& wn,
+                      const GlobalConfig& c )
     : lastCheckedFileIndex(0xffff) // Any big number to start from 0.
     , lastCompactedHashNum(0)
 {
-    workerName = _w_name;
-    gConfig = _config;
+    workerName = wn;
+    applyNewGlobalConfig(c);
+    handle = std::thread(&WorkerBase::loop, this);
+}
+
+void Compactor::applyNewGlobalConfig(const GlobalConfig& g_config) {
+    gConfig = g_config;
     CompactorOptions options;
-    options.sleepDuration_ms = gConfig.compactorSleepDuration_ms;
+    options.sleepDurationMs = gConfig.compactorSleepDuration_ms;
     options.worker = this;
     curOptions = options;
-    handle = std::thread(WorkerBase::loop, &curOptions);
 }
 
 Compactor::~Compactor() {
@@ -95,7 +99,7 @@ bool Compactor::chkLevel(size_t level,
     return false;
 }
 
-void Compactor::work(WorkerOptions* opt_base) {
+void Compactor::work() {
     Status s;
 
     DBMgr* dbm = DBMgr::getWithoutInit();

@@ -52,9 +52,9 @@ public:
 
     struct WorkerOptions {
         WorkerOptions()
-            : sleepDuration_ms(1000)
+            : sleepDurationMs(1000)
             , worker(nullptr) {}
-        size_t sleepDuration_ms;
+        size_t sleepDurationMs;
         WorkerBase* worker;
     };
 
@@ -64,19 +64,31 @@ public:
     virtual void run();
     virtual void stop();
     virtual void invoke();
-    virtual void work(WorkerOptions* options) = 0;
+    virtual void work() = 0;
     virtual void destroy(const DestroyOptions& options);
 
     virtual bool isIdle() const { return status == IDLE; }
     std::string name() const { return workerName; }
 
-    static void loop(WorkerOptions* options);
+    // To avoid any race condition, it will apply new global config after
+    // finishing current task.
+    void updateGlobalConfig(const GlobalConfig& g_config);
+
+    // Each worker may have different ways to apply new global config,
+    // so we let them implement this function.
+    virtual void applyNewGlobalConfig(const GlobalConfig& g_config) = 0;
+
+    void loop();
 
     std::thread handle;
     std::string workerName;
     WorkerOptions curOptions;
     std::atomic<WStatus> status;
     std::atomic<bool> doNotSleepNextTime;
+    GlobalConfig gConfig;
+
+    std::unique_ptr<GlobalConfig> newGConfig;
+    std::mutex newGConfigLock;
 
     EventAwaiter ea;
 };
@@ -89,6 +101,8 @@ public:
     Status addWorker(WorkerBase* worker);
     Status invokeWorker(const std::string& prefix, bool invoke_all = false);
     WorkerBase* getWorker(const std::string& name);
+
+    Status updateGlobalConfig(const GlobalConfig& new_config);
 
 private:
     std::mutex workersLock;

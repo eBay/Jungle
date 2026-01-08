@@ -80,6 +80,14 @@ public:
     static Status shutdown();
 
     /**
+     * Update global configurations on-the-fly.
+     *
+     * @param new_config New global configurations to apply.
+     * @return OK on success.
+     */
+    static Status updateGlobalConfig(const GlobalConfig& new_config);
+
+    /**
      * Open a Jungle instance in the given path.
      * If the given path is empty, create a new one.
      *
@@ -699,6 +707,17 @@ static inline Status init(const GlobalConfig& global_config) {
 static inline Status shutdown() {
     (void)shutdown;
     return DB::shutdown();
+}
+
+/**
+ * Update global configurations on-the-fly.
+ *
+ * @param new_config New global configurations to apply.
+ * @return OK on success.
+ */
+static inline Status updateGlobalConfig(const GlobalConfig& new_config) {
+    (void)updateGlobalConfig;
+    return DB::updateGlobalConfig(new_config);
 }
 
 /**

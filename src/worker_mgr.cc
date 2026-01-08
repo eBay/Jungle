@@ -31,10 +31,13 @@ WorkerBase::WorkerBase()
 WorkerBase::~WorkerBase() {
 }
 
-void WorkerBase::loop(WorkerOptions* opt) {
-    if (!opt || !opt->worker) return;
+void WorkerBase::updateGlobalConfig(const GlobalConfig& g_config) {
+    std::lock_guard<std::mutex> l(newGConfigLock);
+    newGConfig = std::make_unique<GlobalConfig>(g_config);
+}
 
-    WorkerBase* worker = opt->worker;
+void WorkerBase::loop() {
+    WorkerBase* worker = this;
 #ifdef __linux__
     std::string thread_name = "j_" + worker->workerName;
     thread_name = thread_name.substr(0, 15);
@@ -47,10 +50,20 @@ void WorkerBase::loop(WorkerOptions* opt) {
     _log_info(my_log, "worker %s initiated", worker->workerName.c_str());
 
     for (;;) {
+        {
+            std::lock_guard<std::mutex> l(worker->newGConfigLock);
+            if (worker->newGConfig) {
+                _log_info(my_log, "worker %s is applying new global config",
+                          worker->workerName.c_str());
+                worker->applyNewGlobalConfig(*worker->newGConfig);
+                worker->newGConfig.reset();
+            }
+        }
+
         // Sleep if IDLE or STOP.
         if ( (worker->status == IDLE || worker->status == STOP) &&
              !worker->doNotSleepNextTime.load() ) {
-            worker->ea.wait_ms(opt->sleepDuration_ms);
+            worker->ea.wait_ms(worker->curOptions.sleepDurationMs);
             worker->ea.reset();
         }
 
@@ -65,7 +78,7 @@ void WorkerBase::loop(WorkerOptions* opt) {
         WStatus val = WORKING;
         if (worker->status.compare_exchange_weak(exp, val)) {
             worker->doNotSleepNextTime = false;
-            worker->work(opt);
+            worker->work();
             // WORKING --> IDLE.
             exp = WORKING;
             val = IDLE;
@@ -166,6 +179,15 @@ WorkerBase* WorkerMgr::getWorker(const std::string& name) {
     }
 
     return nullptr;
+}
+
+Status WorkerMgr::updateGlobalConfig(const GlobalConfig& new_config) {
+    std::lock_guard<std::mutex> ll(workersLock);
+    for (auto& entry: workers) {
+        WorkerBase* worker = entry.second;
+        worker->updateGlobalConfig(new_config);
+    }
+    return Status();
 }
 
 } // namespace jungle

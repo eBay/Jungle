@@ -31,22 +31,27 @@ limitations under the License.
 
 namespace jungle {
 
-CmdHandler::CmdHandler( const std::string& _w_name,
-                        const GlobalConfig& _config )
+CmdHandler::CmdHandler( const std::string& wn,
+                        const GlobalConfig& c )
 {
-    workerName = _w_name;
-    gConfig = _config;
+    workerName = wn;
+    applyNewGlobalConfig(c);
+    handle = std::thread(&WorkerBase::loop, this);
+}
+
+void CmdHandler::applyNewGlobalConfig(const GlobalConfig& g_config) {
+    gConfig = g_config;
     CmdHandlerOptions options;
-    options.sleepDuration_ms = 1000;
+    options.sleepDurationMs = 1000;
     options.worker = this;
     curOptions = options;
-    handle = std::thread(WorkerBase::loop, &curOptions);
 }
+
 
 CmdHandler::~CmdHandler() {
 }
 
-void CmdHandler::work(WorkerOptions* opt_base) {
+void CmdHandler::work() {
     Status s;
 
     DBMgr* dbm = DBMgr::getWithoutInit();

@@ -84,6 +84,8 @@ public:
     static DBMgr* getWithoutInit();
     static void destroy();
 
+    Status updateGlobalConfig(const GlobalConfig& new_config);
+
     Status addLogReclaimer();
 
     DB* openExisting(const std::string& path, const std::string& kvs_name);

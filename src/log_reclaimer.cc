@@ -29,21 +29,25 @@ limitations under the License.
 
 namespace jungle {
 
-LogReclaimer::LogReclaimer(const std::string& _w_name,
-                          const GlobalConfig& _config)
+LogReclaimer::LogReclaimer(const std::string& wn,
+                          const GlobalConfig& g_config)
 {
-    workerName = _w_name;
-    gConfig = _config;
+    workerName = wn;
+    applyNewGlobalConfig(g_config);
+    handle = std::thread(&WorkerBase::loop, this);
+}
+
+void LogReclaimer::applyNewGlobalConfig(const GlobalConfig& g_config) {
+    gConfig = g_config;
     LogReclaimerOptions options;
-    options.sleepDuration_ms = gConfig.logFileReclaimerSleep_sec * 1000;
+    options.sleepDurationMs = gConfig.logFileReclaimerSleep_sec * 1000;
     options.worker = this;
     curOptions = options;
-    handle = std::thread(WorkerBase::loop, &curOptions);
 }
 
 LogReclaimer::~LogReclaimer() {}
 
-void LogReclaimer::work(WorkerOptions* opt_base) {
+void LogReclaimer::work() {
     Status s;
 
     DBMgr* dbm = DBMgr::getWithoutInit();

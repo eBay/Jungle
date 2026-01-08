@@ -246,6 +246,13 @@ Status DB::shutdown() {
     return Status();
 }
 
+Status DB::updateGlobalConfig(const GlobalConfig& new_config) {
+    DBMgr* mgr = DBMgr::getWithoutInit();
+    if (!mgr) return Status::NOT_INITIALIZED;
+
+    return mgr->updateGlobalConfig(new_config);
+}
+
 Status DB::close(DB* db) {
     if (db->sn) {
         _log_trace(db->p->myLog, "close snapshot %p", db);
