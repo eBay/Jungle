@@ -1027,6 +1027,11 @@ Status MemTable::load(RwSerializer& rws,
         seqNumAlloc = last_seq;
         syncedSeqNum = last_seq;
     }
+    if (minSeqNum == NOT_INITIALIZED && NOT_INITIALIZED != last_seq) {
+        minSeqNum = 1;
+        _log_warn(myLog, "updated min_seq of log file %s to 1",
+                  logFile->filename.c_str());
+    }
 
     if (NOT_INITIALIZED != last_seq && last_seq < synced_seq) {
         _log_err( myLog,
@@ -1514,6 +1519,10 @@ Status MemTable::getLogsToFlush(const uint64_t seq_num,
     }
 
     uint64_t ii = minSeqNum;
+    if (minSeqNum == NOT_INITIALIZED) {
+        ii = 0;
+        _log_warn(myLog, "minSeqNum was not initialized. scan from the beginning (0)");
+    }
     if (flushedSeqNum != NOT_INITIALIZED) ii = flushedSeqNum + 1;
 
     // Remove previous records if there is a seq number rollback.
@@ -1554,6 +1563,10 @@ Status MemTable::getLogsToFlush(const uint64_t seq_num,
         skiplist_release_node(&rec_node->snode);
     }
     if (cursor) skiplist_release_node(cursor);
+
+    _log_info(myLog, "memtable %zu collected %zu logs, seq range %zu - %zu",
+              logFile->getLogFileNum(),
+              list_out.size(), ii, last_seq);
 
     return Status();
 }

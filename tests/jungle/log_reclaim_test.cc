@@ -1714,6 +1714,9 @@ int sync_wo_manifest_test() {
     // Open clone.
     // Even with crash without manifest sync, all 15 logs should be there.
     CHK_Z(jungle::DB::open(&db, clone_path, config));
+    // Before and after log flush, they should be visible.
+    CHK_Z(verify(db, 15));
+    CHK_Z(db->flushLogs());
     CHK_Z(verify(db, 15));
     CHK_Z(jungle::DB::close(db));
 
@@ -1723,7 +1726,7 @@ int sync_wo_manifest_test() {
     return 0;
 }
 
-int sync_1st_file_wo_manifest_test() {
+int sync_1st_file_wo_manifest_test(bool with_2nd_crash) {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
 
@@ -1738,8 +1741,10 @@ int sync_1st_file_wo_manifest_test() {
 
     config.maxEntriesInLogFile = 10;
     config.skipManifestSync = true;
-    config.logSectionOnly = true;
     CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Do initial sync so that next sync will not write the manifest.
+    CHK_Z(db->sync(true));
 
     // Write on the first log file and sync.
     CHK_Z(insert_keys(db, 0, 5));
@@ -1754,7 +1759,29 @@ int sync_1st_file_wo_manifest_test() {
     // Open clone.
     // Even with crash without manifest sync, all 5 logs should be there.
     CHK_Z(jungle::DB::open(&db, clone_path, config));
-    CHK_Z(verify(db, 5));
+
+    size_t exp_upto = 5;
+    if (with_2nd_crash) {
+        // Put more keys.
+        CHK_Z(insert_keys(db, 5, 7));
+        CHK_Z(db->sync(true));
+        exp_upto = 7;
+
+        // Mimic another crash.
+        std::string clone_path2 = filename + "_clone2";
+        TestSuite::copyfile(clone_path, clone_path2);
+
+        CHK_Z(jungle::DB::close(db));
+
+        // Open 2nd clone.
+        // Even with crash without manifest sync, all 5 logs should be there.
+        CHK_Z(jungle::DB::open(&db, clone_path2, config));
+    }
+
+    // Before and after log flush, they should be visible.
+    CHK_Z(verify(db, exp_upto));
+    CHK_Z(db->flushLogs());
+    CHK_Z(verify(db, exp_upto));
     CHK_Z(jungle::DB::close(db));
 
     CHK_Z(jungle::shutdown());
@@ -1762,7 +1789,6 @@ int sync_1st_file_wo_manifest_test() {
     TEST_SUITE_CLEANUP_PATH();
     return 0;
 }
-
 
 } using namespace log_reclaim_test;
 
@@ -1851,7 +1877,8 @@ int main(int argc, char** argv) {
               sync_wo_manifest_test);
 
     ts.doTest("sync 1st file without manifest test",
-              sync_1st_file_wo_manifest_test);
+              sync_1st_file_wo_manifest_test,
+              TestRange<bool>( {false, true} ));
 
 #if 0
     ts.doTest("reload empty files test",
