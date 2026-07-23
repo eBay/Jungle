@@ -358,3 +358,6 @@ int _iterate_keys(jungle::DB* db,
     return 0;
 }
 
+struct DebugCbGuard {
+    ~DebugCbGuard() { jungle::DB::enableDebugCallbacks(false); }
+};

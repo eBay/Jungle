@@ -1851,7 +1851,8 @@ int empty_flush_race_test() {
 
         // When sync thread is at fsync, continue write.
         write_continue_ea.wait_ms(WAIT_MS);
-        mm << "sync thread is at fsync, now continue write into new file\n";
+        mm << "sync thread finished flushing memtable, "
+              "now continue write into new file\n";
     };
 
     dp.afterMemTableFlushCb = [&write_continue_ea, &write_done_ea]
@@ -1872,6 +1873,7 @@ int empty_flush_race_test() {
     };
     jungle::DB::setDebugParams(dp);
     jungle::DB::enableDebugCallbacks(true);
+    DebugCbGuard dbg_guard;
 
     for (size_t ii = 11; ii <= 15; ++ii) {
         std::string key_str = "k" + TestSuite::lzStr(8, ii);
@@ -1897,7 +1899,7 @@ int empty_flush_race_test() {
 
     size_t exp_upto = 18;
     // Before and after log flush, they should be visible.
-    for (size_t ii = 1; ii < exp_upto; ++ii) {
+    for (size_t ii = 1; ii <= exp_upto; ++ii) {
         TestSuite::setInfo("ii=%zu", ii);
         std::string key_str = "k" + TestSuite::lzStr(8, ii);
         std::string val_str = "v" + TestSuite::lzStr(16, ii);
