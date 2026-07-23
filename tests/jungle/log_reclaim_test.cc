@@ -27,6 +27,9 @@ limitations under the License.
 
 namespace log_reclaim_test {
 
+TestSuite::Msg mm;
+static const size_t WAIT_MS = 10 * 1000;
+
 int basic_log_reclaim_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1790,6 +1793,128 @@ int sync_1st_file_wo_manifest_test(bool with_2nd_crash) {
     return 0;
 }
 
+int empty_flush_race_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db = nullptr;
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 1;
+
+    jungle::init(g_config);
+
+    config.maxKeepingMemtables = 16;
+    config.logSectionOnly = true;
+    config.maxEntriesInLogFile = 10;
+    config.allowOverwriteSeqNum = true;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    //   Test scenario:
+    //
+    // [T1] Write 10 logs to log file 0.
+    // [T1] Attempt to write 5 more log files.
+    // [T1] Add a new log file 1.
+    //    [T2] Sync starts.
+    //    [T2] Nothing in log file 1, `after_sync = -1`.
+    // [T1] Append 5 logs to log file 1, now maxSeqnum = 15.
+    //    [T2] update syncedSeqnum properly so that 5 logs should eventually be
+    //         synced next time.
+
+
+    for (size_t ii = 1; ii <= 10; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+    }
+    CHK_Z(db->sync(false));
+
+    EventAwaiter sync_ea;
+    EventAwaiter write_continue_ea;
+    EventAwaiter write_done_ea;
+
+    std::thread sync_thread([&db, &sync_ea](){
+        sync_ea.wait_ms(WAIT_MS);
+        mm << "sync_thread: trigger sync\n";
+        db->sync(false);
+    });
+
+    jungle::DebugParams dp;
+    dp.addNewLogFileCb = [&sync_ea, &write_continue_ea]
+                         (const jungle::DebugParams::GenericCbParams& pp) {
+        // Once a new file is added, trigger sync in another thread.
+        mm << "addNewLogFileCb: trigger sync in another thread\n";
+        sync_ea.invoke();
+
+        // When sync thread is at fsync, continue write.
+        write_continue_ea.wait_ms(WAIT_MS);
+        mm << "sync thread is at fsync, now continue write into new file\n";
+    };
+
+    dp.afterMemTableFlushCb = [&write_continue_ea, &write_done_ea]
+                             (const jungle::DebugParams::GenericCbParams& pp) {
+        static size_t cnt = 0;
+        if (cnt == 0) {
+            // Skip for the first log file.
+            cnt++;
+            return;
+        }
+
+        mm << "afterMemTableFlushCb: continue write\n";
+        write_continue_ea.invoke();
+
+        // (sync thread) continue only after write to new file is done.
+        write_done_ea.wait_ms(WAIT_MS);
+        mm << "afterMemTableFlushCb: write done\n";
+    };
+    jungle::DB::setDebugParams(dp);
+    jungle::DB::enableDebugCallbacks(true);
+
+    for (size_t ii = 11; ii <= 15; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+    }
+    write_done_ea.invoke();
+    if (sync_thread.joinable()) sync_thread.join();
+
+    // Without callback, write more.
+    jungle::DB::enableDebugCallbacks(false);
+    for (size_t ii = 16; ii <= 18; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+    }
+    CHK_Z(db->sync(false));
+
+
+    // Close and reopen.
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    size_t exp_upto = 18;
+    // Before and after log flush, they should be visible.
+    for (size_t ii = 1; ii < exp_upto; ++ii) {
+        TestSuite::setInfo("ii=%zu", ii);
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        jungle::KV kv_out;
+        jungle::KV::Holder h_kv_out(kv_out);
+        CHK_Z(db->getSN(ii, kv_out));
+        CHK_EQ(key_str, kv_out.key.toString());
+        CHK_EQ(val_str, kv_out.value.toString());
+    }
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 } using namespace log_reclaim_test;
 
 int main(int argc, char** argv) {
@@ -1879,6 +2004,9 @@ int main(int argc, char** argv) {
     ts.doTest("sync 1st file without manifest test",
               sync_1st_file_wo_manifest_test,
               TestRange<bool>( {false, true} ));
+
+    ts.doTest("empty flush race test",
+              empty_flush_race_test);
 
 #if 0
     ts.doTest("reload empty files test",

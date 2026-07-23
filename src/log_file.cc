@@ -631,7 +631,7 @@ Status LogFile::setSyncedSeqNum(const uint64_t seq_num) {
         return Status();
     }
 
-    if (!valid_number(mTable->maxSeqNum)) {
+    if (!valid_number(seq_num) || !valid_number(mTable->maxSeqNum)) {
         // Nothing was appended.
         return Status();
     }
@@ -653,7 +653,7 @@ Status LogFile::setFlushedSeqNum(const uint64_t seq_num) {
         return Status();
     }
 
-    if (!valid_number(mTable->syncedSeqNum)) {
+    if (!valid_number(seq_num) || !valid_number(mTable->syncedSeqNum)) {
         // Nothing was flushed.
         return Status();
     }

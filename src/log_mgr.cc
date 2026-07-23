@@ -1271,6 +1271,13 @@ Status LogMgr::syncInternal(bool call_fsync) {
         if (call_fsync) {
             EP( li->file->sync() );
         }
+        if (dbm && dbm->isDebugCallbackEffective()) {
+            DebugParams dp = dbm->getDebugParams();
+            if (dp.afterMemTableFlushCb) {
+                DebugParams::GenericCbParams p;
+                dp.afterMemTableFlushCb(p);
+            }
+        }
 
         // WARNING:
         //   We should update the syncedSeqNum after the sync() operation.
