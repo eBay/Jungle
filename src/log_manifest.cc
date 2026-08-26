@@ -446,6 +446,15 @@ Status LogManifest::load(const std::string& path,
         }
         first_file_read = true;
 
+        if (l_file->getMinSeqNum() < min_seq) {
+            _log_warn(myLog, "min seq %s of log file %zu is less than "
+                      "manifest entry %s, will update manifest entry",
+                      _seq_str(l_file->getMinSeqNum()).c_str(),
+                      l_file_num,
+                      _seq_str(min_seq).c_str());
+            min_seq = l_file->getMinSeqNum();
+        }
+
         _log_info( myLog,
                    "log %ld, min seq %s, last flush %s, last sync %s",
                    l_file_num,

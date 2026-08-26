@@ -1793,6 +1793,116 @@ int sync_1st_file_wo_manifest_test(bool with_2nd_crash) {
     return 0;
 }
 
+int sync_1st_file_wo_manifest_and_then_graceful_shutdown_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db = nullptr;
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 1;
+    jungle::init(g_config);
+
+    config.maxEntriesInLogFile = 10;
+    config.skipManifestSync = true;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Do initial sync so that next sync will not write the manifest.
+    CHK_Z(db->sync(true));
+
+    // Write on the first log file and sync.
+    CHK_Z(insert_keys(db, 0, 5));
+    CHK_Z(db->sync(true));
+
+    // Copy file at this moment to mimic crash.
+    std::string clone_path = filename + "_clone";
+    TestSuite::copyfile(filename, clone_path);
+
+    CHK_Z(jungle::DB::close(db));
+
+    // Open clone.
+    // Even with crash without manifest sync, all 5 logs should be there.
+    CHK_Z(jungle::DB::open(&db, clone_path, config));
+
+    CHK_Z(db->sync(true));
+
+    // Graceful shutdown.
+    CHK_Z(jungle::DB::close(db));
+
+    // Reopen.
+    CHK_Z(jungle::DB::open(&db, clone_path, config));
+
+    // Insert one more key.
+    CHK_Z(insert_keys(db, 5, 6));
+
+    size_t exp_upto = 6;
+
+    // Before and after log flush, they should be visible.
+    CHK_Z(verify(db, exp_upto));
+    CHK_Z(db->sync(true));
+    CHK_Z(db->flushLogs());
+    CHK_Z(verify(db, exp_upto));
+    CHK_Z(jungle::DB::close(db));
+
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int sync_multiple_files_wo_manifest_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    jungle::DB* db = nullptr;
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 1;
+    jungle::init(g_config);
+
+    config.maxEntriesInLogFile = 10;
+    config.skipManifestSync = true;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Do initial sync so that next sync will not write the manifest.
+    CHK_Z(db->sync(true));
+
+    // Write on the multiple log files.
+    CHK_Z(insert_keys(db, 0, 25));
+    CHK_Z(db->sync(true));
+
+    // Copy file at this moment to mimic crash.
+    std::string clone_path = filename + "_clone";
+    TestSuite::copyfile(filename, clone_path);
+
+    CHK_Z(jungle::DB::close(db));
+
+    // Open clone.
+    // Even with crash without manifest sync, all 25 logs should be there.
+    CHK_Z(jungle::DB::open(&db, clone_path, config));
+
+    size_t exp_upto = 25;
+
+    // Before and after log flush, they should be visible.
+    CHK_Z(verify(db, exp_upto));
+    CHK_Z(db->sync(true));
+    CHK_Z(db->flushLogs());
+    CHK_Z(verify(db, exp_upto));
+    CHK_Z(jungle::DB::close(db));
+
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+
 int empty_flush_race_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -2006,6 +2116,12 @@ int main(int argc, char** argv) {
     ts.doTest("sync 1st file without manifest test",
               sync_1st_file_wo_manifest_test,
               TestRange<bool>( {false, true} ));
+
+    ts.doTest("sync 1st file without manifest and then graceful shutdown test",
+              sync_1st_file_wo_manifest_and_then_graceful_shutdown_test);
+
+    ts.doTest("sync multiple files without manifest test",
+              sync_multiple_files_wo_manifest_test);
 
     ts.doTest("empty flush race test",
               empty_flush_race_test);

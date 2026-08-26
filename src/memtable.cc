@@ -981,6 +981,7 @@ Status MemTable::load(RwSerializer& rws,
     size_t last_valid_size = rws.pos();
     uint64_t num_record = 0, num_flush = 0, num_chk = 0;
     uint64_t last_seq = NOT_INITIALIZED;
+    uint64_t min_seq_seen = 0;
     std::string m;
 
     for (; rws.pos() < filesize;) {
@@ -997,6 +998,9 @@ Status MemTable::load(RwSerializer& rws,
             uint64_t seq = 0;
             EB( loadRecord(rws, flags, seq),  "failed to load record" )
             last_seq = seq;
+            if (valid_number(seq) && (seq < min_seq_seen || min_seq_seen == 0)) {
+                min_seq_seen = seq;
+            }
             num_record++;
             last_valid_size = rws.pos();
 
@@ -1027,10 +1031,13 @@ Status MemTable::load(RwSerializer& rws,
         seqNumAlloc = last_seq;
         syncedSeqNum = last_seq;
     }
-    if (minSeqNum == NOT_INITIALIZED && NOT_INITIALIZED != last_seq) {
-        minSeqNum = 1;
-        _log_warn(myLog, "updated min_seq of log file %s to 1",
-                  logFile->filename.c_str());
+    if (valid_number(last_seq) && valid_number(min_seq_seen) &&
+        (minSeqNum == NOT_INITIALIZED || minSeqNum > min_seq_seen)) {
+        _log_warn(myLog, "updated min_seq of log file %s from %s to %s",
+                  logFile->filename.c_str(),
+                  _seq_str(minSeqNum).c_str(),
+                  _seq_str(min_seq_seen).c_str());
+        minSeqNum = min_seq_seen;
     }
 
     if (NOT_INITIALIZED != last_seq && last_seq < synced_seq) {
@@ -1531,8 +1538,8 @@ Status MemTable::getLogsToFlush(const uint64_t seq_num,
         Record* cur_rec = *entry;
         if (cur_rec->seqNum >= ii) {
             _log_err(myLog, "found duplicate seq number across different log files: "
-                     "%zu. will use newer one",
-                     cur_rec->seqNum);
+                     "seqnum %zu >= %zu. will use newer one",
+                     cur_rec->seqNum, ii);
             list_out.pop_back();
             entry = list_out.rbegin();
         } else {
