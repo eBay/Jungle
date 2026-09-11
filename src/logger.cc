@@ -30,6 +30,7 @@
  */
 
 #include "logger.h"
+#include "thread_name.h"
 
 #if defined(__linux__) || defined(__APPLE__)
     #include "backtrace.h"
@@ -41,9 +42,6 @@
 
 #if defined(__linux__) || defined(__APPLE__)
     #include <dirent.h>
-    #ifdef __linux__
-        #include <pthread.h>
-    #endif
     #include <sys/syscall.h>
     #include <sys/types.h>
     #include <unistd.h>
@@ -498,9 +496,7 @@ void SimpleLoggerMgr::handleStackTrace(int sig, siginfo_t* info, void* secret) {
 // LCOV_EXCL_STOP
 
 void SimpleLoggerMgr::flushWorker() {
-#ifdef __linux__
-    pthread_setname_np(pthread_self(), "sl_flusher");
-#endif
+    jungle::setThreadName("sl_flusher");
     SimpleLoggerMgr* mgr = SimpleLoggerMgr::get();
     while (!mgr->chkTermination()) {
         // Every 500ms.
@@ -519,9 +515,7 @@ void SimpleLoggerMgr::flushWorker() {
 }
 
 void SimpleLoggerMgr::compressWorker() {
-#ifdef __linux__
-    pthread_setname_np(pthread_self(), "sl_compressor");
-#endif
+    jungle::setThreadName("sl_compressor");
     SimpleLoggerMgr* mgr = SimpleLoggerMgr::get();
     bool sleep_next_time = true;
     while (!mgr->chkTermination()) {
