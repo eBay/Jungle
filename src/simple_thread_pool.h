@@ -20,6 +20,8 @@ limitations under the License.
 
 #pragma once
 
+#include "thread_name.h"
+
 #include <atomic>
 #include <condition_variable>
 #include <functional>
@@ -99,6 +101,7 @@ private:
     std::mutex cvLock;
     std::condition_variable cv;
 };
+
 
 enum TaskType {
     ONE_TIME = 0x0,
@@ -316,10 +319,7 @@ public:
     }
 
     void loop() {
-#ifdef __linux__
-        std::string thread_name = "stp_" + std::to_string(myId);
-        pthread_setname_np(pthread_self(), thread_name.c_str());
-#endif
+        jungle::setThreadName("stp_" + std::to_string(myId));
         while (!mgr->isStopped()) {
             eaLoop.wait();
             eaLoop.reset();
@@ -506,9 +506,7 @@ private:
     }
 
     void loop() {
-#ifdef __linux__
-        pthread_setname_np(pthread_self(), "stp_coord");
-#endif
+        jungle::setThreadName("stp_coord");
         const uint64_t MAX_SLEEP_US = 1000000;
         uint64_t next_sleep_us = MAX_SLEEP_US;
 
@@ -631,4 +629,3 @@ private:
 };
 
 };
-

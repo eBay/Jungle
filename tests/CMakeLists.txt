@@ -40,6 +40,8 @@ unit_test(NAME table_test SOURCES ${TEST_DIR}/unit/table_test.cc)
 
 unit_test(NAME crc32_test SOURCES ${TEST_DIR}/unit/crc32_test.cc)
 
+unit_test(NAME thread_name_test SOURCES ${TEST_DIR}/unit/thread_name_test.cc)
+
 unit_test(NAME table_lookup_booster_test SOURCES ${TEST_DIR}/unit/table_lookup_booster_test.cc)
 
 add_custom_target(unit_tests)
@@ -47,7 +49,8 @@ add_dependencies(unit_tests
     fileops_test
     fileops_directio_test
     keyvalue_test
-    crc32_test)
+    crc32_test
+    thread_name_test)
 
 unit_test(NAME basic_op_test SOURCES ${TEST_DIR}/jungle/basic_op_test.cc)
 
@@ -140,5 +143,4 @@ install(TARGETS
     jungle_bench
     RUNTIME DESTINATION bin
 )
-
 

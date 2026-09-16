@@ -18,6 +18,7 @@ limitations under the License.
 #include "internal_helper.h"
 #include "latency_collector.h"
 #include "test_common.h"
+#include "thread_name.h"
 
 // TODO: Other DBs
 #include "adapter_selector.h"
@@ -591,11 +592,9 @@ int bench_worker(TestSuite::ThreadArgs* base_args) {
     WorkerHandle* args = static_cast<WorkerHandle*>(base_args);
     const WorkerDef& my_def = args->conf.workerDefs[args->wId];
 
-#ifdef __linux__
     std::string t_name = my_def.getThreadName() + "_" +
                          std::to_string(args->wId);
-    pthread_setname_np(pthread_self(), t_name.c_str());
-#endif
+    jungle::setThreadName(t_name);
 
     TestSuite::WorkloadGenerator wg(my_def.rate);
     while (!args->stopSignal.load()) {
@@ -637,9 +636,7 @@ struct DisplayArgs : public TestSuite::ThreadArgs {
 };
 
 int displayer(TestSuite::ThreadArgs* base_args) {
-#ifdef __linux__
-    pthread_setname_np(pthread_self(), "displayer");
-#endif
+    jungle::setThreadName("displayer");
 
     DisplayArgs* args = static_cast<DisplayArgs*>(base_args);
 
@@ -1026,4 +1023,3 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-

@@ -17,6 +17,7 @@ limitations under the License.
 #include "worker_mgr.h"
 
 #include "db_mgr.h"
+#include "thread_name.h"
 
 #include _MACRO_TO_STR(LOGGER_H)
 
@@ -38,11 +39,7 @@ void WorkerBase::updateGlobalConfig(const GlobalConfig& g_config) {
 
 void WorkerBase::loop() {
     WorkerBase* worker = this;
-#ifdef __linux__
-    std::string thread_name = "j_" + worker->workerName;
-    thread_name = thread_name.substr(0, 15);
-    pthread_setname_np(pthread_self(), thread_name.c_str());
-#endif
+    setThreadName("j_" + worker->workerName);
 
     DBMgr* dbm = DBMgr::getWithoutInit();
     SimpleLogger* my_log = dbm->getLogger();

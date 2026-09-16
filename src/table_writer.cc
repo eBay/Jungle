@@ -19,8 +19,7 @@ limitations under the License.
 #include "db_mgr.h"
 #include "internal_helper.h"
 #include "table_mgr.h"
-
-#include <pthread.h>
+#include "thread_name.h"
 
 namespace jungle {
 
@@ -122,10 +121,7 @@ void TableWriterMgr::returnWriters(const std::vector<TableWriterPkg*> writers) {
 }
 
 void TableWriterMgr::tableWriterLoop(TableWriterArgs* args) {
-#ifdef __linux__
-    std::string thread_name = "j_twriter_" + std::to_string(args->writerId);
-    pthread_setname_np(pthread_self(), thread_name.c_str());
-#endif
+    setThreadName("j_twriter_" + std::to_string(args->writerId));
 
     _log_info( args->myLog, "table Writer initiated (%zu)",
                args->writerId );
@@ -176,4 +172,3 @@ void TableWriterMgr::doTableWrite(TableWriterArgs* args) {
 
 
 }; // namespace jungle
-
