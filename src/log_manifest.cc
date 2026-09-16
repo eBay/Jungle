@@ -237,6 +237,117 @@ Status LogManifest::create(const std::string& path,
     return Status();
 }
 
+bool LogManifest::isInvalidLog(const std::string& l_filename,
+                               uint64_t l_file_num,
+                               uint64_t& min_seq,
+                               uint64_t& synced_seq,
+                               uint64_t purged_seq,
+                               uint64_t last_synced_seq,
+                               bool last_log_file)
+{
+    bool invalid_log = false;
+    bool log_scan_required = false;
+
+    // Log-only mode, validity check.
+    if ( valid_number(min_seq) &&
+         valid_number(synced_seq) &&
+         min_seq > synced_seq ) {
+        // This cannot happen, probably caused by
+        // abnormal shutdown.
+        _log_warn( myLog, "min seq %s > synced seq %s, scan required",
+                   _seq_str(min_seq).c_str(),
+                   _seq_str(synced_seq).c_str() );
+        log_scan_required = true;
+    }
+    if ( valid_number(min_seq) &&
+         valid_number(last_synced_seq) &&
+         min_seq != last_synced_seq + 1 ) {
+        // Inconsecutive sequence number,
+        // probably caused by abnormal shutdown and then
+        // re-open.
+        _log_warn( myLog, "min seq %s and last synced seq %s "
+                   "are inconsecutive, scan required",
+                   _seq_str(min_seq).c_str(),
+                   _seq_str(last_synced_seq).c_str() );
+        log_scan_required = true;
+    }
+    if ( valid_number(min_seq) && !valid_number(synced_seq) ) {
+        // If min seq exists but synced seq does not,
+        // it indicates that the log file has some logs but
+        // manifest does not have the latest information.
+        // Need to scan that file and update the manifest.
+        _log_warn( myLog, "min seq %s exists but synced seq does not, "
+                   "scan required",
+                   _seq_str(min_seq).c_str() );
+        log_scan_required = true;
+    }
+    if ( last_log_file &&
+         !valid_number(min_seq) ) {
+        // If the last log file is empty and manifest file is not properly
+        // updated, we should rescan the log file and see if there are
+        // valid logs.
+        //
+        // If it is indeed empty, we should remove the last empty log file,
+        // otherwise the next DB open will remove all
+        // log files after that empty log file, due to incorrect
+        // manifest entry (min_seq = last_sync + 1) for that log file.
+        _log_warn( myLog, "the last log file %s is empty and manifest entry "
+                   "does not match: min seq %s, synced seq %s. "
+                   "scan required.",
+                   _seq_str(l_file_num).c_str(),
+                   _seq_str(min_seq).c_str(),
+                   _seq_str(synced_seq).c_str() );
+        log_scan_required = true;
+    }
+
+    if (log_scan_required) {
+        // Load the acutal file in a separate instance.
+        LogFile* scan_file = new LogFile(logMgr);
+        scan_file->setLogger(myLog);
+        scan_file->load(l_filename, fLogOps, l_file_num,
+                        min_seq, purged_seq, synced_seq);
+        scan_file->loadMemTable();
+
+        // Now re-check it with the actual log file content.
+        uint64_t actual_min_seq = scan_file->getMinSeqNum();
+        uint64_t actual_synced_seq = scan_file->getSyncedSeqNum();
+        if (valid_number(last_synced_seq) &&
+            actual_min_seq != last_synced_seq + 1) {
+            _log_warn( myLog, "actual min seq %s and last synced seq %s "
+                       "are inconsecutive, invalid log",
+                       _seq_str(actual_min_seq).c_str(),
+                       _seq_str(last_synced_seq).c_str() );
+            invalid_log = true;
+        }
+        if (valid_number(actual_synced_seq) &&
+            actual_min_seq > actual_synced_seq) {
+            _log_warn( myLog, "actual min seq %s > actual synced seq %s, "
+                       "invalid log",
+                       _seq_str(actual_min_seq).c_str(),
+                       _seq_str(actual_synced_seq).c_str() );
+            invalid_log = true;
+        }
+        if (last_log_file && !valid_number(actual_min_seq)) {
+            _log_warn(myLog, "the last log file %s has no valid min seq, "
+                       "marking it as invalid", _seq_str(l_file_num).c_str());
+            invalid_log = true;
+        }
+
+        if (!invalid_log) {
+            // If actual log file content is valid, update the min and synced seq.
+            _log_warn(myLog, "updating min seq %s -> %s and synced %s -> %s",
+                      _seq_str(min_seq).c_str(),
+                      _seq_str(actual_min_seq).c_str(),
+                      _seq_str(synced_seq).c_str(),
+                      _seq_str(actual_synced_seq).c_str());
+            min_seq = actual_min_seq;
+            synced_seq = actual_synced_seq;
+        }
+        delete scan_file;
+    }
+    return invalid_log;
+}
+
 Status LogManifest::load(const std::string& path,
                          const std::string& filename,
                          const uint64_t prefix_num)
@@ -311,47 +422,14 @@ Status LogManifest::load(const std::string& path,
 
         bool invalid_log = false;
         if ( db_config->logSectionOnly &&
-             db_config->truncateInconsecutiveLogs &&
-             valid_number(min_seq) ) {
-            // Log-only mode, validity check.
-            if ( valid_number(synced_seq) &&
-                 min_seq > synced_seq ) {
-                // This cannot happen, probably caused by
-                // abnormal shutdown.
-                _log_warn( myLog, "min seq %s > synced seq %s, break",
-                           _seq_str(min_seq).c_str(),
-                           _seq_str(synced_seq).c_str() );
-                invalid_log = true;
-            }
-            if ( valid_number(last_synced_seq) &&
-                 min_seq != last_synced_seq + 1 ) {
-                // Inconsecutive sequence number,
-                // probably caused by abnormal shutdown and then
-                // re-open.
-                _log_warn( myLog, "min seq %s and last synced seq %s "
-                           "are inconsecutive, break",
-                           _seq_str(min_seq).c_str(),
-                           _seq_str(last_synced_seq).c_str() );
-                invalid_log = true;
-            }
-        }
-
-        // WARNING:
-        //   If the last log file is empty and manifest file is not properly
-        //   updated, we should remove the log file. If not, next DB open
-        //   will remove all log files after that empty log file, due to
-        //   incorrect manifest entry (min_seq = last_sync + 1) for that log file.
-        if ( db_config->logSectionOnly &&
-             db_config->truncateInconsecutiveLogs &&
-             ii + 1 == num_log_files &&
-             !valid_number(min_seq) ) {
-            _log_warn( myLog, "the last log file %zu is empty and manifest entry "
-                       "does not match: min seq %s, "
-                       "synced seq %s. will remove it.",
-                       ii,
-                       _seq_str(min_seq).c_str(),
-                       _seq_str(synced_seq).c_str() );
-            invalid_log = true;
+             db_config->truncateInconsecutiveLogs ) {
+            invalid_log = isInvalidLog(l_filename,
+                                       l_file_num,
+                                       min_seq /* can be updated */,
+                                       synced_seq /* can be updated */,
+                                       purged_seq,
+                                       last_synced_seq,
+                                       ii + 1 == num_log_files /* last_log_file */);
         }
 
         if (invalid_log) {

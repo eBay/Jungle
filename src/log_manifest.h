@@ -335,6 +335,30 @@ public:
 private:
     Status storeInternal(bool call_fsync);
 
+    /**
+     * (Log-section mode only)
+     * Check the validity of sequence numbers in a log file.
+     *
+     * @param l_filename The name of the log file.
+     * @param l_file_num The number of the log file.
+     * @param[inout] min_seq The minimum sequence number in the log file.
+     *                       Can be updated by the function after correction.
+     * @param[inout] synced_seq The last synced sequence number.
+     *                          Can be updated by the function after correction.
+     * @param purged_seq The last purged sequence number.
+     * @param last_synced_seq The last synced sequence number from the previous log file.
+     * @param last_log_file `true` if this log file is the last one in the sequence.
+     *
+     * @return `true` if the log file is invalid, `false` otherwise.
+     */
+    bool isInvalidLog(const std::string& l_filename,
+                      uint64_t l_file_num,
+                      uint64_t& min_seq,
+                      uint64_t& synced_seq,
+                      uint64_t purged_seq,
+                      uint64_t last_synced_seq,
+                      bool last_log_file);
+
     FileOps* fOps;
     FileOps* fLogOps;
     FileHandle* mFile;
