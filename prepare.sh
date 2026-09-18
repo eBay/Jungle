@@ -14,7 +14,7 @@ if [ -d third_party/forestdb ]; then
     if [ ${LAST_COMPILED_COMMIT} == ${FORESTDB_COMMIT} ]; then
         RECOMPILE_FDB=false
     fi
-    if [ ${FORCE_COMPILE_DEPENDENCIES} == true ]; then
+    if [ "${FORCE_COMPILE_DEPENDENCIES}" == "true" ]; then
         RECOMPILE_FDB=true
     fi
     popd

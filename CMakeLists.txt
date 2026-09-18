@@ -280,7 +280,6 @@ if(CODE_COVERAGE GREATER 0)
     )
 endif()
 
-install(DIRECTORY src/ DESTINATION include FILES_MATCHING PATTERN "*.h")
 install(DIRECTORY include/ DESTINATION include)
 install(FILES tools/mutable_table_mgr.h DESTINATION include/libjungle)
 install(TARGETS static_lib simplelogger_lib DESTINATION lib ARCHIVE DESTINATION lib)
