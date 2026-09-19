@@ -2260,7 +2260,7 @@ int main(int argc, char** argv) {
 
     ts.doTest("inconsistent manifest recovery test",
               inconsistent_manifest_recovery_test,
-              TestRange<bool>( {true} ));
+              TestRange<bool>( {false, true} ));
 
 #if 0
     ts.doTest("reload empty files test",

@@ -304,9 +304,18 @@ bool LogManifest::isInvalidLog(const std::string& l_filename,
         // Load the acutal file in a separate instance.
         LogFile* scan_file = new LogFile(logMgr);
         scan_file->setLogger(myLog);
-        scan_file->load(l_filename, fLogOps, l_file_num,
-                        min_seq, purged_seq, synced_seq);
-        scan_file->loadMemTable();
+        // NOTE:
+        //   Passing `NOT_INITIALIZED` for min and synced seq,
+        //   because there can be also a case that actual min/synced seq number
+        //   is greater than the manifest min/synced seq. In that case, the
+        //   manifest is not properly updated/fixed.
+        if (scan_file->load(l_filename, fLogOps, l_file_num,
+                            NOT_INITIALIZED, purged_seq, NOT_INITIALIZED).ok() != true) {
+            return /* invalid_log */true;
+        }
+        if (scan_file->loadMemTable().ok() != true) {
+            return /* invalid_log */true;
+        }
 
         // Now re-check it with the actual log file content.
         uint64_t actual_min_seq = scan_file->getMinSeqNum();
@@ -343,6 +352,7 @@ bool LogManifest::isInvalidLog(const std::string& l_filename,
             min_seq = actual_min_seq;
             synced_seq = actual_synced_seq;
         }
+        scan_file->purgeMemTable();
         delete scan_file;
     }
     return invalid_log;
