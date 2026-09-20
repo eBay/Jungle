@@ -309,11 +309,18 @@ bool LogManifest::isInvalidLog(const std::string& l_filename,
         //   because there can be also a case that actual min/synced seq number
         //   is greater than the manifest min/synced seq. In that case, the
         //   manifest is not properly updated/fixed.
-        if (scan_file->load(l_filename, fLogOps, l_file_num,
-                            NOT_INITIALIZED, purged_seq, NOT_INITIALIZED).ok() != true) {
+        Status ss;
+        ss = scan_file->load(l_filename, fLogOps, l_file_num,
+                             NOT_INITIALIZED, purged_seq, NOT_INITIALIZED);
+        if (!ss.ok() && ss != Status::ALREADY_INITIALIZED) {
+            _log_err(myLog, "failed to load log file %s: %d",
+                     l_filename.c_str(), (int)ss);
             return /* invalid_log */true;
         }
-        if (scan_file->loadMemTable().ok() != true) {
+        ss = scan_file->loadMemTable();
+        if (!ss.ok() && ss != Status::ALREADY_INITIALIZED) {
+            _log_err(myLog, "failed to load memtable for log file %s: %d",
+                     l_filename.c_str(), (int)ss);
             return /* invalid_log */true;
         }
 
