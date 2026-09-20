@@ -11,6 +11,7 @@ option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(LEAK_SANITIZER "Enable leak sanitizer" OFF)
 option(BUILD_EXAMPLES "Build examples" ON)
 option(DETACH_LOGGER "Build libsimplelogger.a" ON)
+option(WITH_JEMALLOC "Use jemalloc as the system memory allocator" OFF)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -42,7 +43,10 @@ if(WITH_CONAN)
     set(FORESTDB forestdb::forestdb)
     set(LIBZ ZLIB::ZLIB)
 else()
-    set(FORESTDB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/forestdb/build/libforestdb.a)
+    set(FORESTDB_LIB_PATH
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/forestdb/build/libforestdb.a"
+        CACHE FILEPATH "Path to libforestdb.a")
+    set(FORESTDB ${FORESTDB_LIB_PATH})
     set(LIBZ z)
 endif()
 
@@ -66,6 +70,12 @@ endif()
 
 set(LIBDL dl)
 set(LIBPTHREAD pthread)
+
+if(WITH_JEMALLOC)
+    find_library(JEMALLOC_LIB jemalloc REQUIRED)
+    message(STATUS "jemalloc: ${JEMALLOC_LIB}")
+    set(LIBJEMALLOC ${JEMALLOC_LIB})
+endif()
 
 # Includes
 include_directories(BEFORE
@@ -227,6 +237,7 @@ set(JUNGLE_CORE
 set(JUNGLE_DEPS
     ${FORESTDB}
     ${LIBSNAPPY}
+    ${LIBJEMALLOC}
     ${LIBPTHREAD}
     ${LIBDL})
 
