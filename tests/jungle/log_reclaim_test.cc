@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 **************************************************************************/
 
+#include "crc32.h"
 #include "jungle_test_common.h"
 
 #include "internal_helper.h"
@@ -1173,6 +1174,137 @@ int overwrite_seq_multi_log_files_test() {
     return 0;
 }
 
+int inconsistent_manifest_recovery_test(bool valid_minseq) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+
+    jungle::GlobalConfig g_config;
+    g_config.logFileReclaimerSleep_sec = 1;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    //config.maxLogFileSize = 10;
+    config.logFileTtl_sec = 1;
+    config.maxEntriesInLogFile = 10;
+    config.maxKeepingMemtables = 1;
+    config.logSectionOnly = true;
+    config.allowOverwriteSeqNum = true;
+
+    jungle::DB* db;
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    for (size_t ii = 1; ii <= 20; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+    }
+    CHK_Z( db->sync(true) );
+
+    for (size_t ii = 21; ii <= 25; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+    }
+    // Make backup of log manifest file.
+    TestSuite::copyfile(filename + "/log0000_manifest",
+                        filename + "/log0000_manifest_backup");
+
+    CHK_Z( jungle::DB::close(db) );
+
+    if (valid_minseq) {
+        // open `log0000_manifest_backup`, put `21` (8-byte big endian) at 0x64.
+        FILE* f = fopen((filename + "/log0000_manifest_backup").c_str(), "r+b");
+        fseek(f, 0x64, SEEK_SET);
+        uint64_t val = 21;
+        val = _enc64(val); // Convert to big endian
+        fwrite(&val, sizeof(val), 1, f);
+        fclose(f);
+
+        // Calculate CRC32 on data except for last 4-byte.
+        f = fopen((filename + "/log0000_manifest_backup").c_str(), "r+b");
+        fseek(f, 0, SEEK_SET);
+        fseek(f, 0, SEEK_END);
+        long file_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        std::vector<char> buffer(file_size - 4);
+        fread(buffer.data(), 1, buffer.size(), f);
+        uint32_t crc = crc32_8(
+            reinterpret_cast<const unsigned char*>(buffer.data()), buffer.size(), 0);
+        fseek(f, file_size - 4, SEEK_SET);
+        crc = _enc32(crc); // Convert to big endian
+        fwrite(&crc, sizeof(crc), 1, f);
+        fclose(f);
+    }
+
+    // Revert manifest back to mimic crash and partial inconsistency.
+    TestSuite::copyfile(filename + "/log0000_manifest_backup",
+                        filename + "/log0000_manifest");
+
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // Even though manifest is inconsistent, log from 1 to 25 should be retrievable.
+    for (size_t ii = 1; ii <= 25; ++ii) {
+        TestSuite::setInfo("ii = %zu", ii);
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        jungle::KV kv_out;
+        jungle::KV::Holder h(kv_out);
+        CHK_Z( db->getSN( ii, kv_out ) );
+    }
+
+    // Read seqnum 1 to 20 to as to purge memtable of log file 2.
+    for (size_t ii = 1; ii <= 20; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        jungle::KV kv_out;
+        jungle::KV::Holder h(kv_out);
+        CHK_Z( db->getSN( ii, kv_out ) );
+    }
+
+    // Sleep to allow log reclaimer to run.
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    for (size_t ii = 21; ii <= 30; ++ii) {
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
+    }
+    CHK_Z( db->sync(true) );
+
+    // All 30 logs should be there.
+    for (size_t ii = 1; ii <= 30; ++ii) {
+        TestSuite::setInfo("ii = %zu", ii);
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        jungle::KV kv_out;
+        jungle::KV::Holder h(kv_out);
+        CHK_Z( db->getSN( ii, kv_out ) );
+    }
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::DB::open(&db, filename, config) );
+
+    // All 30 logs should be there.
+    for (size_t ii = 1; ii <= 30; ++ii) {
+        TestSuite::setInfo("ii = %zu", ii);
+        std::string key_str = "k" + TestSuite::lzStr(8, ii);
+        std::string val_str = "v" + TestSuite::lzStr(16, ii);
+        jungle::KV kv_out;
+        jungle::KV::Holder h(kv_out);
+        CHK_Z( db->getSN( ii, kv_out ) );
+    }
+
+    CHK_Z( jungle::DB::close(db) );
+    CHK_Z( jungle::shutdown() );
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+
 int void_log_file_at_the_end_test(bool emulate_crash) {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -2125,6 +2257,10 @@ int main(int argc, char** argv) {
 
     ts.doTest("empty flush race test",
               empty_flush_race_test);
+
+    ts.doTest("inconsistent manifest recovery test",
+              inconsistent_manifest_recovery_test,
+              TestRange<bool>( {false, true} ));
 
 #if 0
     ts.doTest("reload empty files test",

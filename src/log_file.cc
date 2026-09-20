@@ -186,7 +186,9 @@ Status LogFile::load(const std::string& _filename,
 {
     touch();
 
-    if (mTable) return Status::ALREADY_INITIALIZED;
+    if (mTable) {
+        return Status::ALREADY_INITIALIZED;
+    }
 
     filename = _filename;
     fOps = _f_ops;
@@ -211,7 +213,9 @@ Status LogFile::load(const std::string& _filename,
 Status LogFile::loadMemTable() {
     touch();
 
-    if (mTable) return Status::ALREADY_INITIALIZED;
+    if (mTable) {
+        return Status::ALREADY_INITIALIZED;
+    }
 
     Status s;
     // Open log file
