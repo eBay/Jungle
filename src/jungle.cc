@@ -342,8 +342,16 @@ Status DB::rollback(uint64_t seqnum_upto)
     Status s;
     EP( p->checkHandleValidity(DBInternal::OPTYPE_WRITE) );
 
-    // NOTE: Only for log-only mode for now.
-    if (!p->dbConfig.logSectionOnly) return Status::INVALID_MODE;
+    if (!p->dbConfig.logSectionOnly) {
+        // In normal mode, rollback is only possible if the target seqnum
+        // is still in the log section (not yet flushed to LSM tables).
+        uint64_t last_flushed_seq = 0;
+        s = p->logMgr->getLastFlushedSeqNum(last_flushed_seq);
+        if (s.ok() && seqnum_upto < last_flushed_seq) {
+            // Target seqnum already flushed to tables, cannot rollback.
+            return Status::ALREADY_FLUSHED;
+        }
+    }
 
     return p->logMgr->rollback(seqnum_upto);
 }

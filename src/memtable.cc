@@ -536,7 +536,21 @@ Status MemTable::discardDirty(uint64_t seq_begin,
         if (key_cursor) {
             RecNode* rec_key = _get_entry(key_cursor, RecNode, snode);
             std::list<Record*> discarded = rec_key->discardRecords(seq_begin);
+
+            // If all records for this key were discarded, remove the
+            // RecNode from the key index so iterators never visit an
+            // empty node (getMinSeq would crash on empty recList).
+            bool key_empty;
+            {   mGuard l(rec_key->recListLock);
+                key_empty = rec_key->recList->empty();
+            }
             skiplist_release_node(key_cursor);
+
+            if (key_empty) {
+                skiplist_erase_node(idxByKey, &rec_key->snode);
+                skiplist_wait_for_free(&rec_key->snode);
+                delete rec_key;
+            }
 
             // NOTE:
             //   Due to the race with reader, we cannot delete the discarded

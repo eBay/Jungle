@@ -281,6 +281,21 @@ Status LogMgr::rollback(uint64_t seq_upto) {
     // Should sync first.
     EP( syncInternal(false) );
 
+    // If the DB is empty (no records), nothing to rollback.
+    uint64_t max_seq = NOT_INITIALIZED;
+    getMaxSeqNum(max_seq);
+    if (max_seq == NOT_INITIALIZED) {
+        _log_info(myLog, "[ROLLBACK] DB is empty, nothing to rollback");
+        return Status();
+    }
+
+    // If the target seqnum is beyond the DB's max, nothing to rollback.
+    if (seq_upto >= max_seq) {
+        _log_info(myLog, "[ROLLBACK] target seqnum %zu >= max seqnum %zu, "
+                  "nothing to rollback", seq_upto, max_seq);
+        return Status();
+    }
+
     // Find corresponding log file.
     LogFileInfo* linfo;
     EP( mani->getLogFileInfoBySeq(seq_upto, linfo) );
@@ -290,6 +305,13 @@ Status LogMgr::rollback(uint64_t seq_upto) {
 
     // Truncate that file.
     EP( gg.file()->truncate(seq_upto) );
+
+    // Purge in-memory skiplist entries beyond the rollback point.
+    // truncate() only updates on-disk file and seqnum metadata,
+    // but the memtable skiplist still holds stale records.
+    gg.file()->discardDirty(seq_upto + 1);
+    _log_info(myLog, "[ROLLBACK] discarded in-memory entries > seqnum %zu "
+              "from log file %zu", seq_upto, linfo->logFileNum);
 
     if (d_params.rollbackDelayUs) {
         // If debug parameter is given, sleep here.
@@ -305,6 +327,11 @@ Status LogMgr::rollback(uint64_t seq_upto) {
     for (uint64_t ii = linfo->logFileNum + 1; ii <= lf_max; ++ii) {
         // Avoid loading memtable because of this call.
         LogFileInfoGuard ll(mani->getLogFileInfoP(ii, true));
+
+        // Purge in-memory entries from log files being removed.
+        if (ll.file()) {
+            ll.file()->discardDirty(0);
+        }
 
         // Remove file from manifest.
         mani->removeLogFile(ii);
@@ -323,9 +350,6 @@ Status LogMgr::rollback(uint64_t seq_upto) {
     _log_info(myLog, "[ROLLBACK] now %zu is the last seqnum", seq_upto);
 
     DBMgr::get()->forceRemoveFiles();
-
-    // Reload the entire memtable, to purge rolled-back records.
-    linfo->setEvicted();
 
     return Status();
 }
@@ -1419,6 +1443,23 @@ Status LogMgr::flush(const FlushOptions& options,
         seq_num_local = seq_barrier;
     }
 
+    // Consult flush decision callback: check allowFlush early,
+    // defer rollbackSafeSeqnum clamping until after seq_num_local is resolved.
+    FlushDecisionCbResult flushDecision;
+    bool hasFlushDecision = false;
+    if (db_config->flushDecisionCbFunc) {
+        flushDecision = db_config->flushDecisionCbFunc();
+        hasFlushDecision = true;
+        _log_info(myLog, "FlushDecisionCb: allowFlush=%d, rollbackSafeSeqnum=%lu, "
+                  "seq_num_local=%lu",
+                  (int)flushDecision.allowFlush, flushDecision.rollbackSafeSeqnum,
+                  seq_num_local);
+        if (!flushDecision.allowFlush) {
+            _log_info(myLog, "Flush blocked by flush decision callback.");
+            return Status::OPERATION_IN_PROGRESS;
+        }
+    }
+
     if (seq_num_local == NOT_INITIALIZED) {
         // Purge all synced (checkpointed) logs.
 
@@ -1454,6 +1495,24 @@ Status LogMgr::flush(const FlushOptions& options,
         // If in purge only mode, don't need to load mem table.
         mani->getLogFileNumBySeq(seq_num_local, ln_to, options.purgeOnly);
     }
+
+    // Now seq_num_local is resolved to the actual flush target.
+    // Apply rollbackSafeSeqnum clamping.
+    if (hasFlushDecision &&
+        flushDecision.rollbackSafeSeqnum < seq_num_local) {
+        if (flushDecision.rollbackSafeSeqnum == 0) {
+            // Zero means "flush nothing" — block the flush entirely.
+            _log_info(myLog, "Flush blocked: rollbackSafeSeqnum is 0.");
+            return Status::OPERATION_IN_PROGRESS;
+        }
+        _log_info(myLog, "Flush clamped by flush decision callback: "
+                  "%lu -> %lu",
+                  seq_num_local, flushDecision.rollbackSafeSeqnum);
+        seq_num_local = flushDecision.rollbackSafeSeqnum;
+        // Adjust ln_to to match the clamped seqnum.
+        mani->getLogFileNumBySeq(seq_num_local, ln_to, options.purgeOnly);
+    }
+
     _log_debug(myLog, "Given seq upto %s, actual seq upto %ld",
                _seq_str(seq_num).c_str(), seq_num_local);
 
