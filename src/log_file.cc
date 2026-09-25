@@ -371,6 +371,7 @@ Status LogFile::get(const uint64_t chk,
                     bool allow_tombstone)
 {
     touch();
+    if (!mTable) return Status::NOT_INITIALIZED;
     Status s;
     EP( mTable->getRecordByKey(chk, key, rec_out,
                                allow_flushed_log, allow_tombstone) );
