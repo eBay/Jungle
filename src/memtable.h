@@ -89,7 +89,8 @@ public:
     Status load(RwSerializer& rws,
                 uint64_t min_seq,
                 uint64_t flushed_seq,
-                uint64_t synced_seq);
+                uint64_t synced_seq,
+                uint64_t* valid_size_out = nullptr);
 
     static Status findOffsetOfSeq(SimpleLogger* logger,
                                   RwSerializer& rws,

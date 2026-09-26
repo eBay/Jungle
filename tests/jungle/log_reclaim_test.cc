@@ -1451,7 +1451,7 @@ int restore_crash_manifest(const std::string& db_path,
     return 0;
 }
 
-// Recovery must keep every log file, return all fsynced records,
+// Recovery must keep every log file with records, return all fsynced records,
 // persist a manifest aligned with the log files, and keep accepting writes.
 int verify_manifest_crash_recovery(const std::string& db_path,
                                    const jungle::DBConfig& config,
@@ -1585,10 +1585,11 @@ int manifest_crash_stale_before_empty_tail_test(bool zero_length_last) {
         CHK_TRUE(empty_file.good());
     }
 
+    // The empty log2 is removed: the next write rolls over to a new file
+    // starting at 457, which would otherwise share its start seq.
     CHK_Z(verify_manifest_crash_recovery(
-        filename, config, 3, {{445, 456}}, 456,
-        {{445, 450}, {451, 456},
-         {jungle::NOT_INITIALIZED, jungle::NOT_INITIALIZED}}));
+        filename, config, 2, {{445, 456}}, 456,
+        {{445, 450}, {451, 456}}));
     CHK_Z(jungle::shutdown());
     TEST_SUITE_CLEANUP_PATH();
     return 0;
@@ -2792,7 +2793,7 @@ int main(int argc, char** argv) {
 
     // These tests simulate a manifest/log file discrepancy after a crash,
     // where the log file and its manifest entry were not persisted together.
-    // Recovery must not lose fsynced data or delete the log file.
+    // Recovery must not lose fsynced data or delete a log file with records.
     //
     // Manifest (min/synced) vs. physical log state at recovery.
     // Unless noted, log0 holds 445..450 and is consistent.
@@ -2803,7 +2804,7 @@ int main(int argc, char** argv) {
     // | inconsistent manifest       | log2 451 or NIL/NIL                      | log2 451..455 (log0, log1: 431..450)        |
     // | stale synced seq            | log1 451/453                             | log1 451..456                               |
     // | stale seq before data tail  | log1 451/453, log2 NIL/NIL               | log1 451..456, log2 457..460                |
-    // | stale seq before empty tail | log1 451/453, log2 NIL/NIL               | log1 451..456, log2 empty                   |
+    // | stale seq before empty tail | log1 451/453, log2 NIL/NIL               | log1 451..456, log2 empty (removed)         |
     // | stale seq across rollovers  | log1 451/453, log2 457/NIL, log3 NIL/NIL | log1 451..456, log2 457..462, log3 463..465 |
     // | overwrite without rollback  | log1 451/453 or NIL/NIL                  | log1 451..453, 453'..456 or 451..456        |
     // | seq gap at rollover         | log1 451/453, log2 NIL/NIL               | log1 451..456, log2 470..473                |
