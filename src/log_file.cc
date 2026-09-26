@@ -262,6 +262,77 @@ Status LogFile::loadMemTable() {
     return Status();
 }
 
+Status LogFile::scan(const std::string& _filename,
+                     FileOps* _f_ops,
+                     uint64_t log_file_num,
+                     ScanResult& result_out)
+{
+    if (mTable) return Status::ALREADY_INITIALIZED;
+
+    filename = _filename;
+    fOps = _f_ops;
+    logFileNum = log_file_num;
+    immutable = true;
+    result_out = ScanResult();
+
+    if (!fOps->exist(filename.c_str())) return Status();
+    result_out.exist = true;
+
+    Status s;
+    EP( openFHandle() );
+    result_out.fileSize = fOps->eof(fHandle);
+    if (result_out.fileSize < 8 + 4) {
+        // Empty, or not even the footer and version: no record.
+        result_out.validSize = result_out.fileSize;
+        closeFHandle();
+        return Status();
+    }
+
+    SizedBuf read_buf(result_out.fileSize);
+    SizedBuf::Holder h_read_buf(read_buf);
+    s = fOps->pread(fHandle, read_buf.data, read_buf.size, 0);
+    if (!s) {
+        closeFHandle();
+        return s;
+    }
+
+    RwSerializer ss(read_buf);
+    uint8_t footer_file[8];
+    ss.get(footer_file, 8);
+    uint32_t ver_file = ss.getU32(s);
+    (void)ver_file;
+
+    MemTable* scan_table = new MemTable(this);
+    scan_table->setLogger(myLog);
+    result_out.loadStatus = scan_table->load( ss,
+                                              NOT_INITIALIZED,
+                                              NOT_INITIALIZED,
+                                              NOT_INITIALIZED,
+                                              &result_out.validSize );
+    if (valid_number(scan_table->syncedSeqNum)) {
+        result_out.minSeq = scan_table->minSeqNum;
+        result_out.lastSeq = scan_table->syncedSeqNum;
+    }
+    delete scan_table;
+    closeFHandle();
+    return Status();
+}
+
+Status LogFile::truncateAndSync(uint64_t new_size) {
+    Status s;
+    if (!fHandle) {
+        EP( openFHandle() );
+    }
+    if (valid_number(new_size)) {
+        s = fOps->ftruncate(fHandle, new_size);
+    }
+    if (s) {
+        s = fOps->fsync(fHandle);
+    }
+    closeFHandle();
+    return s;
+}
+
 Status LogFile::truncate(uint64_t seq_upto) {
     Status s;
     // Open log file

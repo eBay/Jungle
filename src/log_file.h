@@ -64,6 +64,40 @@ public:
 
     Status loadMemTable();
 
+    struct ScanResult {
+        ScanResult()
+            : exist(false)
+            , minSeq(NOT_INITIALIZED)
+            , lastSeq(NOT_INITIALIZED)
+            , fileSize(0)
+            , validSize(0)
+            {}
+        bool exist;
+        // Smallest and last record seq, `NOT_INITIALIZED` if no record.
+        uint64_t minSeq;
+        uint64_t lastSeq;
+        uint64_t fileSize;
+        // End offset of the last intact entry.
+        uint64_t validSize;
+        // Error that stopped the scan, if any.
+        Status loadStatus;
+    };
+
+    /**
+     * Read all entries of the given file, without keeping them in memory.
+     * This instance should not be used for anything else.
+     */
+    Status scan(const std::string& _filename,
+                FileOps* _f_ops,
+                uint64_t log_file_num,
+                ScanResult& result_out);
+
+    /**
+     * Truncate the scanned file to `new_size` (if not `NOT_INITIALIZED`),
+     * and fsync it.
+     */
+    Status truncateAndSync(uint64_t new_size);
+
     Status truncate(uint64_t seq_upto);
 
     Status assignSeqNum(Record& rec_local);

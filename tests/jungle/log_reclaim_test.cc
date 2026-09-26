@@ -21,7 +21,9 @@ limitations under the License.
 #include "libjungle/params.h"
 
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <iterator>
 #include <vector>
 
 #include <stdio.h>
@@ -1174,6 +1176,55 @@ int overwrite_seq_multi_log_files_test() {
     return 0;
 }
 
+enum class ManifestSeqField : size_t {
+    MIN = 1,
+    SYNCED = 3,
+};
+
+int patch_manifest_seq(const std::string& path,
+                       size_t num_log_files,
+                       size_t entry_index,
+                       ManifestSeqField field,
+                       uint64_t seq) {
+    CHK_TRUE(entry_index < num_log_files);
+
+    std::ifstream input(path, std::ios::binary);
+    CHK_TRUE(input.good());
+    std::vector<char> buffer((std::istreambuf_iterator<char>(input)),
+                             std::istreambuf_iterator<char>());
+
+    const size_t HEADER_SIZE = 3 * sizeof(uint64_t) + sizeof(uint32_t);
+    const size_t ENTRY_SIZE = 4 * sizeof(uint64_t);
+    const size_t TRAILER_SIZE = sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    CHK_EQ(HEADER_SIZE + num_log_files * ENTRY_SIZE + TRAILER_SIZE,
+           buffer.size());
+
+    size_t seq_offset = HEADER_SIZE + entry_index * ENTRY_SIZE +
+                        static_cast<size_t>(field) * sizeof(uint64_t);
+    uint64_t encoded_seq = _enc64(seq);
+    std::memcpy(buffer.data() + seq_offset,
+                &encoded_seq, sizeof(encoded_seq));
+    uint32_t crc = _enc32(crc32_8(
+        reinterpret_cast<const unsigned char*>(buffer.data()),
+        buffer.size() - sizeof(uint32_t), 0));
+    std::memcpy(buffer.data() + buffer.size() - sizeof(crc),
+                &crc, sizeof(crc));
+
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    CHK_TRUE(output.good());
+    output.write(buffer.data(), buffer.size());
+    CHK_TRUE(output.good());
+    return 0;
+}
+
+int patch_manifest_tail_min_seq(const std::string& path,
+                                size_t num_log_files,
+                                uint64_t min_seq) {
+    CHK_TRUE(num_log_files > 0);
+    return patch_manifest_seq(path, num_log_files, num_log_files - 1,
+                              ManifestSeqField::MIN, min_seq);
+}
+
 int inconsistent_manifest_recovery_test(bool valid_minseq) {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1197,14 +1248,14 @@ int inconsistent_manifest_recovery_test(bool valid_minseq) {
     jungle::DB* db;
     CHK_Z( jungle::DB::open(&db, filename, config) );
 
-    for (size_t ii = 1; ii <= 20; ++ii) {
+    for (size_t ii = 431; ii <= 450; ++ii) {
         std::string key_str = "k" + TestSuite::lzStr(8, ii);
         std::string val_str = "v" + TestSuite::lzStr(16, ii);
         CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
     }
     CHK_Z( db->sync(true) );
 
-    for (size_t ii = 21; ii <= 25; ++ii) {
+    for (size_t ii = 451; ii <= 455; ++ii) {
         std::string key_str = "k" + TestSuite::lzStr(8, ii);
         std::string val_str = "v" + TestSuite::lzStr(16, ii);
         CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
@@ -1216,38 +1267,17 @@ int inconsistent_manifest_recovery_test(bool valid_minseq) {
     CHK_Z( jungle::DB::close(db) );
 
     if (valid_minseq) {
-        // open `log0000_manifest_backup`, put `21` (8-byte big endian) at 0x64.
-        FILE* f = fopen((filename + "/log0000_manifest_backup").c_str(), "r+b");
-        fseek(f, 0x64, SEEK_SET);
-        uint64_t val = 21;
-        val = _enc64(val); // Convert to big endian
-        fwrite(&val, sizeof(val), 1, f);
-        fclose(f);
-
-        // Calculate CRC32 on data except for last 4-byte.
-        f = fopen((filename + "/log0000_manifest_backup").c_str(), "r+b");
-        fseek(f, 0, SEEK_SET);
-        fseek(f, 0, SEEK_END);
-        long file_size = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        std::vector<char> buffer(file_size - 4);
-        fread(buffer.data(), 1, buffer.size(), f);
-        uint32_t crc = crc32_8(
-            reinterpret_cast<const unsigned char*>(buffer.data()), buffer.size(), 0);
-        fseek(f, file_size - 4, SEEK_SET);
-        crc = _enc32(crc); // Convert to big endian
-        fwrite(&crc, sizeof(crc), 1, f);
-        fclose(f);
+        CHK_Z(patch_manifest_tail_min_seq(
+            filename + "/log0000_manifest_backup", 3, 451));
     }
 
-    // Revert manifest back to mimic crash and partial inconsistency.
     TestSuite::copyfile(filename + "/log0000_manifest_backup",
                         filename + "/log0000_manifest");
 
     CHK_Z( jungle::DB::open(&db, filename, config) );
 
-    // Even though manifest is inconsistent, log from 1 to 25 should be retrievable.
-    for (size_t ii = 1; ii <= 25; ++ii) {
+    // Even though manifest is inconsistent, 431 to 455 should be retrievable.
+    for (size_t ii = 431; ii <= 455; ++ii) {
         TestSuite::setInfo("ii = %zu", ii);
         std::string key_str = "k" + TestSuite::lzStr(8, ii);
         std::string val_str = "v" + TestSuite::lzStr(16, ii);
@@ -1256,8 +1286,8 @@ int inconsistent_manifest_recovery_test(bool valid_minseq) {
         CHK_Z( db->getSN( ii, kv_out ) );
     }
 
-    // Read seqnum 1 to 20 to as to purge memtable of log file 2.
-    for (size_t ii = 1; ii <= 20; ++ii) {
+    // Read 431 to 450 to allow the reclaimer to purge older memtables.
+    for (size_t ii = 431; ii <= 450; ++ii) {
         std::string key_str = "k" + TestSuite::lzStr(8, ii);
         std::string val_str = "v" + TestSuite::lzStr(16, ii);
         jungle::KV kv_out;
@@ -1268,15 +1298,15 @@ int inconsistent_manifest_recovery_test(bool valid_minseq) {
     // Sleep to allow log reclaimer to run.
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    for (size_t ii = 21; ii <= 30; ++ii) {
+    for (size_t ii = 451; ii <= 460; ++ii) {
         std::string key_str = "k" + TestSuite::lzStr(8, ii);
         std::string val_str = "v" + TestSuite::lzStr(16, ii);
         CHK_Z( db->setSN( ii, jungle::KV(key_str, val_str) ) );
     }
     CHK_Z( db->sync(true) );
 
-    // All 30 logs should be there.
-    for (size_t ii = 1; ii <= 30; ++ii) {
+    // All 30 records should be there.
+    for (size_t ii = 431; ii <= 460; ++ii) {
         TestSuite::setInfo("ii = %zu", ii);
         std::string key_str = "k" + TestSuite::lzStr(8, ii);
         std::string val_str = "v" + TestSuite::lzStr(16, ii);
@@ -1288,8 +1318,8 @@ int inconsistent_manifest_recovery_test(bool valid_minseq) {
     CHK_Z( jungle::DB::close(db) );
     CHK_Z( jungle::DB::open(&db, filename, config) );
 
-    // All 30 logs should be there.
-    for (size_t ii = 1; ii <= 30; ++ii) {
+    // All 30 records should be there.
+    for (size_t ii = 431; ii <= 460; ++ii) {
         TestSuite::setInfo("ii = %zu", ii);
         std::string key_str = "k" + TestSuite::lzStr(8, ii);
         std::string val_str = "v" + TestSuite::lzStr(16, ii);
@@ -1300,6 +1330,509 @@ int inconsistent_manifest_recovery_test(bool valid_minseq) {
 
     CHK_Z( jungle::DB::close(db) );
     CHK_Z( jungle::shutdown() );
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int write_log_seq_range(jungle::DB* db, uint64_t first, uint64_t last) {
+    for (uint64_t seq = first; seq <= last; ++seq) {
+        CHK_Z(db->setSN(seq, jungle::KV(std::to_string(seq), "v")));
+    }
+    return 0;
+}
+
+struct ManifestEntry {
+    uint64_t min;
+    uint64_t synced;
+};
+
+int read_manifest_entries(const std::string& path,
+                          std::vector<ManifestEntry>& entries_out) {
+    std::ifstream input(path, std::ios::binary);
+    CHK_TRUE(input.good());
+    std::vector<char> buffer((std::istreambuf_iterator<char>(input)),
+                             std::istreambuf_iterator<char>());
+
+    const size_t HEADER_SIZE = 3 * sizeof(uint64_t) + sizeof(uint32_t);
+    const size_t ENTRY_SIZE = 4 * sizeof(uint64_t);
+    const size_t TRAILER_SIZE = sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    CHK_GTEQ(buffer.size(), HEADER_SIZE + TRAILER_SIZE);
+
+    uint32_t num_files = 0;
+    std::memcpy(&num_files, buffer.data() + 3 * sizeof(uint64_t),
+                sizeof(num_files));
+    num_files = _dec32(num_files);
+    CHK_EQ(HEADER_SIZE + num_files * ENTRY_SIZE + TRAILER_SIZE,
+           buffer.size());
+
+    auto read64 = [&](size_t offset) {
+        uint64_t v = 0;
+        std::memcpy(&v, buffer.data() + offset, sizeof(v));
+        return _dec64(v);
+    };
+    entries_out.clear();
+    for (size_t ii = 0; ii < num_files; ++ii) {
+        size_t base = HEADER_SIZE + ii * ENTRY_SIZE;
+        entries_out.push_back({read64(base + sizeof(uint64_t)),
+                               read64(base + 3 * sizeof(uint64_t))});
+    }
+    return 0;
+}
+
+int check_manifest_entries(const std::string& path,
+                           const std::vector<ManifestEntry>& expected) {
+    std::vector<ManifestEntry> actual;
+    CHK_Z(read_manifest_entries(path, actual));
+    CHK_EQ(expected.size(), actual.size());
+    for (size_t ii = 0; ii < expected.size(); ++ii) {
+        TestSuite::setInfo("%s, entry %zu", path.c_str(), ii);
+        CHK_EQ(expected[ii].min, actual[ii].min);
+        CHK_EQ(expected[ii].synced, actual[ii].synced);
+    }
+    return 0;
+}
+
+std::string log_file_path(const std::string& db_path, size_t file_num) {
+    char name[32];
+    snprintf(name, sizeof(name), "/log0000_%08zu", file_num);
+    return db_path + name;
+}
+
+struct SeqRange {
+    uint64_t first;
+    uint64_t last;
+};
+
+int check_seq_ranges(jungle::DB* db, const std::vector<SeqRange>& ranges) {
+    for (const SeqRange& range : ranges) {
+        for (uint64_t seq = range.first; seq <= range.last; ++seq) {
+            TestSuite::setInfo("seq %llu", static_cast<unsigned long long>(seq));
+            jungle::KV kv_out;
+            jungle::KV::Holder h(kv_out);
+            CHK_Z(db->getSN(seq, kv_out));
+        }
+    }
+    return 0;
+}
+
+struct DBCloser {
+    jungle::DB*& db;
+    ~DBCloser() {
+        if (db) jungle::DB::close(db);
+        db = nullptr;
+    }
+};
+
+jungle::DBConfig manifest_crash_config() {
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.logSectionOnly = true;
+    config.logFileTtl_sec = 600;
+    config.allowOverwriteSeqNum = true;
+    config.maxEntriesInLogFile = 6;
+    return config;
+}
+
+int init_manifest_crash_test() {
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 0;
+    g_config.numCompactorThreads = 0;
+    g_config.numTableWriters = 0;
+    CHK_Z(jungle::init(g_config));
+    return 0;
+}
+
+// Put back the manifest captured at the crash point. The data files
+// were fsynced after it was captured, but its update never made it.
+int restore_crash_manifest(const std::string& db_path,
+                           const std::string& snapshot) {
+    CHK_Z(TestSuite::copyfile(snapshot, db_path + "/log0000_manifest"));
+    CHK_Z(TestSuite::copyfile(snapshot, db_path + "/log0000_manifest.bak"));
+    return 0;
+}
+
+// Recovery must keep every log file with records, return all fsynced records,
+// persist a manifest aligned with the log files, and keep accepting writes.
+int verify_manifest_crash_recovery(const std::string& db_path,
+                                   const jungle::DBConfig& config,
+                                   size_t num_log_files,
+                                   const std::vector<SeqRange>& expected_seqs,
+                                   uint64_t expected_max,
+                                   const std::vector<ManifestEntry>& expected_manifest) {
+    jungle::DB* db = nullptr;
+    DBCloser closer{db};
+    CHK_Z(jungle::DB::open(&db, db_path, config));
+
+    for (size_t ii = 0; ii < num_log_files; ++ii) {
+        CHK_TRUE(TestSuite::exist(log_file_path(db_path, ii)));
+    }
+    uint64_t max_seq = 0;
+    CHK_Z(db->getMaxSeqNum(max_seq));
+    CHK_EQ(expected_max, max_seq);
+    CHK_Z(check_seq_ranges(db, expected_seqs));
+    for (const char* suffix : {"", ".bak"}) {
+        CHK_Z(check_manifest_entries(db_path + "/log0000_manifest" + suffix,
+                                     expected_manifest));
+    }
+
+    CHK_Z(write_log_seq_range(db, expected_max + 1, expected_max + 3));
+    CHK_Z(db->sync(true));
+    CHK_Z(jungle::DB::close(db));
+    db = nullptr;
+
+    CHK_Z(jungle::DB::open(&db, db_path, config));
+    std::vector<SeqRange> all_seqs = expected_seqs;
+    all_seqs.push_back({expected_max + 1, expected_max + 3});
+    CHK_Z(check_seq_ranges(db, all_seqs));
+    CHK_Z(db->getMaxSeqNum(max_seq));
+    CHK_EQ(expected_max + 3, max_seq);
+    return 0;
+}
+
+// Crash after fsyncing the last log file but before its manifest update.
+int manifest_crash_stale_synced_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+    CHK_Z(init_manifest_crash_test());
+    const jungle::DBConfig config = manifest_crash_config();
+    const std::string snapshot = filename + "/crash_manifest";
+    {
+        jungle::DB* db = nullptr;
+        DBCloser closer{db};
+        CHK_Z(jungle::DB::open(&db, filename, config));
+        CHK_Z(write_log_seq_range(db, 445, 450));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 451, 453));
+        CHK_Z(db->sync(true));
+        CHK_Z(TestSuite::copyfile(filename + "/log0000_manifest", snapshot));
+        CHK_Z(write_log_seq_range(db, 454, 456));
+        CHK_Z(db->sync(true));
+    }
+    CHK_Z(check_manifest_entries(snapshot, {{445, 450}, {451, 453}}));
+    CHK_Z(restore_crash_manifest(filename, snapshot));
+
+    CHK_Z(verify_manifest_crash_recovery(
+        filename, config, 2, {{445, 456}}, 456,
+        {{445, 450}, {451, 456}}));
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+// Rollover to log2 persists the manifest with log1's stale in-memory synced seq.
+// Crash after fsyncing log1 and log2 but before the manifest update.
+int manifest_crash_stale_before_data_tail_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+    CHK_Z(init_manifest_crash_test());
+    const jungle::DBConfig config = manifest_crash_config();
+    const std::string snapshot = filename + "/crash_manifest";
+    {
+        jungle::DB* db = nullptr;
+        DBCloser closer{db};
+        CHK_Z(jungle::DB::open(&db, filename, config));
+        CHK_Z(write_log_seq_range(db, 445, 450));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 451, 453));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 454, 457));
+        CHK_Z(TestSuite::copyfile(filename + "/log0000_manifest", snapshot));
+        CHK_Z(write_log_seq_range(db, 458, 460));
+        CHK_Z(db->sync(true));
+    }
+    CHK_Z(check_manifest_entries(
+        snapshot, {{445, 450}, {451, 453},
+                   {jungle::NOT_INITIALIZED, jungle::NOT_INITIALIZED}}));
+    CHK_Z(restore_crash_manifest(filename, snapshot));
+
+    CHK_Z(verify_manifest_crash_recovery(
+        filename, config, 3, {{445, 460}}, 460,
+        {{445, 450}, {451, 456}, {457, 460}}));
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+// Same as above, but crash after fsyncing log1 and before flushing log2.
+int manifest_crash_stale_before_empty_tail_test(bool zero_length_last) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+    CHK_Z(init_manifest_crash_test());
+    const jungle::DBConfig config = manifest_crash_config();
+    const std::string snapshot = filename + "/crash_manifest";
+    const std::string last_log = log_file_path(filename, 2);
+    const std::string empty_last_log = filename + "/crash_last_log";
+    {
+        jungle::DB* db = nullptr;
+        DBCloser closer{db};
+        CHK_Z(jungle::DB::open(&db, filename, config));
+        CHK_Z(write_log_seq_range(db, 445, 450));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 451, 453));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 454, 457));
+        CHK_Z(TestSuite::copyfile(filename + "/log0000_manifest", snapshot));
+        CHK_Z(TestSuite::copyfile(last_log, empty_last_log));
+        CHK_Z(db->sync(true));
+    }
+    CHK_Z(check_manifest_entries(
+        snapshot, {{445, 450}, {451, 453},
+                   {jungle::NOT_INITIALIZED, jungle::NOT_INITIALIZED}}));
+    CHK_Z(restore_crash_manifest(filename, snapshot));
+    CHK_Z(TestSuite::copyfile(empty_last_log, last_log));
+    if (zero_length_last) {
+        std::ofstream empty_file(last_log, std::ios::binary | std::ios::trunc);
+        CHK_TRUE(empty_file.good());
+    }
+
+    // The empty log2 is removed: the next write rolls over to a new file
+    // starting at 457, which would otherwise share its start seq.
+    CHK_Z(verify_manifest_crash_recovery(
+        filename, config, 2, {{445, 456}}, 456,
+        {{445, 450}, {451, 456}}));
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+// Two rollovers between syncs leave two stale entries before the tail.
+int manifest_crash_stale_across_rollovers_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+    CHK_Z(init_manifest_crash_test());
+    const jungle::DBConfig config = manifest_crash_config();
+    const std::string snapshot = filename + "/crash_manifest";
+    {
+        jungle::DB* db = nullptr;
+        DBCloser closer{db};
+        CHK_Z(jungle::DB::open(&db, filename, config));
+        CHK_Z(write_log_seq_range(db, 445, 450));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 451, 453));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 454, 463));
+        CHK_Z(TestSuite::copyfile(filename + "/log0000_manifest", snapshot));
+        CHK_Z(write_log_seq_range(db, 464, 465));
+        CHK_Z(db->sync(true));
+    }
+    CHK_Z(check_manifest_entries(
+        snapshot, {{445, 450}, {451, 453}, {457, jungle::NOT_INITIALIZED},
+                   {jungle::NOT_INITIALIZED, jungle::NOT_INITIALIZED}}));
+    CHK_Z(restore_crash_manifest(filename, snapshot));
+
+    CHK_Z(verify_manifest_crash_recovery(
+        filename, config, 4, {{445, 465}}, 465,
+        {{445, 450}, {451, 456}, {457, 462}, {463, 465}}));
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+// Overwriting without rollback appends a lower seq, so the last
+// record in the file is not the highest seq.
+int manifest_crash_overwrite_test(bool unsynced_log) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+    CHK_Z(init_manifest_crash_test());
+    const jungle::DBConfig config = manifest_crash_config();
+    const std::string snapshot = filename + "/crash_manifest";
+    {
+        jungle::DB* db = nullptr;
+        DBCloser closer{db};
+        CHK_Z(jungle::DB::open(&db, filename, config));
+        CHK_Z(write_log_seq_range(db, 445, 450));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 451, 453));
+        if (!unsynced_log) {
+            CHK_Z(db->sync(true));
+            CHK_Z(TestSuite::copyfile(filename + "/log0000_manifest", snapshot));
+        }
+        CHK_Z(write_log_seq_range(db, 454, 456));
+        CHK_Z(db->setSN(453, jungle::KV("453", "overwritten")));
+        if (unsynced_log) {
+            CHK_Z(TestSuite::copyfile(filename + "/log0000_manifest", snapshot));
+        }
+        CHK_Z(db->sync(true));
+    }
+    if (unsynced_log) {
+        CHK_Z(check_manifest_entries(
+            snapshot, {{445, 450},
+                       {jungle::NOT_INITIALIZED, jungle::NOT_INITIALIZED}}));
+    } else {
+        CHK_Z(check_manifest_entries(snapshot, {{445, 450}, {451, 453}}));
+    }
+    CHK_Z(restore_crash_manifest(filename, snapshot));
+
+    CHK_Z(verify_manifest_crash_recovery(
+        filename, config, 2, {{445, 456}}, 456,
+        {{445, 450}, {451, 456}}));
+
+    jungle::DB* db = nullptr;
+    DBCloser closer{db};
+    CHK_Z(jungle::DB::open(&db, filename, config));
+    jungle::KV kv_out;
+    jungle::KV::Holder h(kv_out);
+    CHK_Z(db->getSN(453, kv_out));
+    CHK_EQ(std::string("overwritten"), kv_out.value.toString());
+    CHK_Z(jungle::DB::close(db));
+    db = nullptr;
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+// Seq numbers may skip at rollover (e.g. a log compaction marker),
+// so log2's first seq does not prove where log1 ends.
+int manifest_crash_seq_gap_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+    CHK_Z(init_manifest_crash_test());
+    const jungle::DBConfig config = manifest_crash_config();
+    const std::string snapshot = filename + "/crash_manifest";
+    {
+        jungle::DB* db = nullptr;
+        DBCloser closer{db};
+        CHK_Z(jungle::DB::open(&db, filename, config));
+        CHK_Z(write_log_seq_range(db, 445, 450));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 451, 453));
+        CHK_Z(db->sync(true));
+        CHK_Z(write_log_seq_range(db, 454, 456));
+        CHK_Z(write_log_seq_range(db, 470, 470));
+        CHK_Z(TestSuite::copyfile(filename + "/log0000_manifest", snapshot));
+        CHK_Z(write_log_seq_range(db, 471, 473));
+        CHK_Z(db->sync(true));
+    }
+    CHK_Z(check_manifest_entries(
+        snapshot, {{445, 450}, {451, 453},
+                   {jungle::NOT_INITIALIZED, jungle::NOT_INITIALIZED}}));
+    CHK_Z(restore_crash_manifest(filename, snapshot));
+
+    CHK_Z(verify_manifest_crash_recovery(
+        filename, config, 3, {{445, 456}, {470, 473}}, 473,
+        {{445, 450}, {451, 456}, {470, 473}}));
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int manifest_crash_missing_synced_prefix_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 0;
+    g_config.numCompactorThreads = 0;
+    g_config.numTableWriters = 0;
+    CHK_Z(jungle::init(g_config));
+
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.logSectionOnly = true;
+    config.logFileTtl_sec = 600;
+    config.allowOverwriteSeqNum = true;
+    config.maxEntriesInLogFile = 6;
+
+    jungle::DB* db = nullptr;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+    CHK_Z(write_log_seq_range(db, 445, 450));
+    CHK_Z(db->sync(true));
+    CHK_Z(write_log_seq_range(db, 451, 453));
+    CHK_Z(db->sync(true));
+
+    const std::string last_log = filename + "/log0000_00000001";
+    const std::string short_log = filename + "/log_through_453";
+    CHK_Z(TestSuite::copyfile(last_log, short_log));
+    CHK_Z(write_log_seq_range(db, 454, 456));
+    CHK_Z(db->sync(true));
+    CHK_Z(jungle::DB::close(db));
+
+    CHK_Z(TestSuite::copyfile(short_log, last_log));
+    const jungle::Status recovery = jungle::DB::open(&db, filename, config);
+    CHK_EQ(jungle::Status::FILE_CORRUPTION, recovery.getValue());
+    CHK_TRUE(TestSuite::exist(last_log));
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
+int manifest_crash_incomplete_tail_test(bool stale_manifest) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 0;
+    g_config.numCompactorThreads = 0;
+    g_config.numTableWriters = 0;
+    CHK_Z(jungle::init(g_config));
+
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    // Direct-I/O padding would hide the deliberately incomplete trailing byte.
+    config.directIoOpt.enabled = false;
+    config.logSectionOnly = true;
+    config.logFileTtl_sec = 600;
+    config.allowOverwriteSeqNum = true;
+    config.maxEntriesInLogFile = 6;
+
+    jungle::DB* db = nullptr;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+    CHK_Z(write_log_seq_range(db, 445, 450));
+    CHK_Z(db->sync(true));
+    CHK_Z(write_log_seq_range(db, 451, 456));
+    const std::string old_manifest = filename + "/manifest_before_tail_sync";
+    CHK_Z(TestSuite::copyfile(filename + "/log0000_manifest", old_manifest));
+    CHK_Z(db->sync(true));
+    CHK_Z(jungle::DB::close(db));
+
+    const size_t HEADER_SIZE = 3 * sizeof(uint64_t) + sizeof(uint32_t);
+    const size_t ENTRY_SIZE = 4 * sizeof(uint64_t);
+    std::ifstream saved_manifest(old_manifest, std::ios::binary);
+    CHK_TRUE(saved_manifest.good());
+    saved_manifest.seekg(HEADER_SIZE + ENTRY_SIZE + sizeof(uint64_t));
+    uint64_t min_seq = 0;
+    uint64_t synced_seq = 0;
+    saved_manifest.read(reinterpret_cast<char*>(&min_seq), sizeof(min_seq));
+    saved_manifest.seekg(sizeof(uint64_t), std::ios::cur);
+    saved_manifest.read(reinterpret_cast<char*>(&synced_seq),
+                        sizeof(synced_seq));
+    CHK_TRUE(saved_manifest.good());
+    saved_manifest.close();
+    CHK_EQ(jungle::NOT_INITIALIZED, min_seq);
+    CHK_EQ(jungle::NOT_INITIALIZED, synced_seq);
+
+    if (stale_manifest) {
+        CHK_Z(patch_manifest_tail_min_seq(old_manifest, 2, 451));
+        CHK_Z(TestSuite::copyfile(old_manifest, filename + "/log0000_manifest"));
+        CHK_Z(TestSuite::copyfile(old_manifest, filename + "/log0000_manifest.bak"));
+    }
+    const std::string log_file = filename + "/log0000_00000001";
+    std::ofstream tail(log_file, std::ios::binary | std::ios::app);
+    CHK_TRUE(tail.good());
+    tail.put('\0');
+    tail.close();
+    CHK_TRUE(tail.good());
+
+    jungle::Status recovery = jungle::DB::open(&db, filename, config);
+    bool readable = true;
+    if (recovery) {
+        for (uint64_t seq = 451; seq <= 456; ++seq) {
+            jungle::KV kv_out;
+            jungle::KV::Holder h(kv_out);
+            if (!db->getSN(seq, kv_out)) {
+                readable = false;
+                break;
+            }
+        }
+        CHK_Z(jungle::DB::close(db));
+    }
+    const bool log_file_present = TestSuite::exist(log_file);
+    CHK_Z(jungle::shutdown());
+
+    TestSuite::setInfo("recovery status %d, log file present %d, readable %d",
+                       static_cast<int>(recovery), log_file_present, readable);
+    CHK_TRUE(log_file_present);
+    CHK_TRUE(!recovery || readable);
     TEST_SUITE_CLEANUP_PATH();
     return 0;
 }
@@ -2258,9 +2791,57 @@ int main(int argc, char** argv) {
     ts.doTest("empty flush race test",
               empty_flush_race_test);
 
+    // These tests simulate a manifest/log file discrepancy after a crash,
+    // where the log file and its manifest entry were not persisted together.
+    // Recovery must not lose fsynced data or delete a log file with records.
+    //
+    // Manifest (min/synced) vs. physical log state at recovery.
+    // Unless noted, log0 holds 445..450 and is consistent.
+    // 453' is a later copy of seq 453 in the same file, written by an overwrite.
+    //
+    // | Test                        | Manifest                                 | Physical log                                |
+    // |-----------------------------|------------------------------------------|---------------------------------------------|
+    // | inconsistent manifest       | log2 451 or NIL/NIL                      | log2 451..455 (log0, log1: 431..450)        |
+    // | stale synced seq            | log1 451/453                             | log1 451..456                               |
+    // | stale seq before data tail  | log1 451/453, log2 NIL/NIL               | log1 451..456, log2 457..460                |
+    // | stale seq before empty tail | log1 451/453, log2 NIL/NIL               | log1 451..456, log2 empty (removed)         |
+    // | stale seq across rollovers  | log1 451/453, log2 457/NIL, log3 NIL/NIL | log1 451..456, log2 457..462, log3 463..465 |
+    // | overwrite without rollback  | log1 451/453 or NIL/NIL                  | log1 451..453, 453'..456 or 451..456        |
+    // | seq gap at rollover         | log1 451/453, log2 NIL/NIL               | log1 451..456, log2 470..473                |
+    // | incomplete log              | log1 451/NIL or 451/456                  | log1 451..456 + 1 byte                      |
     ts.doTest("inconsistent manifest recovery test",
               inconsistent_manifest_recovery_test,
               TestRange<bool>( {false, true} ));
+
+    ts.doTest("manifest crash with stale synced seq test",
+              manifest_crash_stale_synced_test);
+
+    ts.doTest("manifest crash with stale seq before data tail test",
+              manifest_crash_stale_before_data_tail_test);
+
+    ts.doTest("manifest crash with stale seq before empty tail test",
+              manifest_crash_stale_before_empty_tail_test,
+              TestRange<bool>( {false, true} ));
+
+    ts.doTest("manifest crash with stale seq across rollovers test",
+              manifest_crash_stale_across_rollovers_test);
+
+    ts.doTest("manifest crash with overwrite test",
+              manifest_crash_overwrite_test,
+              TestRange<bool>( {false, true} ));
+
+    ts.doTest("manifest crash with seq gap test",
+              manifest_crash_seq_gap_test);
+
+    ts.doTest("manifest crash with incomplete log test",
+              manifest_crash_incomplete_tail_test,
+              TestRange<bool>( {false, true} ));
+
+    // TODO: expected behavior to be decided together with rollback crash handling.
+#if 0
+    ts.doTest("manifest crash with missing synced prefix test",
+              manifest_crash_missing_synced_prefix_test);
+#endif
 
 #if 0
     ts.doTest("reload empty files test",

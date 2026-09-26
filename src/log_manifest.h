@@ -28,6 +28,7 @@ limitations under the License.
 #include <map>
 #include <string>
 #include <thread>
+#include <vector>
 
 class SimpleLogger;
 
@@ -332,32 +333,36 @@ public:
 
     void setLogger(SimpleLogger* logger) { myLog = logger; }
 
+    /**
+     * `true` if the last `load` failed as the manifest cannot be
+     * aligned with the log files. Restoring an older manifest
+     * should not be attempted in that case.
+     */
+    bool isLogFileCorrupted() const { return logFileCorrupted; }
+
 private:
     Status storeInternal(bool call_fsync);
 
+    struct Entry {
+        uint64_t fileNum;
+        uint64_t minSeq;
+        uint64_t flushedSeq;
+        uint64_t syncedSeq;
+    };
+
     /**
      * (Log-section mode only)
-     * Check the validity of sequence numbers in a log file.
+     * Align manifest entries with the log files, walking backwards
+     * from the newest file. A crash between a log fsync and the
+     * following manifest update leaves the manifest behind the files.
      *
-     * @param l_filename The name of the log file.
-     * @param l_file_num The number of the log file.
-     * @param[inout] min_seq The minimum sequence number in the log file.
-     *                       Can be updated by the function after correction.
-     * @param[inout] synced_seq The last synced sequence number.
-     *                          Can be updated by the function after correction.
-     * @param purged_seq The last purged sequence number.
-     * @param last_synced_seq The last synced sequence number from the previous log file.
-     * @param last_log_file `true` if this log file is the last one in the sequence.
-     *
-     * @return `true` if the log file is invalid, `false` otherwise.
+     * @param[inout] entries Manifest entries, updated after correction.
+     * @param[out] changed_out `true` if any entry has been updated.
+     * @return `FILE_CORRUPTION` if the log files cannot be aligned
+     *         without losing synced data.
      */
-    bool isInvalidLog(const std::string& l_filename,
-                      uint64_t l_file_num,
-                      uint64_t& min_seq,
-                      uint64_t& synced_seq,
-                      uint64_t purged_seq,
-                      uint64_t last_synced_seq,
-                      bool last_log_file);
+    Status reconcileWithLogFiles(std::vector<Entry>& entries,
+                                 bool& changed_out);
 
     FileOps* fOps;
     FileOps* fLogOps;
@@ -402,6 +407,8 @@ private:
      * and backup file, so that we cannot do partial write.
      */
     bool fullBackupRequired;
+
+    bool logFileCorrupted;
 
     LogMgr* logMgr;
     SimpleLogger* myLog;
