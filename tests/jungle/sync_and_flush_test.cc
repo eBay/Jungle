@@ -705,6 +705,77 @@ int sync_flush_race_test() {
     return 0;
 }
 
+// Force an older flush to complete after a newer successful sync. The debug
+// callback represents a scheduler interleaving without timing-dependent sleeps.
+int older_flush_preserves_newer_sync_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+    jungle::GlobalConfig global;
+    global.numFlusherThreads = 0;
+    global.numCompactorThreads = 0;
+    CHK_Z(jungle::init(global));
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.autoLogFlush = false;
+    config.maxEntriesInLogFile = 1000;
+    jungle::DB* db = nullptr;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+    auto insert_keys = [&](size_t first, size_t last) {
+        for (size_t i = first; i <= last; ++i) {
+            CHK_Z(db->set(jungle::KV("key" + std::to_string(i), "value")));
+        }
+        return 0;
+    };
+    CHK_Z(insert_keys(1, 10));
+    bool called = false;
+    int callback_status = 0;
+    uint64_t newer_synced = 0;
+    jungle::DebugParams debug;
+    debug.logFlushCb = [&](const jungle::DebugParams::GenericCbParams&) {
+        if (called) return;
+        called = true;
+        callback_status = insert_keys(11, 20);
+        if (callback_status) return;
+        auto status = db->sync(true);
+        if (!status) {
+            callback_status = -1;
+            return;
+        }
+        status = db->getLastSyncedSeqNum(newer_synced);
+        if (!status) callback_status = -1;
+    };
+    jungle::DB::setDebugParams(debug);
+    jungle::DB::enableDebugCallbacks(true);
+    jungle::FlushOptions options;
+    options.beyondLastSync = true;
+    const auto flush_status = db->flushLogs(options);
+    jungle::DB::enableDebugCallbacks(false);
+    jungle::DB::setDebugParams(jungle::DebugParams{});
+    CHK_Z(flush_status);
+    CHK_TRUE(called);
+    CHK_Z(callback_status);
+    CHK_EQ(20, newer_synced);
+    uint64_t final_synced = 0;
+    CHK_Z(db->getLastSyncedSeqNum(final_synced));
+    CHK_EQ(newer_synced, final_synced);
+
+    // Reopen a copy taken before graceful close could sync or flush again.
+    const std::string clone_path = filename + "_clone";
+    TestSuite::copyfile(filename, clone_path);
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::DB::open(&db, clone_path, config));
+    for (size_t i = 1; i <= 20; ++i) {
+        jungle::SizedBuf value;
+        jungle::SizedBuf::Holder holder(value);
+        CHK_Z(db->get("key" + std::to_string(i), value));
+        CHK_EQ(std::string("value"), value.toString());
+    }
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int sync_skip_and_reload_test() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -814,6 +885,8 @@ int main(int argc, char** argv) {
     ts.doTest("serialized sync and flush test", serialized_sync_and_flush_test);
     ts.doTest("disabling auto flush test", disabling_auto_flush_test);
     ts.doTest("sync flush race test", sync_flush_race_test);
+    ts.doTest("older flush preserves newer sync test",
+              older_flush_preserves_newer_sync_test);
     ts.doTest("sync skip and reload test", sync_skip_and_reload_test);
 
     return 0;

@@ -16,6 +16,8 @@ limitations under the License.
 
 #include "log_file.h"
 
+#include <algorithm>
+
 #include "db_mgr.h"
 #include "internal_helper.h"
 #include "log_mgr.h"
@@ -640,10 +642,15 @@ Status LogFile::setSyncedSeqNum(const uint64_t seq_num) {
         return Status();
     }
 
-    if (seq_num > mTable->maxSeqNum) {
-        mTable->syncedSeqNum.store(mTable->maxSeqNum.load());
-    } else {
-        mTable->syncedSeqNum = seq_num;
+    // A beyond-last-sync flush can finish after a newer sync on the same
+    // file. Both advance durable storage; the older completion must not
+    // move the shared durability frontier backwards. NOT_INITIALIZED is a
+    // sentinel, not an already-synced upper bound.
+    const uint64_t max_seq = mTable->maxSeqNum.load();
+    const uint64_t target = std::min(seq_num, max_seq);
+    uint64_t previous = mTable->syncedSeqNum.load();
+    while ((!valid_number(previous) || previous < target)
+           && !mTable->syncedSeqNum.compare_exchange_weak(previous, target)) {
     }
     _log_debug(myLog, "Set log file %ld synced seqnum to %ld.",
                logFileNum, mTable->syncedSeqNum.load());

@@ -115,6 +115,7 @@ public:
     // If seq_num == NOT_INITIALIZED, return all.
     Status getCheckpoints(const uint64_t seq_num,
                           std::list<uint64_t>& list_out);
+    // Advance the durable frontier; an older flush cannot undo a newer sync.
     Status setSyncedSeqNum(const uint64_t seq_num);
     Status setFlushedSeqNum(const uint64_t seq_num);
     Status updateSeqNumByBulkLoader(const uint64_t seq_num);
