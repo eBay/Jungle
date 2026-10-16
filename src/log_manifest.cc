@@ -160,6 +160,7 @@ LogManifest::LogManifest(LogMgr* log_mgr, FileOps* _f_ops, FileOps* _f_l_ops)
     , cachedManifest(32768)
     , lenCachedManifest(0)
     , fullBackupRequired(true)
+    , logFileCorrupted(false)
     , logMgr(log_mgr)
     , myLog(nullptr)
 {
@@ -237,132 +238,204 @@ Status LogManifest::create(const std::string& path,
     return Status();
 }
 
-bool LogManifest::isInvalidLog(const std::string& l_filename,
-                               uint64_t l_file_num,
-                               uint64_t& min_seq,
-                               uint64_t& synced_seq,
-                               uint64_t purged_seq,
-                               uint64_t last_synced_seq,
-                               bool last_log_file)
+// Backward walk, newest -> oldest entry (L = last synced log,
+// next_min = min seq of the closest later file with records):
+//
+//   if e.file < lastFlushedLog: stop
+//   if e.synced + 1 == next_min:                // lines up with next file
+//       if e.file < L: stop                     // written by a completed sync
+//       next_min = e.min (if e has records); continue
+//   r = scan(e.file); if missing: stop
+//   torn     = parsing stopped on an error
+//   promised = e.synced >= e.min                // entry claims records
+//   if torn and valid(next_min): FILE_CORRUPTION
+//   if synced seq would be lowered:
+//       torn ? warn and accept : FILE_CORRUPTION
+//   if no records:
+//       at the end of the log (not first entry): remove e
+//       else if torn: truncate to last intact entry, fsync
+//       continue
+//   if r.last >= next_min: FILE_CORRUPTION      // overlap; gaps are fine
+//   if torn or e != (r.min, r.last):
+//       truncate if torn, fsync; e = (r.min, r.last)
+//   next_min = e.min
+//
+// Removing empty tail files lowers max/synced/flushed log numbers to
+// the new last file.
+Status LogManifest::reconcileWithLogFiles(std::vector<Entry>& entries,
+                                          bool& changed_out)
 {
-    bool invalid_log = false;
-    bool log_scan_required = false;
+    changed_out = false;
+    const uint64_t last_synced_log = lastSyncedLog.load();
 
-    // Log-only mode, validity check.
-    if ( valid_number(min_seq) &&
-         valid_number(synced_seq) &&
-         min_seq > synced_seq ) {
-        // This cannot happen, probably caused by
-        // abnormal shutdown.
-        _log_warn( myLog, "min seq %s > synced seq %s, scan required",
-                   _seq_str(min_seq).c_str(),
-                   _seq_str(synced_seq).c_str() );
-        log_scan_required = true;
-    }
-    if ( valid_number(min_seq) &&
-         valid_number(last_synced_seq) &&
-         min_seq != last_synced_seq + 1 ) {
-        // Inconsecutive sequence number,
-        // probably caused by abnormal shutdown and then
-        // re-open.
-        _log_warn( myLog, "min seq %s and last synced seq %s "
-                   "are inconsecutive, scan required",
-                   _seq_str(min_seq).c_str(),
-                   _seq_str(last_synced_seq).c_str() );
-        log_scan_required = true;
-    }
-    if ( valid_number(min_seq) && !valid_number(synced_seq) ) {
-        // If min seq exists but synced seq does not,
-        // it indicates that the log file has some logs but
-        // manifest does not have the latest information.
-        // Need to scan that file and update the manifest.
-        _log_warn( myLog, "min seq %s exists but synced seq does not, "
-                   "scan required",
-                   _seq_str(min_seq).c_str() );
-        log_scan_required = true;
-    }
-    if ( last_log_file &&
-         !valid_number(min_seq) ) {
-        // If the last log file is empty and manifest file is not properly
-        // updated, we should rescan the log file and see if there are
-        // valid logs.
-        //
-        // If it is indeed empty, we should remove the last empty log file,
-        // otherwise the next DB open will remove all
-        // log files after that empty log file, due to incorrect
-        // manifest entry (min_seq = last_sync + 1) for that log file.
-        _log_warn( myLog, "the last log file %s is empty and manifest entry "
-                   "does not match: min seq %s, synced seq %s. "
-                   "scan required.",
-                   _seq_str(l_file_num).c_str(),
-                   _seq_str(min_seq).c_str(),
-                   _seq_str(synced_seq).c_str() );
-        log_scan_required = true;
-    }
+    // Min seq of the closest later file that has records.
+    uint64_t next_min_seq = NOT_INITIALIZED;
+    // Number of empty files at the end, to be removed.
+    size_t num_empty_tail = 0;
 
-    if (log_scan_required) {
-        // Load the acutal file in a separate instance.
-        LogFile* scan_file = new LogFile(logMgr);
-        scan_file->setLogger(myLog);
-        // NOTE:
-        //   Passing `NOT_INITIALIZED` for min and synced seq,
-        //   because there can be also a case that actual min/synced seq number
-        //   is greater than the manifest min/synced seq. In that case, the
-        //   manifest is not properly updated/fixed.
-        Status ss;
-        ss = scan_file->load(l_filename, fLogOps, l_file_num,
-                             NOT_INITIALIZED, purged_seq, NOT_INITIALIZED);
-        if (!ss.ok() && ss != Status::ALREADY_INITIALIZED) {
-            _log_err(myLog, "failed to load log file %s: %d",
-                     l_filename.c_str(), (int)ss);
-            return /* invalid_log */true;
-        }
-        ss = scan_file->loadMemTable();
-        if (!ss.ok() && ss != Status::ALREADY_INITIALIZED) {
-            _log_err(myLog, "failed to load memtable for log file %s: %d",
-                     l_filename.c_str(), (int)ss);
-            return /* invalid_log */true;
+    for (size_t ii = entries.size(); ii-- > 0; ) {
+        Entry& ee = entries[ii];
+        if ( valid_number(lastFlushedLog) &&
+             ee.fileNum < lastFlushedLog ) {
+            // Will not be loaded.
+            break;
         }
 
-        // Now re-check it with the actual log file content.
-        uint64_t actual_min_seq = scan_file->getMinSeqNum();
-        uint64_t actual_synced_seq = scan_file->getSyncedSeqNum();
-        if (valid_number(last_synced_seq) &&
-            actual_min_seq != last_synced_seq + 1) {
-            _log_warn( myLog, "actual min seq %s and last synced seq %s "
-                       "are inconsecutive, invalid log",
-                       _seq_str(actual_min_seq).c_str(),
-                       _seq_str(last_synced_seq).c_str() );
-            invalid_log = true;
-        }
-        if (valid_number(actual_synced_seq) &&
-            actual_min_seq > actual_synced_seq) {
-            _log_warn( myLog, "actual min seq %s > actual synced seq %s, "
-                       "invalid log",
-                       _seq_str(actual_min_seq).c_str(),
-                       _seq_str(actual_synced_seq).c_str() );
-            invalid_log = true;
-        }
-        if (last_log_file && !valid_number(actual_min_seq)) {
-            _log_warn(myLog, "the last log file %s has no valid min seq, "
-                       "marking it as invalid", _seq_str(l_file_num).c_str());
-            invalid_log = true;
+        if ( valid_number(next_min_seq) &&
+             valid_number(ee.minSeq) &&
+             valid_number(ee.syncedSeq) &&
+             ee.syncedSeq + 1 == next_min_seq ) {
+            // Every file before the last synced log was written by
+            // a completed sync, along with its manifest entry.
+            if ( valid_number(last_synced_log) &&
+                 ee.fileNum < last_synced_log ) {
+                break;
+            }
+            if (ee.syncedSeq >= ee.minSeq) {
+                next_min_seq = ee.minSeq;
+            }
+            continue;
         }
 
-        if (!invalid_log) {
-            // If actual log file content is valid, update the min and synced seq.
-            _log_warn(myLog, "updating min seq %s -> %s and synced %s -> %s",
-                      _seq_str(min_seq).c_str(),
-                      _seq_str(actual_min_seq).c_str(),
-                      _seq_str(synced_seq).c_str(),
-                      _seq_str(actual_synced_seq).c_str());
-            min_seq = actual_min_seq;
-            synced_seq = actual_synced_seq;
+        std::string l_filename =
+            LogFile::getLogFileName(dirPath, prefixNum, ee.fileNum);
+        LogFile scan_file(logMgr);
+        scan_file.setLogger(myLog);
+        LogFile::ScanResult res;
+        Status s = scan_file.scan(l_filename, fLogOps, ee.fileNum, res);
+        if (!s) {
+            _log_err(myLog, "failed to scan log file %s: %d",
+                     l_filename.c_str(), (int)s);
+            return s;
         }
-        scan_file->purgeMemTable();
-        delete scan_file;
+        if (!res.exist) {
+            // Handled by the caller as before.
+            _log_warn(myLog, "log file %s does not exist, stop reconciling",
+                      l_filename.c_str());
+            break;
+        }
+
+        const bool has_records = valid_number(res.lastSeq);
+        const bool promised = valid_number(ee.minSeq) &&
+                              valid_number(ee.syncedSeq) &&
+                              ee.syncedSeq >= ee.minSeq;
+        const bool torn = !res.loadStatus.ok();
+
+        _log_info( myLog,
+                   "scanned log file %s: manifest min seq %s synced seq %s, "
+                   "actual min seq %s last seq %s, next min seq %s, "
+                   "size %zu valid %zu, status %d",
+                   l_filename.c_str(),
+                   _seq_str(ee.minSeq).c_str(),
+                   _seq_str(ee.syncedSeq).c_str(),
+                   _seq_str(res.minSeq).c_str(),
+                   _seq_str(res.lastSeq).c_str(),
+                   _seq_str(next_min_seq).c_str(),
+                   res.fileSize, res.validSize,
+                   (int)res.loadStatus );
+
+        // Only the end of the log can be torn by a crash.
+        if (torn && valid_number(next_min_seq)) {
+            _log_err(myLog, "log file %s is corrupted before the end of log",
+                     l_filename.c_str());
+            return Status::FILE_CORRUPTION;
+        }
+
+        // Synced seq should never be lowered. A torn end is left by
+        // losing un-fsynced data (e.g., power loss after `sync(false)`),
+        // then align it with the file as before.
+        const bool lost_synced =
+            has_records
+            ? ( ( valid_number(ee.syncedSeq) &&
+                  ee.syncedSeq > res.lastSeq ) ||
+                ( promised && res.minSeq > ee.minSeq ) )
+            : promised;
+        if (lost_synced) {
+            if (!torn) {
+                _log_err(myLog, "log file %s lost synced seq: manifest "
+                         "%s - %s, actual %s - %s",
+                         l_filename.c_str(),
+                         _seq_str(ee.minSeq).c_str(),
+                         _seq_str(ee.syncedSeq).c_str(),
+                         _seq_str(res.minSeq).c_str(),
+                         _seq_str(res.lastSeq).c_str());
+                return Status::FILE_CORRUPTION;
+            }
+            _log_warn(myLog, "torn log file %s lost synced seq: manifest "
+                      "%s - %s, actual %s - %s",
+                      l_filename.c_str(),
+                      _seq_str(ee.minSeq).c_str(),
+                      _seq_str(ee.syncedSeq).c_str(),
+                      _seq_str(res.minSeq).c_str(),
+                      _seq_str(res.lastSeq).c_str());
+        }
+
+        if (!has_records) {
+            if (promised) {
+                ee.minSeq = NOT_INITIALIZED;
+                ee.syncedSeq = NOT_INITIALIZED;
+                changed_out = true;
+            }
+            if (!valid_number(next_min_seq) && ii > 0) {
+                // Empty file at the end: the next file will start from the
+                // same seq, so it should be removed.
+                num_empty_tail++;
+            } else if (torn) {
+                EP( scan_file.truncateAndSync(res.validSize) );
+            }
+            continue;
+        }
+
+        // Seq numbers may skip at rollover, but never go backwards.
+        if (valid_number(next_min_seq) && res.lastSeq >= next_min_seq) {
+            _log_err(myLog, "last seq %s of log file %s overlaps with "
+                     "next min seq %s",
+                     _seq_str(res.lastSeq).c_str(),
+                     l_filename.c_str(),
+                     _seq_str(next_min_seq).c_str());
+            return Status::FILE_CORRUPTION;
+        }
+
+        const bool updated = res.minSeq != ee.minSeq ||
+                             res.lastSeq != ee.syncedSeq;
+        if (updated || torn) {
+            // Records about to be listed in the manifest should be durable.
+            EP( scan_file.truncateAndSync(torn ? res.validSize
+                                               : NOT_INITIALIZED) );
+        }
+        if (updated) {
+            _log_warn(myLog, "log file %s: updating min seq %s -> %s, "
+                      "synced seq %s -> %s",
+                      l_filename.c_str(),
+                      _seq_str(ee.minSeq).c_str(),
+                      _seq_str(res.minSeq).c_str(),
+                      _seq_str(ee.syncedSeq).c_str(),
+                      _seq_str(res.lastSeq).c_str());
+            ee.minSeq = res.minSeq;
+            ee.syncedSeq = res.lastSeq;
+            changed_out = true;
+        }
+        next_min_seq = ee.minSeq;
     }
-    return invalid_log;
+
+    if (num_empty_tail) {
+        entries.resize(entries.size() - num_empty_tail);
+        const uint64_t last_file_num = entries.back().fileNum;
+        _log_warn(myLog, "removed %zu empty log files at the end, "
+                  "last log file %zu",
+                  num_empty_tail, last_file_num);
+        maxLogFileNum = last_file_num;
+        if ( valid_number(lastSyncedLog) &&
+             lastSyncedLog > last_file_num ) {
+            lastSyncedLog = last_file_num;
+        }
+        if ( valid_number(lastFlushedLog) &&
+             lastFlushedLog > last_file_num ) {
+            lastFlushedLog = last_file_num;
+        }
+        changed_out = true;
+    }
+    return Status();
 }
 
 Status LogManifest::load(const std::string& path,
@@ -376,6 +449,7 @@ Status LogManifest::load(const std::string& path,
     dirPath = path;
     mFileName = filename;
     prefixNum = prefix_num;
+    logFileCorrupted = false;
 
     Status s;
     Timer tt;
@@ -422,6 +496,27 @@ Status LogManifest::load(const std::string& path,
               maxLogFileNum.load(), lastFlushedLog.load(),
               lastSyncedLog.load(), num_log_files);
 
+    std::vector<Entry> entries(num_log_files);
+    for (Entry& ee: entries) {
+        ee.fileNum = ss.getU64(s);
+        ee.minSeq = ss.getU64(s);
+        ee.flushedSeq = ss.getU64(s);
+        ee.syncedSeq = ss.getU64(s);
+    }
+
+    // Align entries with the log files before loading them. On failure,
+    // `LogMgr::init` should not retry with the backup manifest.
+    bool entries_changed = false;
+    if ( db_config->logSectionOnly &&
+         db_config->truncateInconsecutiveLogs ) {
+        s = reconcileWithLogFiles(entries, entries_changed);
+        if (!s) {
+            logFileCorrupted = true;
+            throw s;
+        }
+    }
+
+    num_log_files = entries.size();
     uint64_t last_synced_seq = NOT_INITIALIZED;
 
     bool first_file_read = false;
@@ -429,38 +524,13 @@ Status LogManifest::load(const std::string& path,
         LogFile* l_file = new LogFile(logMgr);
         l_file->setLogger(myLog);
 
-        uint64_t l_file_num = ss.getU64(s);
+        uint64_t l_file_num = entries[ii].fileNum;
         std::string l_filename =
                 LogFile::getLogFileName(dirPath, prefixNum, l_file_num);
 
-        uint64_t min_seq = ss.getU64(s);
-        uint64_t purged_seq = ss.getU64(s);
-        uint64_t synced_seq = ss.getU64(s);
-
-        bool invalid_log = false;
-        if ( db_config->logSectionOnly &&
-             db_config->truncateInconsecutiveLogs ) {
-            invalid_log = isInvalidLog(l_filename,
-                                       l_file_num,
-                                       min_seq /* can be updated */,
-                                       synced_seq /* can be updated */,
-                                       purged_seq,
-                                       last_synced_seq,
-                                       ii + 1 == num_log_files /* last_log_file */);
-        }
-
-        if (invalid_log) {
-            delete l_file;
-            if (l_file_num) {
-                maxLogFileNum.store(l_file_num-1, MOR);
-                lastSyncedLog.store(l_file_num-1, MOR);
-                _log_warn(myLog, "adjusted max log file num %zu, "
-                          "last synced log file num %zu",
-                          maxLogFileNum.load(),
-                          lastSyncedLog.load());
-            }
-            break;
-        }
+        uint64_t min_seq = entries[ii].minSeq;
+        uint64_t purged_seq = entries[ii].flushedSeq;
+        uint64_t synced_seq = entries[ii].syncedSeq;
 
         if (valid_number(synced_seq)) {
             last_synced_seq = synced_seq;
@@ -562,6 +632,11 @@ Status LogManifest::load(const std::string& path,
              lastSyncedLog < l_file_num ) {
             lastSyncedLog.store(l_file_num);
         }
+    }
+
+    if (entries_changed) {
+        // Persist the aligned entries.
+        TC( store(true) );
     }
 
     _log_info(myLog, "loading manifest & log files done: %lu us, "
