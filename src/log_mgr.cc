@@ -1305,7 +1305,7 @@ Status LogMgr::syncInternal(bool call_fsync) {
     }
 
     // Sync up manifest file next
-    mani->setLastSyncedLog(last_synced_log);
+    mani->advanceLastSyncedLog(last_synced_log);
 
     const DBConfig* db_config = getDbConfig();
     if (!db_config->skipManifestSync || needSkippedManiSync) {
@@ -1551,15 +1551,10 @@ Status LogMgr::flush(const FlushOptions& options,
               _seq_str(seq_num).c_str(), seq_num_local, ln_from, ln_to);
 
     if (options.beyondLastSync) {
-        // WARNING:
-        //   Update last synced log only if it is beyond the last sync.
-        //   Due to `FlushOptions::numFilesLimit`, `ln_to` could be
-        //   less than `last_synced_log`.
-        uint64_t last_synced_log = 0;
-        mani->getLastSyncedLog(last_synced_log);
-        if (ln_to > last_synced_log) {
-            mani->setLastSyncedLog(ln_to);
-        }
+        // A concurrent sync may already have advanced farther. Advance
+        // atomically, including the first flush, rather than racing a
+        // get/check/store against a newer completion.
+        mani->advanceLastSyncedLog(ln_to);
     }
     mani->setLastFlushedLog(ln_to);
 

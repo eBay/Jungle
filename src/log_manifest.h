@@ -322,6 +322,15 @@ public:
     void setLastSyncedLog(const uint64_t log_num) {
         lastSyncedLog = log_num;
     }
+
+    // Normal sync/flush completions only advance durability. Rollback and
+    // overwrite retain setLastSyncedLog() to deliberately reset the frontier.
+    void advanceLastSyncedLog(const uint64_t log_num) {
+        uint64_t previous = lastSyncedLog.load();
+        while ((previous == NOT_INITIALIZED || previous < log_num)
+               && !lastSyncedLog.compare_exchange_weak(previous, log_num)) {
+        }
+    }
     void setLastFlushedLog(const uint64_t log_num) {
         lastFlushedLog = log_num;
     }
