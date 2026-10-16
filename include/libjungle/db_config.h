@@ -170,6 +170,7 @@ public:
         , maxL1Size((uint64_t)1024 * 1073741824)    // 1 TiB
         , maxParallelWritesPerJob(0)
         , readOnly(false)
+        , allowConcurrentWrites(false)
         , preFlushDirtyInterval_sec(5)
         , preFlushDirtySize(0)
         , numExpectedUserThreads(8)
@@ -470,6 +471,14 @@ public:
      * If `true`, read-only mode. No modify, recovery, and compaction.
      */
     bool readOnly;
+
+    /**
+     * If `true`, allow concurrent writes by bypassing the write mutex
+     * for common cases (auto-assigned sequence numbers, no overwrite).
+     * This optimization can significantly improve multi-threaded write
+     * throughput but may have edge cases. Default: `false`
+     */
+    bool allowConcurrentWrites;
 
     struct DirectIoOptions{
         DirectIoOptions()
