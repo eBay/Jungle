@@ -964,7 +964,8 @@ Status MemTable::loadCheckpoint(RwSerializer& rws)
 Status MemTable::load(RwSerializer& rws,
                       uint64_t min_seq,
                       uint64_t flushed_seq,
-                      uint64_t synced_seq)
+                      uint64_t synced_seq,
+                      uint64_t* valid_size_out)
 {
     Timer tt;
     getReady();
@@ -1040,7 +1041,13 @@ Status MemTable::load(RwSerializer& rws,
         minSeqNum = min_seq_seen;
     }
 
-    if (NOT_INITIALIZED != last_seq && last_seq < synced_seq) {
+    if (valid_size_out) {
+        *valid_size_out = last_valid_size;
+    }
+
+    if ( NOT_INITIALIZED != last_seq &&
+         valid_number(synced_seq) &&
+         last_seq < synced_seq ) {
         _log_err( myLog,
                   "failed to load memTable for log file %s %ld "
                   "as some log entries are missing. "
