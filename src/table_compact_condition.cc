@@ -672,11 +672,14 @@ Status TableMgr::chkLPCompactCond(size_t level,
              total = 0,
              max_stack = 0;
 
-    bool force_interlevel = false;
-    // TODO: If we want to force inter-level compaction
-    //       for intermediate levels, need to add some
-    //       logic to make this flag true here.
-    (void)force_interlevel;
+    // Force inter-level compaction for intermediate levels,
+    // so that in-place compaction happens only at the last level.
+    // In-place compaction copies records as they are without invoking
+    // the compaction callback, while inter-level compaction always
+    // rewrites them into the next level.
+    bool force_interlevel = db_config->nextLevelExtension &&
+                            level >= 1 &&
+                            level + 1 < mani->getNumLevels();
 
     // Check if inter-level merge is needed.
     if ( !isLevelLocked(level) ) {
@@ -705,7 +708,7 @@ Status TableMgr::chkLPCompactCond(size_t level,
         s = pickVictimTable( level, v_policy, true,
                              victim_table, wss, total );
         if (s && victim_table) {
-            s_out = TableMgr::INPLACE;
+            s_out = force_interlevel ? TableMgr::INTERLEVEL : TableMgr::INPLACE;
             victim_table_out = victim_table;
             return s;
         }

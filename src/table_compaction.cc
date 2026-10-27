@@ -664,6 +664,19 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
 {
     if (level >= mani->getNumLevels()) return Status::INVALID_LEVEL;
 
+    const DBConfig* db_config = getDbConfig();
+    if ( db_config->nextLevelExtension &&
+         level >= 1 &&
+         level + 1 < mani->getNumLevels() ) {
+        // In-place compaction is not allowed for intermediate levels,
+        // as it copies records as they are without invoking the
+        // compaction callback. Instead, do inter-level compaction,
+        // which always rewrites the records into the next level.
+        _log_info( myLog, "in-place compaction at intermediate level %zu, "
+                   "redirect to inter-level compaction", level );
+        return compactLevelItr(options, victim_table, level);
+    }
+
     Status s;
     Timer tt;
     VictimPolicy v_policy = oldest_one_first ? WORKING_SET_SIZE : STALE_RATIO;
