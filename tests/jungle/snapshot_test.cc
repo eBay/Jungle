@@ -1050,6 +1050,138 @@ int empty_db_snapshot_test() {
     return 0;
 }
 
+int snapshot_lookup_after_compaction_test(int lookup_type, bool level_extension) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 0;
+    g_config.numCompactorThreads = 0;
+    CHK_Z(jungle::init(g_config));
+
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.numL0Partitions = 4;
+    config.maxEntriesInLogFile = 4;
+    config.nextLevelExtension = level_extension;
+    jungle::DB* db = nullptr;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    const size_t num = 32;
+    CHK_Z(_set_keys(db, 0, num, 1, "key_%04zu", "old_%04zu"));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
+    }
+
+    // With level extension, the snapshot contains overlapping L0 and L1
+    // versions. Point reads must select the newest captured version.
+    CHK_Z(_set_keys(db, 0, num / 2, 1, "key_%04zu", "snap_%04zu"));
+    CHK_Z(db->del(jungle::SizedBuf("key_0001")));
+    // Rotate past all tested keys, including the deletion, so their reads
+    // must reach the captured table snapshots rather than the final log file.
+    CHK_Z(_set_keys(db, 0, 8, 1, "padding_%04zu", "padding_%04zu"));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+    jungle::DB* snap = nullptr;
+    CHK_Z(db->openSnapshot(&snap));
+    uint64_t snapshot_seq = 0;
+    CHK_Z(db->getMaxSeqNum(snapshot_seq));
+
+    // Replace the live tables and change every value after capturing the
+    // snapshot. Older keys cannot be satisfied by its retained log tail.
+    CHK_Z(_set_keys(db, 0, num, 1, "key_%04zu", "live_%04zu"));
+    CHK_Z(db->set(jungle::KV("future_key", "future_value")));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
+    }
+
+    for (size_t ii = 0; ii < num; ++ii) {
+        std::string key = "key_" + TestSuite::lzStr(4, ii);
+        std::string value = (ii < num / 2 ? "snap_" : "old_") +
+                            TestSuite::lzStr(4, ii);
+        TestSuite::setInfo("key %s, lookup %d, extension %d",
+                           key.c_str(), lookup_type, level_extension);
+        if (lookup_type == 0) {
+            jungle::SizedBuf value_out;
+            jungle::SizedBuf::Holder h_value_out(value_out);
+            jungle::Status s = snap->get(jungle::SizedBuf(key), value_out);
+            if (ii == 1) {
+                CHK_OK(s == jungle::Status::KEY_NOT_FOUND);
+            } else {
+                CHK_Z(s);
+                CHK_EQ(jungle::SizedBuf(value), value_out);
+            }
+            for (bool meta_only : {false, true}) {
+                jungle::Record rec;
+                jungle::Record::Holder h_rec(rec);
+                s = snap->getRecordByKey(jungle::SizedBuf(key), rec, meta_only);
+                if (ii == 1 && !meta_only) {
+                    CHK_OK(s == jungle::Status::KEY_NOT_FOUND);
+                    continue;
+                }
+                CHK_Z(s);
+                CHK_EQ(ii == 1, rec.isDel());
+                CHK_OK(rec.seqNum <= snapshot_seq);
+                if (!meta_only) CHK_EQ(jungle::SizedBuf(value), rec.kv.value);
+            }
+        } else if (lookup_type == 1) {
+            for (auto opt : {jungle::SearchOptions::GREATER_OR_EQUAL,
+                             jungle::SearchOptions::SMALLER_OR_EQUAL}) {
+                for (bool meta_only : {false, true}) {
+                    jungle::Record rec;
+                    jungle::Record::Holder h_rec(rec);
+                    CHK_Z(snap->getNearestRecordByKey(jungle::SizedBuf(key),
+                                                      rec, opt, meta_only));
+                    CHK_EQ(jungle::SizedBuf(key), rec.kv.key);
+                    CHK_EQ(ii == 1, rec.isDel());
+                    CHK_OK(rec.seqNum <= snapshot_seq);
+                    if (!meta_only && ii != 1) {
+                        CHK_EQ(jungle::SizedBuf(value), rec.kv.value);
+                    }
+                }
+            }
+        } else {
+            // Prefix lookup intentionally reports versions from multiple
+            // tables. Check its newest result without changing that contract.
+            uint64_t newest_seq = 0;
+            std::string newest_value;
+            bool newest_deleted = false;
+            bool future_record = false;
+            auto cb = [&](const jungle::SearchCbParams& params) {
+                const jungle::Record& rec = params.rec;
+                future_record |= rec.seqNum > snapshot_seq;
+                if (rec.seqNum > newest_seq) {
+                    newest_seq = rec.seqNum;
+                    newest_value = rec.kv.value.toString();
+                    newest_deleted = rec.isDel();
+                }
+                return jungle::SearchCbDecision::NEXT;
+            };
+            CHK_Z(snap->getRecordsByPrefix(jungle::SizedBuf(key), cb));
+            CHK_NOT(future_record);
+            CHK_OK(newest_seq > 0);
+            CHK_EQ(ii == 1, newest_deleted);
+            if (ii != 1) CHK_EQ(value, newest_value);
+        }
+    }
+
+    jungle::SizedBuf value_out;
+    jungle::SizedBuf::Holder h_value_out(value_out);
+    CHK_OK(snap->get(jungle::SizedBuf("future_key"), value_out) ==
+           jungle::Status::KEY_NOT_FOUND);
+    CHK_Z(_get_keys(db, 0, num, 1, "key_%04zu", "live_%04zu"));
+
+    CHK_Z(jungle::DB::close(snap));
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int race_with_set_batch() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1182,6 +1314,17 @@ int main(int argc, char** argv) {
     ts.doTest("snapshot with compaction test", snapshot_with_compaction_test);
     ts.doTest("latest snapshot test", latest_snapshot_test);
     ts.doTest("empty db snapshot test", empty_db_snapshot_test);
+    for (bool level_extension : {false, true}) {
+        for (int lookup_type = 0; lookup_type < 3; ++lookup_type) {
+            ts.doTest("snapshot lookup after compaction " +
+                      std::to_string(lookup_type) +
+                      (level_extension ? " with levels" : " without levels"),
+                      [=]() {
+                          return snapshot_lookup_after_compaction_test(
+                              lookup_type, level_extension);
+                      });
+        }
+    }
     ts.doTest("race with set batch test", race_with_set_batch);
 
     return 0;
