@@ -1142,6 +1142,7 @@ int snapshot_lookup_after_compaction_test(int lookup_type, bool level_extension)
                     if (!meta_only && ii != 1) {
                         CHK_EQ(jungle::SizedBuf(value), rec.kv.value);
                     }
+                    if (meta_only) CHK_OK(rec.kv.value.empty());
                 }
             }
         } else {

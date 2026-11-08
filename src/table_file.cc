@@ -1306,6 +1306,11 @@ Status TableFile::getNearest(DB* snap_handle,
     if (!meta_only) {
         rec_out.kv.value.set(doc->bodylen, doc->body);
         rec_out.kv.value.setNeedToFree();
+    } else {
+        // ForestDB's nearest-key API also allocates the body for metadata-only
+        // reads. It is not transferred to the output record in that mode.
+        free(doc->body);
+        doc->body = nullptr;
     }
 
     // Decode meta.
