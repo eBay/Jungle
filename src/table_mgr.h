@@ -161,6 +161,8 @@ public:
 
     Status adjustNumL0Partitions();
 
+    Status purgeTables();
+
     Status removeStaleFiles();
 
     Status shutdown();
