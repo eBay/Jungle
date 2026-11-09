@@ -560,6 +560,19 @@ Status TableMgr::storeManifest() {
     return Status();
 }
 
+Status TableMgr::getSnapshotTables(DB* snap_handle, TableList& tables_out) {
+    if (!snap_handle->sn || !snap_handle->sn->tableList) {
+        return Status::INVALID_SNAPSHOT;
+    }
+    // Compaction can replace the live manifest's tables while the snapshot
+    // still owns the old tables and their ForestDB snapshot handles.
+    for (TableInfo* table: *snap_handle->sn->tableList) {
+        table->grab();
+        tables_out.push_back(table);
+    }
+    return Status();
+}
+
 Status TableMgr::get(DB* snap_handle,
                      Record& rec_inout,
                      bool meta_only)
@@ -571,18 +584,24 @@ Status TableMgr::get(DB* snap_handle,
 
     Status s;
     Record latest_rec;
-    size_t num_levels = mani->getNumLevels();
+    // A snapshot searches its captured table set once, across all levels.
+    // Current manifest ranges and table statuses no longer describe that image.
+    size_t num_levels = snap_handle ? 1 : mani->getNumLevels();
 
     for (size_t ii=0; ii<num_levels; ++ii) {
         std::list<TableInfo*> tables;
-        s = mani->getTablesPoint(ii, rec_inout.kv.key, tables);
+        if (snap_handle) {
+            EP(getSnapshotTables(snap_handle, tables));
+        } else {
+            s = mani->getTablesPoint(ii, rec_inout.kv.key, tables);
+        }
         if (!s) continue;
 
         TableInfo* sm_table = nullptr;
         // [Only for L0]
         // Search smallest normal table first and then the others,
         // as it always has the newest data for the same key.
-        if (ii == 0) {
+        if (!snap_handle && ii == 0) {
             sm_table = getSmallestNormalTable(tables);
             if (sm_table) {
                 Record new_rec;
@@ -633,7 +652,7 @@ Status TableMgr::get(DB* snap_handle,
                 new_rec.kv.key.clear();
                 new_rec.free();
 
-                if (s != Status::KEY_NOT_FOUND) {
+                if (!s.ok() && s != Status::KEY_NOT_FOUND) {
                     // This is intolerable error.
                     found_intolerable_error = true;
                 }
@@ -708,14 +727,18 @@ Status TableMgr::getNearest(DB* snap_handle,
     };
 
     Status s;
-    size_t num_levels = mani->getNumLevels();
+    size_t num_levels = snap_handle ? 1 : mani->getNumLevels();
 
     // NOTE:
     //   Unlike point query, nearest search should check the all level,
     //   as closer key may exist in lower levels.
     for (size_t ii=0; ii<num_levels; ++ii) {
         std::list<TableInfo*> tables;
-        s = mani->getTablesNearest(ii, key, tables, s_opt);
+        if (snap_handle) {
+            EP(getSnapshotTables(snap_handle, tables));
+        } else {
+            s = mani->getTablesNearest(ii, key, tables, s_opt);
+        }
         if (!s) continue;
 
         bool found_intolerable_error = false;
@@ -761,11 +784,15 @@ Status TableMgr::getPrefix(DB* snap_handle,
     if (db_config->logSectionOnly) return Status::KEY_NOT_FOUND;
 
     Status s;
-    size_t num_levels = mani->getNumLevels();
+    size_t num_levels = snap_handle ? 1 : mani->getNumLevels();
 
     for (size_t ii=0; ii<num_levels; ++ii) {
         std::list<TableInfo*> tables;
-        s = mani->getTablesPrefix(ii, prefix, tables);
+        if (snap_handle) {
+            EP(getSnapshotTables(snap_handle, tables));
+        } else {
+            s = mani->getTablesPrefix(ii, prefix, tables);
+        }
         if (!s) continue;
 
         bool stopped = false;

@@ -491,6 +491,10 @@ protected:
     using SnapMap = std::unordered_map<DB*, TableList*>;
 
 // === FUNCTIONS
+    // Copy and acquire table references from an open snapshot. The caller
+    // releases these references with TableInfo::done(), as for manifest queries.
+    Status getSnapshotTables(DB* snap_handle, TableList& tables_out);
+
     void logTableSettings(const DBConfig* db_config);
 
     Status createNewTableFile(size_t level,
