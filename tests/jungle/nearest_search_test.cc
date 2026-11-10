@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <numeric>
 #include <random>
+#include <set>
 #include <vector>
 
 #include <stdio.h>
@@ -519,6 +520,63 @@ int get_by_prefix_out_of_order_delete_test() {
     return 0;
 }
 
+int get_by_prefix_many_tables_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config);
+    config.numL0Partitions = 4;
+    config.nextLevelExtension = true;
+    config.maxL1TableSize = 1024 * 1024;
+    jungle::DB* db;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    const size_t NUM = 10000;
+    const char K_FMT[] = "key_%06zu";
+    const char V_FMT[] = "val_%0450zu";
+    CHK_Z(_set_keys(db, 0, NUM, 1, K_FMT, V_FMT));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
+    }
+    CHK_Z(_split_level1(db, 4));
+
+    // Prefixes whose keys span one to all level-1 tables.
+    for (std::string prefix: {"key_0", "key_00", "key_000", "key_0012"}) {
+        TestSuite::setInfo("prefix %s", prefix.c_str());
+        std::set<std::string> keys;
+        auto cb_func = [&](const jungle::SearchCbParams& params)
+                       -> jungle::SearchCbDecision {
+            char val_str[MAX_TEST_LEN];
+            size_t idx = 0;
+            sscanf(params.rec.kv.key.toString().c_str(), K_FMT, &idx);
+            sprintf(val_str, V_FMT, idx);
+            if (params.rec.kv.value.toString() != val_str) {
+                return jungle::SearchCbDecision::STOP;
+            }
+            keys.insert(params.rec.kv.key.toString());
+            return jungle::SearchCbDecision::NEXT;
+        };
+        CHK_Z(db->getRecordsByPrefix(jungle::SizedBuf(prefix), cb_func));
+
+        size_t num_expected = 0;
+        for (size_t ii = 0; ii < NUM; ++ii) {
+            char key_str[MAX_TEST_LEN];
+            sprintf(key_str, K_FMT, ii);
+            if (std::string(key_str).find(prefix) == 0) num_expected++;
+        }
+        CHK_EQ(num_expected, keys.size());
+    }
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -535,5 +593,7 @@ int main(int argc, char** argv) {
               get_by_prefix_frequent_update_test);
     ts.doTest("get by prefix out of order delete test",
               get_by_prefix_out_of_order_delete_test);
+    ts.doTest("get by prefix many tables test",
+              get_by_prefix_many_tables_test);
     return 0;
 }
