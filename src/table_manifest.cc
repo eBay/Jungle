@@ -801,40 +801,33 @@ Status TableManifest::getTablesPrefix(const size_t level,
         return getTablesByHash(l_info, target_hash, tables_out);
 
     } else {
-        // Other levels: return 1 or 2 tables
-        //   If next table's min key has matched prefix,
-        //   return the next table as well.
+        // Other levels: return the table containing `prefix`, and
+        // all following tables whose min key matches the prefix,
+        // as the matching keys may span more than two tables.
         TableInfo query(level, 0, 0, true);
         query.minKey.referTo(prefix);
         skiplist_node* cursor = skiplist_find_smaller_or_equal
                                 ( l_info->tables, &query.snode );
         if (!cursor) cursor = skiplist_begin(l_info->tables);
 
-        if (cursor) {
-            skiplist_node* cur_next = skiplist_next(l_info->tables, cursor);
-            if (cur_next) {
-                TableInfo* t_info = _get_entry(cur_next, TableInfo, snode);
-                // Check if prefix matches.
-                if ( t_info->minKey.size < prefix.size ||
-                     SizedBuf::cmp( SizedBuf(prefix.size, t_info->minKey.data),
-                                    prefix ) != 0 ) {
-                    // Prefix doesn't match, don't need to search next table.
-                    // SHOULD RELEASE SKIPLIST NODE.
-                    skiplist_release_node(cur_next);
-                    cur_next = nullptr;
-                }
+        bool is_first_table = true;
+        while (cursor) {
+            TableInfo* t_info = _get_entry(cursor, TableInfo, snode);
+            if ( !is_first_table &&
+                 !t_info->minKeyHasPrefix(prefix) ) {
+                // Prefix doesn't match, don't need to search next tables.
+                // SHOULD RELEASE SKIPLIST NODE.
+                skiplist_release_node(cursor);
+                break;
             }
 
-            for (skiplist_node* cc: {cursor, cur_next}) {
-                if (!cc) continue;
+            t_info->grab();
+            pushTablesInStack(t_info, tables_out);
+            tables_out.push_back(t_info);
 
-                TableInfo* t_info = _get_entry(cc, TableInfo, snode);
-                t_info->grab();
-                pushTablesInStack(t_info, tables_out);
-                tables_out.push_back(t_info);
-
-                skiplist_release_node(cc);
-            }
+            cursor = skiplist_next(l_info->tables, cursor);
+            skiplist_release_node(&t_info->snode);
+            is_first_table = false;
         }
     }
 

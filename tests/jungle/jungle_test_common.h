@@ -263,6 +263,19 @@ int _del_keys(jungle::DB* db,
     return 0;
 }
 
+// Split level-1 tables until the level has at least `min_num_tables` tables.
+int _split_level1(jungle::DB* db, size_t min_num_tables) {
+    for (;;) {
+        jungle::DBStatsOptions opt;
+        opt.getTableHierarchy = true;
+        jungle::DBStats stats;
+        CHK_Z(db->getStats(stats, opt));
+        if (stats.tableHierarchy[1].size() >= min_num_tables) break;
+        CHK_Z(db->splitLevel(jungle::CompactOptions(), 1));
+    }
+    return 0;
+}
+
 int _get_keys(jungle::DB* db,
               size_t start,
               size_t end,

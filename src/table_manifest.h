@@ -126,6 +126,12 @@ struct TableInfo {
     bool isSrc() const      { return status.load(MOR) == COMPACT_SRC; }
     bool isValid() const    { return status.load(MOR) != COMPACT_DST; }
 
+    bool minKeyHasPrefix(const SizedBuf& prefix) const {
+        if (minKey.size < prefix.size) return false;
+        return SizedBuf::cmp( SizedBuf(prefix.size, minKey.data),
+                              prefix ) == 0;
+    }
+
     // Skiplist metadata.
     skiplist_node snode;
 
