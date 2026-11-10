@@ -495,7 +495,7 @@ Status TableMgr::shutdown() {
 Status TableMgr::cloneManifest(DB* snap_handle,
                                const uint64_t checkpoint,
                                const std::string& dst_path,
-                               std::list<TableInfo*>*& table_list_out)
+                               SnapTableList*& table_list_out)
 {
     Status s;
     EP( openSnapshot(snap_handle, checkpoint, table_list_out) );
@@ -508,26 +508,47 @@ Status TableMgr::cloneManifest(DB* snap_handle,
 
 Status TableMgr::openSnapshot(DB* snap_handle,
                               const uint64_t checkpoint,
-                              std::list<TableInfo*>*& table_list_out)
+                              SnapTableList*& table_list_out)
 {
     Status s;
-    TableList* t_list = new TableList();
+    SnapTableList* t_list = new SnapTableList();
     {   mGuard l(sMapLock);
         sMap.insert( std::make_pair(snap_handle, t_list) );
     }
 
     SizedBuf empty_key;
     size_t num_levels = mani->getNumLevels();
+    t_list->levels.resize(num_levels);
 
     for (size_t ii=0; ii<num_levels; ++ii) {
-        s = mani->getTablesRange(ii, empty_key, empty_key, *t_list);
+        TableList tables;
+        s = mani->getTablesRange(ii, empty_key, empty_key, tables);
         if (!s) continue;
+
+        // Tables in the stack of a table precede that table
+        // (see `TableManifest::pushTablesInStack()`).
+        std::vector<SnapTableList::Entry>& entries = t_list->levels[ii];
+        std::vector<TableInfo*> stack;
+        for (TableInfo* info: tables) {
+            if (!info->baseTable) {
+                stack.push_back(info);
+                continue;
+            }
+            entries.emplace_back(info);
+            entries.back().stack.swap(stack);
+        }
+        // Should not happen, but keep them to release them on close.
+        for (TableInfo* info: stack) entries.emplace_back(info);
     }
 
     // If `checkpoint == 0`, take the latest one.
-    for (auto& entry: *t_list) {
-        TableInfo* info = entry;
-        info->file->openSnapshot(snap_handle, checkpoint);
+    for (auto& level: t_list->levels) {
+        for (auto& entry: level) {
+            for (TableInfo* info: entry.stack) {
+                info->file->openSnapshot(snap_handle, checkpoint);
+            }
+            entry.table->file->openSnapshot(snap_handle, checkpoint);
+        }
     }
 
     table_list_out = t_list;
@@ -536,7 +557,7 @@ Status TableMgr::openSnapshot(DB* snap_handle,
 
 Status TableMgr::closeSnapshot(DB* snap_handle) {
     Status s;
-    TableList* t_list = nullptr;
+    SnapTableList* t_list = nullptr;
     {   mGuard l(sMapLock);
         auto entry = sMap.find(snap_handle);
         assert(entry != sMap.end());
@@ -544,10 +565,15 @@ Status TableMgr::closeSnapshot(DB* snap_handle) {
         sMap.erase(entry);
     }
 
-    for (auto& entry: *t_list) {
-        TableInfo* info = entry;
+    auto close_table = [&](TableInfo* info) {
         info->file->closeSnapshot(snap_handle);
         info->done();
+    };
+    for (auto& level: t_list->levels) {
+        for (auto& entry: level) {
+            for (TableInfo* info: entry.stack) close_table(info);
+            close_table(entry.table);
+        }
     }
     delete t_list;
 
@@ -560,16 +586,186 @@ Status TableMgr::storeManifest() {
     return Status();
 }
 
-Status TableMgr::getSnapshotTables(DB* snap_handle, TableList& tables_out) {
+Status TableMgr::getSnapTableList(DB* snap_handle,
+                                  const SnapTableList*& snap_tables_out)
+{
+    snap_tables_out = nullptr;
+    if (!snap_handle) return Status();
     if (!snap_handle->sn || !snap_handle->sn->tableList) {
         return Status::INVALID_SNAPSHOT;
     }
-    // Compaction can replace the live manifest's tables while the snapshot
-    // still owns the old tables and their ForestDB snapshot handles.
-    for (TableInfo* table: *snap_handle->sn->tableList) {
-        table->grab();
-        tables_out.push_back(table);
+    snap_tables_out = snap_handle->sn->tableList;
+    return Status();
+}
+
+using SnapEntries = std::vector<SnapTableList::Entry>;
+
+// Index of the last entry whose min key is equal to or smaller than `key`.
+// Returns -1 if `key` is smaller than all min keys.
+static int64_t find_snap_entry(const SnapEntries& entries,
+                               const SizedBuf& key)
+{
+    // Same order as `TableInfo::cmp()`.
+    auto entry = std::upper_bound( entries.begin(), entries.end(), key,
+        [](const SizedBuf& kk, const SnapTableList::Entry& ee) {
+            return SizedBuf::cmp(kk, ee.table->minKey) < 0;
+        } );
+    return (int64_t)(entry - entries.begin()) - 1;
+}
+
+// Push all entries sharing the min key with `entries[idx]`,
+// including their stacks, as `TableManifest::pushTablesInStack()` does.
+// Returns the range of the pushed entries.
+static std::pair<int64_t, int64_t> push_snap_entries
+                                   ( const SnapEntries& entries,
+                                     int64_t idx,
+                                     std::list<TableInfo*>& tables_out )
+{
+    // Tables with the same min key may coexist in the middle of
+    // compaction (e.g., in-place compaction), push all of them.
+    const SizedBuf& min_key = entries[idx].table->minKey;
+    int64_t begin = idx, end = idx;
+    while ( begin > 0 &&
+            SizedBuf::cmp(entries[begin - 1].table->minKey, min_key) == 0 ) {
+        begin--;
     }
+    while ( end + 1 < (int64_t)entries.size() &&
+            SizedBuf::cmp(entries[end + 1].table->minKey, min_key) == 0 ) {
+        end++;
+    }
+
+    for (int64_t ii = begin; ii <= end; ++ii) {
+        const SnapTableList::Entry& entry = entries[ii];
+        for (TableInfo* tt: entry.stack) {
+            tt->grab();
+            tables_out.push_back(tt);
+        }
+        entry.table->grab();
+        tables_out.push_back(entry.table);
+    }
+    return std::make_pair(begin, end);
+}
+
+// Push the previous entries of `range` if any of `range` requires it
+// (see `TableInfo::prevTableSearchRequired`).
+static void push_snap_prev_entries_if_required
+            ( const SnapEntries& entries,
+              const std::pair<int64_t, int64_t>& range,
+              std::list<TableInfo*>& tables_out )
+{
+    if (range.first == 0) return;
+    for (int64_t ii = range.first; ii <= range.second; ++ii) {
+        if (entries[ii].prevSearch) {
+            push_snap_entries(entries, range.first - 1, tables_out);
+            return;
+        }
+    }
+}
+
+static void push_snap_l0_tables(const SnapEntries& entries,
+                                uint32_t target_hash_num,
+                                uint32_t num_partitions,
+                                std::list<TableInfo*>& tables_out)
+{
+    // Same as `TableManifest::getTablesByHash()`.
+    for (const SnapTableList::Entry& entry: entries) {
+        if ( target_hash_num >= num_partitions ||
+             entry.table->hashNum == target_hash_num ) {
+            entry.table->grab();
+            tables_out.push_back(entry.table);
+        }
+    }
+}
+
+Status TableMgr::getSnapTablesPoint(const SnapTableList* snap_tables,
+                                    const size_t level,
+                                    const SizedBuf& key,
+                                    std::list<TableInfo*>& tables_out)
+{
+    if (level >= snap_tables->levels.size()) return Status::INVALID_LEVEL;
+    const SnapEntries& entries = snap_tables->levels[level];
+
+    if (level == 0) {
+        SizedBuf data_to_hash = get_data_to_hash(getDbConfig(), key, false);
+        uint32_t target_hash = get_murmur_hash(data_to_hash, numL0Partitions);
+        push_snap_l0_tables(entries, target_hash, numL0Partitions, tables_out);
+
+    } else {
+        int64_t idx = find_snap_entry(entries, key);
+        if (idx < 0) return Status::TABLE_NOT_FOUND;
+
+        auto range = push_snap_entries(entries, idx, tables_out);
+        push_snap_prev_entries_if_required(entries, range, tables_out);
+    }
+    if (tables_out.empty()) return Status::TABLE_NOT_FOUND;
+    return Status();
+}
+
+Status TableMgr::getSnapTablesNearest(const SnapTableList* snap_tables,
+                                      const size_t level,
+                                      const SizedBuf& key,
+                                      std::list<TableInfo*>& tables_out,
+                                      SearchOptions s_opt)
+{
+    if (level >= snap_tables->levels.size()) return Status::INVALID_LEVEL;
+    const SnapEntries& entries = snap_tables->levels[level];
+
+    if (level == 0) {
+        push_snap_l0_tables(entries, numL0Partitions, numL0Partitions, tables_out);
+
+    } else if (!entries.empty()) {
+        // Same as `TableManifest::getTablesNearest()`:
+        //   greater: target, next
+        //   smaller: prev, target
+        int64_t idx = std::max(find_snap_entry(entries, key), (int64_t)0);
+        auto range = push_snap_entries(entries, idx, tables_out);
+        if (s_opt.isSmaller() && range.first > 0) {
+            push_snap_entries(entries, range.first - 1, tables_out);
+        } else {
+            push_snap_prev_entries_if_required(entries, range, tables_out);
+        }
+        if ( s_opt.isGreater() &&
+             range.second + 1 < (int64_t)entries.size() ) {
+            push_snap_entries(entries, range.second + 1, tables_out);
+        }
+    }
+    if (tables_out.empty()) return Status::TABLE_NOT_FOUND;
+    return Status();
+}
+
+Status TableMgr::getSnapTablesPrefix(const SnapTableList* snap_tables,
+                                     const size_t level,
+                                     const SizedBuf& prefix,
+                                     std::list<TableInfo*>& tables_out)
+{
+    if (level >= snap_tables->levels.size()) return Status::INVALID_LEVEL;
+    const SnapEntries& entries = snap_tables->levels[level];
+
+    if (level == 0) {
+        // Same as `TableManifest::getTablesPrefix()`.
+        bool used_custom_hash = false;
+        SizedBuf data_to_hash = get_data_to_hash( getDbConfig(),
+                                                  prefix,
+                                                  true,
+                                                  &used_custom_hash );
+        uint32_t target_hash = numL0Partitions;
+        if (used_custom_hash) {
+            target_hash = get_murmur_hash(data_to_hash, numL0Partitions);
+        }
+        push_snap_l0_tables(entries, target_hash, numL0Partitions, tables_out);
+
+    } else if (!entries.empty()) {
+        // The table containing `prefix`, and all following tables
+        // whose min key matches the prefix.
+        int64_t idx = std::max(find_snap_entry(entries, prefix), (int64_t)0);
+        auto range = push_snap_entries(entries, idx, tables_out);
+        push_snap_prev_entries_if_required(entries, range, tables_out);
+        while ( range.second + 1 < (int64_t)entries.size() &&
+                entries[range.second + 1].table->minKeyHasPrefix(prefix) ) {
+            range = push_snap_entries(entries, range.second + 1, tables_out);
+        }
+    }
+    if (tables_out.empty()) return Status::TABLE_NOT_FOUND;
     return Status();
 }
 
@@ -584,14 +780,16 @@ Status TableMgr::get(DB* snap_handle,
 
     Status s;
     Record latest_rec;
-    // A snapshot searches its captured table set once, across all levels.
-    // Current manifest ranges and table statuses no longer describe that image.
-    size_t num_levels = snap_handle ? 1 : mani->getNumLevels();
+    const SnapTableList* snap_tables = nullptr;
+    EP( getSnapTableList(snap_handle, snap_tables) );
+    size_t num_levels = snap_tables
+                        ? snap_tables->levels.size()
+                        : mani->getNumLevels();
 
     for (size_t ii=0; ii<num_levels; ++ii) {
         std::list<TableInfo*> tables;
-        if (snap_handle) {
-            EP(getSnapshotTables(snap_handle, tables));
+        if (snap_tables) {
+            s = getSnapTablesPoint(snap_tables, ii, rec_inout.kv.key, tables);
         } else {
             s = mani->getTablesPoint(ii, rec_inout.kv.key, tables);
         }
@@ -601,7 +799,7 @@ Status TableMgr::get(DB* snap_handle,
         // [Only for L0]
         // Search smallest normal table first and then the others,
         // as it always has the newest data for the same key.
-        if (!snap_handle && ii == 0) {
+        if (!snap_tables && ii == 0) {
             sm_table = getSmallestNormalTable(tables);
             if (sm_table) {
                 Record new_rec;
@@ -666,7 +864,11 @@ Status TableMgr::get(DB* snap_handle,
             return s;
         }
 
-        if (!latest_rec.empty()) break;
+        // A snapshot may have been captured in the middle of compaction,
+        // and current table statuses no longer describe it. Search all
+        // levels and choose the newest record, instead of relying on
+        // the level order.
+        if (!snap_tables && !latest_rec.empty()) break;
     }
     if (latest_rec.empty()) return Status::KEY_NOT_FOUND;
 
@@ -727,15 +929,19 @@ Status TableMgr::getNearest(DB* snap_handle,
     };
 
     Status s;
-    size_t num_levels = snap_handle ? 1 : mani->getNumLevels();
+    const SnapTableList* snap_tables = nullptr;
+    EP( getSnapTableList(snap_handle, snap_tables) );
+    size_t num_levels = snap_tables
+                        ? snap_tables->levels.size()
+                        : mani->getNumLevels();
 
     // NOTE:
     //   Unlike point query, nearest search should check the all level,
     //   as closer key may exist in lower levels.
     for (size_t ii=0; ii<num_levels; ++ii) {
         std::list<TableInfo*> tables;
-        if (snap_handle) {
-            EP(getSnapshotTables(snap_handle, tables));
+        if (snap_tables) {
+            s = getSnapTablesNearest(snap_tables, ii, key, tables, s_opt);
         } else {
             s = mani->getTablesNearest(ii, key, tables, s_opt);
         }
@@ -784,12 +990,16 @@ Status TableMgr::getPrefix(DB* snap_handle,
     if (db_config->logSectionOnly) return Status::KEY_NOT_FOUND;
 
     Status s;
-    size_t num_levels = snap_handle ? 1 : mani->getNumLevels();
+    const SnapTableList* snap_tables = nullptr;
+    EP( getSnapTableList(snap_handle, snap_tables) );
+    size_t num_levels = snap_tables
+                        ? snap_tables->levels.size()
+                        : mani->getNumLevels();
 
     for (size_t ii=0; ii<num_levels; ++ii) {
         std::list<TableInfo*> tables;
-        if (snap_handle) {
-            EP(getSnapshotTables(snap_handle, tables));
+        if (snap_tables) {
+            s = getSnapTablesPrefix(snap_tables, ii, prefix, tables);
         } else {
             s = mani->getTablesPrefix(ii, prefix, tables);
         }

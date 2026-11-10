@@ -168,11 +168,11 @@ public:
     Status cloneManifest(DB* snap_handle,
                          const uint64_t checkpoint,
                          const std::string& dst_path,
-                         std::list<TableInfo*>*& table_list_out);
+                         SnapTableList*& table_list_out);
 
     Status openSnapshot(DB* snap_handle,
                         const uint64_t checkpoint,
-                        std::list<TableInfo*>*& table_list_out);
+                        SnapTableList*& table_list_out);
     Status closeSnapshot(DB* snap_handle);
 
     Status setBatch(std::list<Record*>& batch,
@@ -439,7 +439,7 @@ public:
         Type type;
         TableMgr* tMgr;
         std::vector< std::vector<ItrItem*> > tables;
-        std::list<TableInfo*>* snapTableList;
+        SnapTableList* snapTableList;
         uint64_t minSeqSnap;
         uint64_t maxSeqSnap;
         SizedBuf startKey;
@@ -488,12 +488,32 @@ protected:
     };
 
     using TableList = std::list<TableInfo*>;
-    using SnapMap = std::unordered_map<DB*, TableList*>;
+    using SnapMap = std::unordered_map<DB*, SnapTableList*>;
 
 // === FUNCTIONS
-    // Copy and acquire table references from an open snapshot. The caller
-    // releases these references with TableInfo::done(), as for manifest queries.
-    Status getSnapshotTables(DB* snap_handle, TableList& tables_out);
+    // Get the tables captured by the given snapshot.
+    // `snap_tables_out` will be `nullptr` if `snap_handle` is `nullptr`.
+    Status getSnapTableList(DB* snap_handle,
+                            const SnapTableList*& snap_tables_out);
+
+    // Equivalent to `TableManifest::getTables*()`, but search the tables
+    // captured by the given snapshot. The caller releases the returned
+    // tables with `TableInfo::done()`, as for manifest queries.
+    Status getSnapTablesPoint(const SnapTableList* snap_tables,
+                              const size_t level,
+                              const SizedBuf& key,
+                              TableList& tables_out);
+
+    Status getSnapTablesNearest(const SnapTableList* snap_tables,
+                                const size_t level,
+                                const SizedBuf& key,
+                                TableList& tables_out,
+                                SearchOptions s_opt);
+
+    Status getSnapTablesPrefix(const SnapTableList* snap_tables,
+                               const size_t level,
+                               const SizedBuf& prefix,
+                               TableList& tables_out);
 
     void logTableSettings(const DBConfig* db_config);
 

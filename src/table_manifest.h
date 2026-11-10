@@ -174,6 +174,32 @@ struct TableInfo {
     std::atomic<bool> prevTableSearchRequired;
 };
 
+// Tables captured by a snapshot, grouped by level as in the manifest.
+// It is immutable once the snapshot is opened.
+struct SnapTableList {
+    struct Entry {
+        Entry(TableInfo* _table)
+            : table(_table)
+            , prevSearch(_table->prevTableSearchRequired)
+            {}
+
+        // Table in the level's skiplist.
+        TableInfo* table;
+
+        // Tiering stack of `table`: newer -> older.
+        std::vector<TableInfo*> stack;
+
+        // `prevTableSearchRequired` at the time the snapshot was opened.
+        // `fixTable()` may clear the flag later, but the captured
+        // table still has the same data.
+        bool prevSearch;
+    };
+
+    // Level-0: hash partitions.
+    // Level-1+: sorted by `minKey`, in the same order as the manifest.
+    std::vector< std::vector<Entry> > levels;
+};
+
 class TableManifest {
 public:
     TableManifest(const TableMgr* table_mgr, FileOps* _f_ops);
