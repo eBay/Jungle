@@ -140,9 +140,24 @@
         _log_(lv1, l, __VA_ARGS__);                                     \
     }
 
+class SimpleLoggerImpl;
+
+// Part of the constructor's signature. Bump the version if a change makes
+// code compiled with an older copy of this header unable to work with this
+// implementation, so that such code fails to link instead of misbehaving.
+template<int VERSION> struct SimpleLoggerAbiTag {};
+using SimpleLoggerAbi = SimpleLoggerAbiTag<2>;
+
+// NOTE: Other libraries (e.g., Jungle) may be compiled with a different copy
+//       of this header, while linked with this implementation. Hence,
+//         * `SimpleLogger` should have no data member other than `impl`,
+//           and no inline function accessing its state. Everything else
+//           goes to `SimpleLoggerImpl` (logger_impl.h).
+//         * Do not change the signature of existing functions, or the
+//           layout of the types defined in this header
+//           (`LoggerStream`, `SimpleLoggerLocalCtx`, etc.).
+//         * Adding a new non-inline member function is fine.
 class SimpleLogger {
-    friend class SimpleLoggerMgr;
-    friend class SimpleLoggerLocalCtx;
 public:
     static const int MSG_SIZE = 4096;
     static const std::memory_order MOR = std::memory_order_relaxed;
@@ -244,48 +259,19 @@ public:
                           SimpleLogger* logger,
                           const char* file,
                           const char* func,
-                          size_t line ) {
-        thread_local LoggerStream msg;
-        msg.setLogInfo(level, logger, file, func, line);
-        return msg;
-    }
+                          size_t line );
 
-    EndOfStmt& eos() {
-        thread_local EndOfStmt eos_inst;
-        return eos_inst;
-    }
+    EndOfStmt& eos();
 
-private:
-    struct LogElem {
-        enum Status {
-            CLEAN       = 0,
-            WRITING     = 1,
-            DIRTY       = 2,
-            FLUSHING    = 3,
-        };
-
-        LogElem();
-
-        // True if dirty.
-        bool needToFlush();
-
-        // True if no other thread is working on it.
-        bool available();
-
-        int write(size_t len, char* msg);
-        int flush(std::ofstream& fs);
-
-        size_t len;
-        char ctx[MSG_SIZE];
-        std::atomic<Status> status;
-    };
-
-public:
     SimpleLogger(const std::string& file_path,
                  size_t max_log_elems           = 4096,
                  uint64_t log_file_size_limit   = 32*1024*1024,
-                 uint32_t max_log_files         = 16);
+                 uint32_t max_log_files         = 16,
+                 SimpleLoggerAbi abi            = SimpleLoggerAbi());
     ~SimpleLogger();
+
+    SimpleLogger(const SimpleLogger&) = delete;
+    SimpleLogger& operator=(const SimpleLogger&) = delete;
 
     static void setCriticalInfo(const std::string& info_str);
     static void setCrashDumpPath(const std::string& path,
@@ -301,15 +287,15 @@ public:
     int start();
     int stop();
 
-    inline bool traceAllowed() const { return (curLogLevel.load(MOR) >= 6); }
-    inline bool debugAllowed() const { return (curLogLevel.load(MOR) >= 5); }
+    bool traceAllowed() const;
+    bool debugAllowed() const;
 
     void setLogLevel(int level);
     void setDispLevel(int level);
     void setMaxLogFiles(size_t max_log_files);
 
-    inline int getLogLevel()  const { return curLogLevel.load(MOR); }
-    inline int getDispLevel() const { return curDispLevel.load(MOR); }
+    int getLogLevel() const;
+    int getDispLevel() const;
 
     void put(int level,
              const char* source_file,
@@ -317,7 +303,9 @@ public:
              size_t line_number,
              const char* format,
              ...);
-    void flushAll();
+    // If `skip_if_clean` is true, skip the ring buffer scan when no
+    // log has been written since the last flush.
+    void flushAll(bool skip_if_clean = false);
 
     void setGlobalCallback(PreCbType pre_cb, CbType cb);
 
@@ -327,50 +315,11 @@ public:
                            size_t line_number);
 
 private:
-    void calcTzGap();
-    void findMinMaxRevNum(size_t& min_revnum_out,
-                          size_t& max_revnum_out);
-    void findMinMaxRevNumInternal(bool& min_revnum_initialized,
-                                  size_t& min_revnum,
-                                  size_t& max_revnum,
-                                  std::string& f_name);
-    std::string getLogFilePath(size_t file_num) const;
-    void execCmd(const std::string& cmd);
-    void doCompression(size_t file_num);
-    bool flush(size_t start_pos);
-
-    CtxMap& getLocalCtxMap();
-    std::list<CbType>& getLocalCbList();
-    std::list<PreCbType>& getLocalPreCbList();
-
-    std::string filePath;
-    size_t minRevnum;
-    size_t curRevnum;
-    std::atomic<size_t> maxLogFiles;
-    std::ofstream fs;
-
-    uint64_t maxLogFileSize;
-    std::atomic<uint32_t> numCompJobs;
-
-    // Log up to `curLogLevel`, default: 6.
-    // Disable: -1.
-    std::atomic<int> curLogLevel;
-
-    // Display (print out on terminal) up to `curDispLevel`,
-    // default: 4 (do not print debug and trace).
-    // Disable: -1.
-    std::atomic<int> curDispLevel;
-
-    std::mutex displayLock;
-
-    int tzGap;
-    std::atomic<uint64_t> cursor;
-    std::vector<LogElem> logs;
-    std::mutex flushingLogs;
-
-    PreCbType globalPreCallback;
-    CbType globalCallback;
+    SimpleLoggerImpl* impl;
 };
+
+static_assert( sizeof(SimpleLogger) == sizeof(void*),
+               "SimpleLogger should have no data member other than `impl`" );
 
 // Singleton class
 class SimpleLoggerMgr {
@@ -415,9 +364,11 @@ public:
     void flushCriticalInfo();
     void enableOnlyOneDisplayer();
     void flushAllLoggers() { flushAllLoggers(0, std::string()); }
-    void flushAllLoggers(int level, const std::string& msg);
-    void addLogger(SimpleLogger* logger);
-    void removeLogger(SimpleLogger* logger);
+    void flushAllLoggers(int level,
+                         const std::string& msg,
+                         bool skip_clean_loggers = false);
+    void addLogger(SimpleLoggerImpl* logger);
+    void removeLogger(SimpleLoggerImpl* logger);
     void addThread(uint64_t tid);
     void removeThread(uint64_t tid);
     void addCompElem(SimpleLoggerMgr::CompElem* elem);
@@ -470,8 +421,17 @@ private:
 
     bool chkExitOnCrash();
 
+    // Must be called under `loggersLock`.
+    void mergePendingLoggers();
+
     std::mutex loggersLock;
-    std::unordered_set<SimpleLogger*> loggers;
+    std::unordered_set<SimpleLoggerImpl*> loggers;
+
+    // Loggers added by `addLogger()` but not yet merged into `loggers`,
+    // so that `addLogger()` does not wait for an ongoing flush pass.
+    // Lock order: `loggersLock` -> `pendingLoggersLock`.
+    std::mutex pendingLoggersLock;
+    std::vector<SimpleLoggerImpl*> pendingLoggers;
 
     std::mutex activeThreadsLock;
     std::unordered_set<uint64_t> activeThreads;
