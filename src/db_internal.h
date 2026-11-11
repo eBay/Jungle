@@ -177,7 +177,7 @@ public:
     uint64_t lastFlush;
     uint64_t chkNum;
     std::list<LogFileInfo*>* logList;
-    std::list<TableInfo*>* tableList;
+    SnapTableList* tableList;
 };
 
 class DBGroup::DBGroupInternal {

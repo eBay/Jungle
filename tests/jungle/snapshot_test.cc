@@ -18,6 +18,8 @@ limitations under the License.
 
 #include "libjungle/jungle.h"
 
+#include <map>
+#include <set>
 #include <vector>
 
 #include <stdio.h>
@@ -1183,6 +1185,223 @@ int snapshot_lookup_after_compaction_test(int lookup_type, bool level_extension)
     return 0;
 }
 
+int snapshot_lookup_many_tables_test(bool use_checkpoint) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 0;
+    g_config.numCompactorThreads = 0;
+    CHK_Z(jungle::init(g_config));
+
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.numL0Partitions = 4;
+    config.maxEntriesInLogFile = 1000;
+    config.nextLevelExtension = true;
+    config.maxL1TableSize = 1024 * 1024;
+    jungle::DB* db = nullptr;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    // Snapshot image: even keys only, so that odd keys can be used as
+    // keys in between, and as keys written after the snapshot.
+    const size_t NUM = 20000;
+    const char K_FMT[] = "key_%06zu";
+    struct Expected {
+        std::string value;
+        bool deleted = false;
+    };
+    std::map<std::string, Expected> image;
+    auto key_of = [&](size_t idx) {
+        char buf[32];
+        sprintf(buf, K_FMT, idx);
+        return std::string(buf);
+    };
+    // Keys around the boundaries of level-1 tables.
+    std::set<size_t> boundary_idxs;
+    auto set_even_keys = [&](size_t step, const std::string& v_prefix) {
+        for (size_t ii = 0; ii < NUM; ii += step) {
+            if (boundary_idxs.count(ii)) continue;
+            std::string key = key_of(ii);
+            std::string value = v_prefix + std::string(450, 'x') +
+                                TestSuite::lzStr(6, ii);
+            CHK_Z(db->set(jungle::KV(key, value)));
+            image[key].value = value;
+        }
+        return 0;
+    };
+
+    // Level-1 consisting of multiple tables.
+    CHK_Z(set_even_keys(2, "old_"));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
+    }
+    CHK_Z(_split_level1(db, 4));
+
+    // Newer versions in level-1.
+    CHK_Z(set_even_keys(6, "mid_"));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
+    }
+
+    // Level-1 tables are not changed until the snapshot is opened.
+    // Keep the keys around their boundaries only in level-1, so that
+    // lookups there need the right level-1 tables.
+    {
+        jungle::DBStatsOptions opt;
+        opt.getTableHierarchy = true;
+        jungle::DBStats stats;
+        CHK_Z(db->getStats(stats, opt));
+        CHK_GTEQ(stats.tableHierarchy[1].size(), 4);
+        for (auto& entry: stats.tableHierarchy[1]) {
+            size_t idx = 0;
+            std::string min_key = entry.minKey.toString();
+            if (sscanf(min_key.c_str(), K_FMT, &idx) != 1) continue;
+            for (size_t jj = (idx > 4 ? idx - 4 : 0); jj <= idx + 4; ++jj) {
+                boundary_idxs.insert(jj);
+            }
+        }
+        CHK_GTEQ(boundary_idxs.size(), 3 * 9);
+    }
+
+    // Newer versions and deletions in level-0.
+    CHK_Z(set_even_keys(4, "new_"));
+    for (size_t ii = 0; ii < NUM; ii += 10) {
+        if (boundary_idxs.count(ii)) continue;
+        CHK_Z(db->del(jungle::SizedBuf(key_of(ii))));
+        image[key_of(ii)].deleted = true;
+    }
+    // Rotate past all tested keys, so that their reads must reach
+    // the captured tables rather than the log files.
+    CHK_Z(_set_keys(db, 0, config.maxEntriesInLogFile * 2, 1,
+                    "padding_%06zu", "padding_%06zu"));
+    uint64_t chk = 0;
+    if (use_checkpoint) CHK_Z(db->checkpoint(chk));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+
+    std::set<size_t> test_idxs = boundary_idxs;
+    for (size_t ii = 0; ii <= NUM; ii += 97) test_idxs.insert(ii);
+
+    jungle::DB* snap = nullptr;
+    CHK_Z(db->openSnapshot(&snap, chk));
+
+    // Replace the live tables, and write odd keys after the snapshot.
+    CHK_Z(_set_keys(db, 0, NUM, 1, K_FMT, "live_%06zu"));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs());
+    for (size_t ii = 0; ii < config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(jungle::CompactOptions(), ii));
+    }
+    CHK_Z(_get_keys(db, 0, NUM, 1, K_FMT, "live_%06zu"));
+
+    auto check_rec = [&](const jungle::Record& rec, bool meta_only) {
+        std::string key = rec.kv.key.toString();
+        auto entry = image.find(key);
+        CHK_OK(entry != image.end());
+        CHK_EQ(entry->second.deleted, rec.isDel());
+        if (!meta_only && !rec.isDel()) {
+            CHK_EQ(entry->second.value, rec.kv.value.toString());
+        }
+        return 0;
+    };
+
+    // Point and nearest lookups.
+    for (size_t ii: test_idxs) {
+        std::string key = key_of(ii);
+        TestSuite::setInfo("key %s", key.c_str());
+        auto entry = image.find(key);
+
+        jungle::SizedBuf value_out;
+        jungle::SizedBuf::Holder h_value_out(value_out);
+        jungle::Status s = snap->get(jungle::SizedBuf(key), value_out);
+        if (entry == image.end() || entry->second.deleted) {
+            CHK_EQ(jungle::Status::KEY_NOT_FOUND, s.getValue());
+        } else {
+            CHK_Z(s);
+            CHK_EQ(entry->second.value, value_out.toString());
+        }
+
+        if (entry != image.end()) {
+            jungle::Record rec;
+            jungle::Record::Holder h_rec(rec);
+            CHK_Z(snap->getRecordByKey(jungle::SizedBuf(key), rec, true));
+            CHK_EQ(entry->second.deleted, rec.isDel());
+        }
+
+        for (auto opt: { jungle::SearchOptions::GREATER,
+                         jungle::SearchOptions::SMALLER }) {
+            auto exp = (opt == jungle::SearchOptions::GREATER)
+                       ? image.upper_bound(key)
+                       : image.lower_bound(key);
+            if (opt == jungle::SearchOptions::SMALLER) {
+                exp = (exp == image.begin()) ? image.end() : std::prev(exp);
+            }
+
+            jungle::Record rec;
+            jungle::Record::Holder h_rec(rec);
+            s = snap->getNearestRecordByKey(jungle::SizedBuf(key), rec, opt);
+            if (exp == image.end()) {
+                // Out of the tested keys: nothing, or the padding keys.
+                if (s) CHK_NEQ(std::string::npos, rec.kv.key.toString().find("padding_"));
+                continue;
+            }
+            CHK_Z(s);
+            CHK_EQ(exp->first, rec.kv.key.toString());
+            CHK_Z(check_rec(rec, false));
+        }
+    }
+
+    // Prefix lookups, spanning one to all level-1 tables.
+    for (std::string prefix: {"key_0", "key_00", "key_01",
+                              "key_000", "key_0123"}) {
+        TestSuite::setInfo("prefix %s", prefix.c_str());
+        // Prefix lookup reports versions from multiple tables.
+        // Check the newest one of each key.
+        std::map<std::string, jungle::Record*> newest;
+        auto cb = [&](const jungle::SearchCbParams& params) {
+            jungle::Record*& rec = newest[params.rec.kv.key.toString()];
+            if (!rec || rec->seqNum < params.rec.seqNum) {
+                if (rec) rec->free();
+                delete rec;
+                rec = new jungle::Record();
+                params.rec.copyTo(*rec);
+            }
+            return jungle::SearchCbDecision::NEXT;
+        };
+        CHK_Z(snap->getRecordsByPrefix(jungle::SizedBuf(prefix), cb));
+
+        size_t num_expected = 0;
+        for (auto& entry: image) {
+            if (entry.first.find(prefix) == 0) num_expected++;
+        }
+        CHK_EQ(num_expected, newest.size());
+        for (auto& entry: newest) {
+            CHK_Z(check_rec(*entry.second, false));
+            entry.second->free();
+            delete entry.second;
+        }
+    }
+
+    // Keys out of range.
+    for (std::string key: {"a", "key_", "z"}) {
+        jungle::SizedBuf value_out;
+        jungle::SizedBuf::Holder h_value_out(value_out);
+        CHK_EQ(jungle::Status::KEY_NOT_FOUND,
+               snap->get(jungle::SizedBuf(key), value_out).getValue());
+    }
+
+    CHK_Z(jungle::DB::close(snap));
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int race_with_set_batch() {
     std::string filename;
     TEST_SUITE_PREPARE_PATH(filename);
@@ -1326,6 +1545,9 @@ int main(int argc, char** argv) {
                       });
         }
     }
+    ts.doTest("snapshot lookup many tables test",
+              snapshot_lookup_many_tables_test,
+              TestRange<bool>({false, true}));
     ts.doTest("race with set batch test", race_with_set_batch);
 
     return 0;

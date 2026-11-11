@@ -18,6 +18,8 @@ limitations under the License.
 
 #include "db_internal.h"
 
+#include <algorithm>
+
 namespace jungle {
 
 // === Iterator
@@ -119,19 +121,27 @@ Status TableMgr::Iterator::initInternal(DB* snap_handle,
    try {
     Status s;
     size_t n_levels = tMgr->mani->getNumLevels();
+    if (snap_handle) {
+        assert(snap_handle->sn->tableList);
+        n_levels = std::max(n_levels, snap_handle->sn->tableList->levels.size());
+    }
     tables.resize(n_levels);
 
     if (snap_handle) {
         // Snapshot
-        assert(snap_handle->sn->tableList);
         Status failed;
-        for (auto& entry: *snap_handle->sn->tableList) {
-            TableInfo* t_info = entry;
-            // WARNING:
-            //   We should do `addTableItr` for all tables in `t_info_ret`,
-            //   to let them be closed during `close()` call.
-            s = addTableItr(snap_handle, t_info);
-            if (failed.ok() && !s.ok()) failed = s;
+        for (auto& level: snap_handle->sn->tableList->levels) {
+            for (auto& entry: level) {
+                // WARNING:
+                //   We should do `addTableItr` for all tables in the snapshot,
+                //   to let them be closed during `close()` call.
+                for (TableInfo* t_info: entry.stack) {
+                    s = addTableItr(snap_handle, t_info);
+                    if (failed.ok() && !s.ok()) failed = s;
+                }
+                s = addTableItr(snap_handle, entry.table);
+                if (failed.ok() && !s.ok()) failed = s;
+            }
         }
         snapTableList = snap_handle->sn->tableList;
 
