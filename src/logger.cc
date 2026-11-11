@@ -30,6 +30,7 @@
  */
 
 #include "logger.h"
+#include "logger_impl.h"
 #include "thread_name.h"
 
 #if defined(__linux__) || defined(__APPLE__)
@@ -117,11 +118,11 @@ std::mutex SimpleLoggerMgr::display_lock;
 std::atomic<int> tid_digits(2);
 
 struct SimpleLoggerMgr::CompElem {
-    CompElem(uint64_t num, SimpleLogger* logger)
+    CompElem(uint64_t num, SimpleLoggerImpl* logger)
         : fileNum(num), targetLogger(logger)
         {}
     uint64_t fileNum;
-    SimpleLogger* targetLogger;
+    SimpleLoggerImpl* targetLogger;
 };
 
 SimpleLoggerMgr::TimeInfo::TimeInfo(std::tm* src)
@@ -502,7 +503,7 @@ void SimpleLoggerMgr::flushWorker() {
         // Every 500ms.
         size_t sub_ms = 500;
         mgr->sleepFlusher(sub_ms);
-        mgr->flushAllLoggers();
+        mgr->flushAllLoggers(0, std::string(), true);
         if (mgr->abortTimer) {
             if (mgr->abortTimer > sub_ms) {
                 mgr->abortTimer.fetch_sub(sub_ms);
@@ -618,8 +619,9 @@ SimpleLoggerMgr::~SimpleLoggerMgr() {
 void SimpleLoggerMgr::enableOnlyOneDisplayer() {
     bool marked = false;
     std::unique_lock<std::mutex> l(loggersLock);
+    mergePendingLoggers();
     for (auto& entry: loggers) {
-        SimpleLogger* logger = entry;
+        SimpleLoggerImpl* logger = entry;
         if (!logger) continue;
         if (!marked) {
             // The first logger: enable display
@@ -636,25 +638,47 @@ void SimpleLoggerMgr::enableOnlyOneDisplayer() {
 }
 // LCOV_EXCL_STOP
 
-void SimpleLoggerMgr::flushAllLoggers(int level, const std::string& msg) {
+void SimpleLoggerMgr::flushAllLoggers(int level,
+                                      const std::string& msg,
+                                      bool skip_clean_loggers)
+{
     std::unique_lock<std::mutex> l(loggersLock);
+    mergePendingLoggers();
     for (auto& entry: loggers) {
-        SimpleLogger* logger = entry;
+        SimpleLoggerImpl* logger = entry;
         if (!logger) continue;
         if (!msg.empty()) {
             logger->put(level, __FILE__, __func__, __LINE__, "%s", msg.c_str());
         }
-        logger->flushAll();
+        logger->flushAll(skip_clean_loggers);
     }
 }
 
-void SimpleLoggerMgr::addLogger(SimpleLogger* logger) {
-    std::unique_lock<std::mutex> l(loggersLock);
-    loggers.insert(logger);
+void SimpleLoggerMgr::mergePendingLoggers() {
+    std::unique_lock<std::mutex> l(pendingLoggersLock);
+    for (SimpleLoggerImpl* logger: pendingLoggers) {
+        loggers.insert(logger);
+    }
+    pendingLoggers.clear();
 }
 
-void SimpleLoggerMgr::removeLogger(SimpleLogger* logger) {
+void SimpleLoggerMgr::addLogger(SimpleLoggerImpl* logger) {
+    // Do not grab `loggersLock` here, as it is held during the entire
+    // flush pass. The flusher will merge it into `loggers`.
+    std::unique_lock<std::mutex> l(pendingLoggersLock);
+    pendingLoggers.push_back(logger);
+}
+
+void SimpleLoggerMgr::removeLogger(SimpleLoggerImpl* logger) {
+    // Grabbing `loggersLock` guarantees that no flush pass is
+    // using `logger` once this function returns.
     std::unique_lock<std::mutex> l(loggersLock);
+    {   std::unique_lock<std::mutex> ll(pendingLoggersLock);
+        pendingLoggers.erase( std::remove( pendingLoggers.begin(),
+                                           pendingLoggers.end(),
+                                           logger ),
+                              pendingLoggers.end() );
+    }
     loggers.erase(logger);
 }
 
@@ -748,22 +772,16 @@ struct ThreadWrapper {
 
 // ==========================================
 
-SimpleLogger::LogElem::LogElem() : len(0), status(CLEAN) {
+SimpleLoggerImpl::LogElem::LogElem() : len(0), status(CLEAN) {
     memset(ctx, 0x0, MSG_SIZE);
 }
 
 // True if dirty.
-bool SimpleLogger::LogElem::needToFlush() {
+bool SimpleLoggerImpl::LogElem::needToFlush() {
     return status.load(MOR) == DIRTY;
 }
 
-// True if no other thread is working on it.
-bool SimpleLogger::LogElem::available() {
-    Status s = status.load(MOR);
-    return s == CLEAN || s == DIRTY;
-}
-
-int SimpleLogger::LogElem::write(size_t ll, char* msg) {
+int SimpleLoggerImpl::LogElem::write(size_t ll, char* msg) {
     Status exp = CLEAN;
     Status val = WRITING;
     if (!status.compare_exchange_strong(exp, val)) return -1;
@@ -775,7 +793,7 @@ int SimpleLogger::LogElem::write(size_t ll, char* msg) {
     return 0;
 }
 
-int SimpleLogger::LogElem::flush(std::ofstream& fs) {
+int SimpleLoggerImpl::LogElem::flush(std::ofstream& fs) {
     Status exp = DIRTY;
     Status val = FLUSHING;
     if (!status.compare_exchange_strong(exp, val)) return -1;
@@ -790,11 +808,11 @@ int SimpleLogger::LogElem::flush(std::ofstream& fs) {
 // ==========================================
 
 
-SimpleLogger::SimpleLogger(const std::string& file_path,
-                           size_t max_log_elems,
-                           uint64_t log_file_size_limit,
-                           uint32_t max_log_files)
-    : filePath(replaceString(file_path, "//", "/"))
+SimpleLoggerImpl::SimpleLoggerImpl(const std::string& file_path,
+                                   size_t max_log_elems,
+                                   uint64_t log_file_size_limit,
+                                   uint32_t max_log_files)
+    : filePath(SimpleLogger::replaceString(file_path, "//", "/"))
     , maxLogFiles(max_log_files)
     , maxLogFileSize(log_file_size_limit)
     , numCompJobs(0)
@@ -803,13 +821,14 @@ SimpleLogger::SimpleLogger(const std::string& file_path,
     , tzGap( SimpleLoggerMgr::getTzGap() )
     , cursor(0)
     , logs(max_log_elems)
+    , hasDirtyLogs(false)
     , globalPreCallback(nullptr)
     , globalCallback(nullptr)
 {
     findMinMaxRevNum(minRevnum, curRevnum);
 }
 
-SimpleLogger::~SimpleLogger() {
+SimpleLoggerImpl::~SimpleLoggerImpl() {
     stop();
 }
 
@@ -870,8 +889,8 @@ std::string SimpleLogger::replaceString( const std::string& src_str,
     return ret;
 }
 
-void SimpleLogger::findMinMaxRevNum( size_t& min_revnum_out,
-                                     size_t& max_revnum_out )
+void SimpleLoggerImpl::findMinMaxRevNum( size_t& min_revnum_out,
+                                         size_t& max_revnum_out )
 {
     std::string dir_path = "./";
     std::string file_name_only = filePath;
@@ -933,10 +952,10 @@ void SimpleLogger::findMinMaxRevNum( size_t& min_revnum_out,
     max_revnum_out = max_revnum;
 }
 
-void SimpleLogger::findMinMaxRevNumInternal(bool& min_revnum_initialized,
-                                            size_t& min_revnum,
-                                            size_t& max_revnum,
-                                            std::string& f_name)
+void SimpleLoggerImpl::findMinMaxRevNumInternal(bool& min_revnum_initialized,
+                                                size_t& min_revnum,
+                                                size_t& max_revnum,
+                                                std::string& f_name)
 {
     size_t last_dot = f_name.rfind(".");
     if (last_dot == std::string::npos) return;
@@ -962,14 +981,14 @@ void SimpleLogger::findMinMaxRevNumInternal(bool& min_revnum_initialized,
     min_revnum = std::min(min_revnum, revnum);
 }
 
-std::string SimpleLogger::getLogFilePath(size_t file_num) const {
+std::string SimpleLoggerImpl::getLogFilePath(size_t file_num) const {
     if (file_num) {
         return filePath + "." + std::to_string(file_num);
     }
     return filePath;
 }
 
-int SimpleLogger::start() {
+int SimpleLoggerImpl::start() {
     if (filePath.empty()) return 0;
 
     // Append at the end.
@@ -977,7 +996,7 @@ int SimpleLogger::start() {
     if (!fs) return -1;
 
     SimpleLoggerMgr* mgr = SimpleLoggerMgr::get();
-    SimpleLogger* ll = this;
+    SimpleLoggerImpl* ll = this;
     mgr->addLogger(ll);
 
     _log_sys(ll, "Start logger: %s (%zu MB per file, up to %zu files)",
@@ -993,11 +1012,11 @@ int SimpleLogger::start() {
     return 0;
 }
 
-int SimpleLogger::stop() {
+int SimpleLoggerImpl::stop() {
     if (fs.is_open()) {
         SimpleLoggerMgr* mgr = SimpleLoggerMgr::getWithoutInit();
         if (mgr) {
-            SimpleLogger* ll = this;
+            SimpleLoggerImpl* ll = this;
             mgr->removeLogger(ll);
 
             _log_sys(ll, "Stop logger: %s", filePath.c_str());
@@ -1012,20 +1031,20 @@ int SimpleLogger::stop() {
     return 0;
 }
 
-void SimpleLogger::setLogLevel(int level) {
+void SimpleLoggerImpl::setLogLevel(int level) {
     if (level > 6) return;
     if (!fs) return;
 
     curLogLevel = level;
 }
 
-void SimpleLogger::setDispLevel(int level) {
+void SimpleLoggerImpl::setDispLevel(int level) {
     if (level > 6) return;
 
     curDispLevel = level;
 }
 
-void SimpleLogger::setMaxLogFiles(size_t max_log_files) {
+void SimpleLoggerImpl::setMaxLogFiles(size_t max_log_files) {
     if (max_log_files == 0) return;
 
     maxLogFiles = max_log_files;
@@ -1041,12 +1060,25 @@ void SimpleLogger::setMaxLogFiles(size_t max_log_files) {
     msg_len = vsnprintf( msg + cur_len, avail_len, __VA_ARGS__ );   \
     cur_len += (avail_len > msg_len) ? msg_len : avail_len
 
-void SimpleLogger::put(int level,
-                       const char* source_file,
-                       const char* func_name,
-                       size_t line_number,
-                       const char* format,
-                       ...)
+void SimpleLoggerImpl::put(int level,
+                           const char* source_file,
+                           const char* func_name,
+                           size_t line_number,
+                           const char* format,
+                           ...)
+{
+    va_list args;
+    va_start(args, format);
+    putV(level, source_file, func_name, line_number, format, args);
+    va_end(args);
+}
+
+void SimpleLoggerImpl::putV(int level,
+                            const char* source_file,
+                            const char* func_name,
+                            size_t line_number,
+                            const char* format,
+                            va_list args_given)
 {
     static const char* lv_names[7] = {"====",
                                       "FATL", "ERRO", "WARN",
@@ -1106,7 +1138,7 @@ void SimpleLogger::put(int level,
         size_t cb_avail_len = MSG_SIZE;
         size_t cb_msg_len = 0;
         va_list args;
-        va_start(args, format);
+        va_copy(args, args_given);
         _vsnprintf(cb_msg, cb_avail_len, cb_cur_len, cb_msg_len, format, args);
         va_end(args);
 
@@ -1165,7 +1197,7 @@ void SimpleLogger::put(int level,
 #endif
 
     va_list args;
-    va_start(args, format);
+    va_copy(args, args_given);
     _vsnprintf(msg, avail_len, cur_len, msg_len, format, args);
     va_end(args);
 
@@ -1186,16 +1218,23 @@ void SimpleLogger::put(int level,
         cursor_val = (cursor_exp + 1) % num;
         ll = &logs[cursor_exp];
     } while ( !cursor.compare_exchange_strong(cursor_exp, cursor_val, MOR) );
-    while ( !ll->available() ) std::this_thread::yield();
 
-    if (ll->needToFlush()) {
-        // Allow only one thread to flush.
-        if (!flush(cursor_exp)) {
-            // Other threads: wait.
-            while (ll->needToFlush()) std::this_thread::yield();
+    // Retry until the write succeeds, otherwise the log will be lost.
+    // The entry may not be CLEAN if
+    //   1) it has not been flushed since the previous round (DIRTY),
+    //   2) another thread is flushing it (FLUSHING), or
+    //   3) another writer claimed the same entry in the next round,
+    //      as the cursor wrapped around (WRITING or DIRTY).
+    while (ll->write(cur_len, msg) != 0) {
+        if (ll->needToFlush()) {
+            // Allow only one thread to flush. If it fails, just retry.
+            flush(cursor_exp);
         }
+        std::this_thread::yield();
     }
-    ll->write(cur_len, msg);
+    // Should be set after `write()` publishes DIRTY,
+    // otherwise the flusher may clear it before seeing the DIRTY entry.
+    hasDirtyLogs.store(true);
 
     if (level > curDispLevel) return;
 
@@ -1241,7 +1280,7 @@ void SimpleLogger::put(int level,
         _snprintf(msg, avail_len, cur_len, msg_len, "\n");
     }
 
-    va_start(args, format);
+    va_copy(args, args_given);
 
 #ifndef LOGGER_NO_COLOR
     if (level == 0) {
@@ -1265,7 +1304,7 @@ void SimpleLogger::put(int level,
     l.unlock();
 }
 
-void SimpleLogger::execCmd(const std::string& cmd_given) {
+void SimpleLoggerImpl::execCmd(const std::string& cmd_given) {
     int r = 0;
     std::string cmd = cmd_given;
 
@@ -1281,7 +1320,7 @@ void SimpleLogger::execCmd(const std::string& cmd_given) {
     (void)r;
 }
 
-void SimpleLogger::doCompression(size_t file_num) {
+void SimpleLoggerImpl::doCompression(size_t file_num) {
 #if defined(__linux__) || defined(__APPLE__)
     std::string filename = getLogFilePath(file_num);
     std::string cmd;
@@ -1307,9 +1346,15 @@ void SimpleLogger::doCompression(size_t file_num) {
     numCompJobs.fetch_sub(1);
 }
 
-bool SimpleLogger::flush(size_t start_pos) {
+bool SimpleLoggerImpl::flush(size_t start_pos) {
     std::unique_lock<std::mutex> ll(flushingLogs, std::try_to_lock);
     if (!ll.owns_lock()) return false;
+
+    // Clear it after acquiring `flushingLogs` and before scanning `logs`.
+    // Any entry published as DIRTY before a writer sets the flag will be
+    // seen by the scan below, while a flag set after this point remains
+    // for the next flush.
+    hasDirtyLogs.exchange(false);
 
     size_t num = logs.size();
     // Circular flush into file.
@@ -1343,35 +1388,36 @@ bool SimpleLogger::flush(size_t start_pos) {
     return true;
 }
 
-void SimpleLogger::flushAll() {
+void SimpleLoggerImpl::flushAll(bool skip_if_clean) {
+    if (skip_if_clean && !hasDirtyLogs.load(MOR)) return;
     uint64_t start_pos = cursor.load(MOR);
     flush(start_pos);
 }
 
-SimpleLogger::CtxMap& SimpleLogger::getLocalCtxMap() {
+SimpleLoggerImpl::CtxMap& SimpleLoggerImpl::getLocalCtxMap() {
     thread_local SimpleLogger::CtxMap ctx_map;
     return ctx_map;
 }
 
-std::list<SimpleLogger::CbType>& SimpleLogger::getLocalCbList() {
+std::list<SimpleLogger::CbType>& SimpleLoggerImpl::getLocalCbList() {
     thread_local std::list<SimpleLogger::CbType> cb_list;
     return cb_list;
 }
 
-std::list<SimpleLogger::PreCbType>& SimpleLogger::getLocalPreCbList() {
+std::list<SimpleLogger::PreCbType>& SimpleLoggerImpl::getLocalPreCbList() {
     thread_local std::list<SimpleLogger::PreCbType> pre_cb_list;
     return pre_cb_list;
 }
 
-void SimpleLogger::setGlobalCallback(PreCbType pre_cb, CbType cb) {
+void SimpleLoggerImpl::setGlobalCallback(PreCbType pre_cb, CbType cb) {
     globalPreCallback = pre_cb;
     globalCallback = cb;
 }
 
-bool SimpleLogger::checkWhetherToLog(int level,
-                                     const char* source_file,
-                                     const char* func_name,
-                                     size_t line_number) {
+bool SimpleLoggerImpl::checkWhetherToLog(int level,
+                                         const char* source_file,
+                                         const char* func_name,
+                                         size_t line_number) {
     if (getLogLevel() >= level) {
         return true;
     }
@@ -1394,6 +1440,105 @@ bool SimpleLogger::checkWhetherToLog(int level,
     return false;
 }
 
+
+// ==========================================
+
+SimpleLogger::SimpleLogger(const std::string& file_path,
+                           size_t max_log_elems,
+                           uint64_t log_file_size_limit,
+                           uint32_t max_log_files,
+                           SimpleLoggerAbi)
+    : impl( new SimpleLoggerImpl( file_path,
+                                  max_log_elems,
+                                  log_file_size_limit,
+                                  max_log_files ) )
+{}
+
+SimpleLogger::~SimpleLogger() {
+    delete impl;
+}
+
+int SimpleLogger::start() {
+    return impl->start();
+}
+
+int SimpleLogger::stop() {
+    return impl->stop();
+}
+
+bool SimpleLogger::traceAllowed() const {
+    return impl->getLogLevel() >= TRACE;
+}
+
+bool SimpleLogger::debugAllowed() const {
+    return impl->getLogLevel() >= DEBUG;
+}
+
+void SimpleLogger::setLogLevel(int level) {
+    impl->setLogLevel(level);
+}
+
+void SimpleLogger::setDispLevel(int level) {
+    impl->setDispLevel(level);
+}
+
+void SimpleLogger::setMaxLogFiles(size_t max_log_files) {
+    impl->setMaxLogFiles(max_log_files);
+}
+
+int SimpleLogger::getLogLevel() const {
+    return impl->getLogLevel();
+}
+
+int SimpleLogger::getDispLevel() const {
+    return impl->getDispLevel();
+}
+
+void SimpleLogger::put(int level,
+                       const char* source_file,
+                       const char* func_name,
+                       size_t line_number,
+                       const char* format,
+                       ...)
+{
+    va_list args;
+    va_start(args, format);
+    impl->putV(level, source_file, func_name, line_number, format, args);
+    va_end(args);
+}
+
+void SimpleLogger::flushAll(bool skip_if_clean) {
+    impl->flushAll(skip_if_clean);
+}
+
+void SimpleLogger::setGlobalCallback(PreCbType pre_cb, CbType cb) {
+    impl->setGlobalCallback(pre_cb, cb);
+}
+
+bool SimpleLogger::checkWhetherToLog(int level,
+                                     const char* source_file,
+                                     const char* func_name,
+                                     size_t line_number)
+{
+    return impl->checkWhetherToLog(level, source_file, func_name, line_number);
+}
+
+SimpleLogger::LoggerStream& SimpleLogger::stream(int level,
+                                                 SimpleLogger* logger,
+                                                 const char* file,
+                                                 const char* func,
+                                                 size_t line)
+{
+    thread_local LoggerStream msg;
+    msg.setLogInfo(level, logger, file, func, line);
+    return msg;
+}
+
+SimpleLogger::EndOfStmt& SimpleLogger::eos() {
+    thread_local EndOfStmt eos_inst;
+    return eos_inst;
+}
+
 SimpleLoggerLocalCtx::SimpleLoggerLocalCtx(
     SimpleLogger* l,
     const SimpleLogger::CtxMap& ctx,
@@ -1406,7 +1551,7 @@ SimpleLoggerLocalCtx::SimpleLoggerLocalCtx(
 {
     if (!logger) return;
 
-    auto& local_ctx_map = logger->getLocalCtxMap();
+    auto& local_ctx_map = SimpleLoggerImpl::getLocalCtxMap();
     for (auto& entry: localCtx) {
         auto ee = local_ctx_map.find(entry.first);
         if (ee == local_ctx_map.end()) {
@@ -1421,12 +1566,12 @@ SimpleLoggerLocalCtx::SimpleLoggerLocalCtx(
     }
 
     if (preCallback) {
-        auto& local_pre_cb_list = logger->getLocalPreCbList();
+        auto& local_pre_cb_list = SimpleLoggerImpl::getLocalPreCbList();
         local_pre_cb_list.push_front(preCallback);
     }
 
     if (callback) {
-        auto& local_cb_list = logger->getLocalCbList();
+        auto& local_cb_list = SimpleLoggerImpl::getLocalCbList();
         local_cb_list.push_front(callback);
     }
 }
@@ -1434,7 +1579,7 @@ SimpleLoggerLocalCtx::SimpleLoggerLocalCtx(
 SimpleLoggerLocalCtx::~SimpleLoggerLocalCtx() {
     if (!logger) return;
 
-    auto& local_ctx_map = logger->getLocalCtxMap();
+    auto& local_ctx_map = SimpleLoggerImpl::getLocalCtxMap();
     for (auto& entry: localCtx) {
         auto ee = local_ctx_map.find(entry.first);
         if (ee != local_ctx_map.end()) {
@@ -1450,12 +1595,12 @@ SimpleLoggerLocalCtx::~SimpleLoggerLocalCtx() {
     }
 
     if (preCallback) {
-        auto& local_pre_cb_list = logger->getLocalPreCbList();
+        auto& local_pre_cb_list = SimpleLoggerImpl::getLocalPreCbList();
         local_pre_cb_list.pop_front();
     }
 
     if (callback) {
-        auto& local_cb_list = logger->getLocalCbList();
+        auto& local_cb_list = SimpleLoggerImpl::getLocalCbList();
         local_cb_list.pop_front();
     }
 }
