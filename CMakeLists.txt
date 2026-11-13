@@ -101,8 +101,8 @@ endif()
 # === SANITIZER ===
 
 if(ADDRESS_SANITIZER)
-    add_compile_options(-fsanitize=address -fuse-ld=gold)
-    add_link_options(-fsanitize=address -fuse-ld=gold)
+    add_compile_options(-fsanitize=address)
+    add_link_options(-fsanitize=address)
     message(STATUS "---- ADDRESS SANITIZER IS ON ----")
 endif()
 
