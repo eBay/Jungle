@@ -257,18 +257,27 @@ MemTable::MemTable(const LogFile* log_file)
 }
 
 MemTable::~MemTable() {
+    // WARNING:
+    //   Do not use `skiplist_erase_node()` here. It searches the node to
+    //   erase by key, so if a key in the skiplist is corrupted (e.g., its
+    //   memory is overwritten by others), it loops forever and this
+    //   destructor never returns. Nobody can access this MemTable at this
+    //   point, so just detach and free all nodes without key comparison.
     if (idxByKey) {
         // Note: due to dedup,
         //       # logs in skiplist <= # total logs.
-        skiplist_node* cursor = skiplist_begin(idxByKey);
-        while (cursor) {
-            RecNode* node = _get_entry(cursor, RecNode, snode);
-            cursor = skiplist_next(idxByKey, cursor);
-
-            skiplist_erase_node(idxByKey, &node->snode);
-            skiplist_release_node(&node->snode);
-            skiplist_wait_for_free(&node->snode);
-            delete node;
+        size_t num_expected = skiplist_get_size(idxByKey);
+        size_t num_freed = skiplist_destroy_nodes(
+            idxByKey,
+            [](skiplist_node* snode, void*) {
+                RecNode* node = _get_entry(snode, RecNode, snode);
+                delete node;
+            },
+            nullptr );
+        if (num_freed != num_expected) {
+            _log_warn(myLog, "memtable of log file %zu: freed %zu nodes "
+                      "from key index, but expected %zu",
+                      logFile->getLogFileNum(), num_freed, num_expected);
         }
         skiplist_free(idxByKey);
         delete idxByKey;
@@ -283,17 +292,20 @@ MemTable::~MemTable() {
     }
 
     if (idxBySeq) {
-        skiplist_node* cursor = skiplist_begin(idxBySeq);
-        while (cursor) {
-            RecNodeSeq* node = _get_entry(cursor, RecNodeSeq, snode);
-            cursor = skiplist_next(idxBySeq, cursor);
-
-            skiplist_erase_node(idxBySeq, &node->snode);
-            skiplist_release_node(&node->snode);
-            skiplist_wait_for_free(&node->snode);
-            node->rec->free();
-            delete node->rec;
-            delete node;
+        size_t num_expected = skiplist_get_size(idxBySeq);
+        size_t num_freed = skiplist_destroy_nodes(
+            idxBySeq,
+            [](skiplist_node* snode, void*) {
+                RecNodeSeq* node = _get_entry(snode, RecNodeSeq, snode);
+                node->rec->free();
+                delete node->rec;
+                delete node;
+            },
+            nullptr );
+        if (num_freed != num_expected) {
+            _log_warn(myLog, "memtable of log file %zu: freed %zu nodes "
+                      "from seq index, but expected %zu",
+                      logFile->getLogFileNum(), num_freed, num_expected);
         }
         skiplist_free(idxBySeq);
         delete idxBySeq;

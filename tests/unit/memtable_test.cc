@@ -399,6 +399,58 @@ int memtable_itr_seek_beyond_seq_test() {
 }
 
 
+static void put_log_store_records(MemTable* mt, size_t num) {
+    // Same as raft log store: 8-byte big-endian key, which is the seq number.
+    for (size_t ii = 1; ii <= num; ++ii) {
+        uint8_t keybuf[8];
+        for (size_t jj = 0; jj < 8; ++jj) {
+            keybuf[jj] = (ii >> (8 * (7 - jj))) & 0xff;
+        }
+        Record rec;
+        rec.seqNum = ii;
+        rec.kv.key = SizedBuf(8, keybuf);
+        rec.kv.value = SizedBuf("value");
+        mt->putNewRecord(rec);
+    }
+}
+
+int memtable_corrupted_index_teardown_test(bool corrupt_key) {
+    DBConfig config;
+    LogMgrOptions l_opt;
+    l_opt.dbConfig = &config;
+    LogMgr l_mgr(nullptr, l_opt);
+    LogFile l_file(&l_mgr);
+    MemTable* mt = new MemTable(&l_file);
+    mt->init();
+
+    const size_t NUM = 1000;
+    put_log_store_records(mt, NUM);
+
+    // Corrupt a few nodes in the middle, as if their memory was
+    // overwritten by others. Erasing a node by key from such a
+    // skiplist never finishes.
+    for (size_t target: {500, 501, 777}) {
+        uint8_t keybuf[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        keybuf[6] = (target >> 8) & 0xff;
+        keybuf[7] = target & 0xff;
+        Record query;
+        query.kv.key = SizedBuf(8, keybuf);
+        auto* node = mt->findRecNode(&query);
+        CHK_NONNULL(node);
+        if (corrupt_key) {
+            memset(node->key.data, 0x0, node->key.size);
+        } else {
+            node->recList->front()->seqNum = 0;
+        }
+        skiplist_release_node(&node->snode);
+    }
+
+    // Should not hang.
+    delete mt;
+    return 0;
+}
+
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -407,6 +459,8 @@ int main(int argc, char** argv) {
     ts.doTest("memtable nearest search test", memtable_nearest_search_test);
     ts.doTest("memtable prefix search test", memtable_prefix_search_test);
     ts.doTest("memtable itr seek beyond seq test", memtable_itr_seek_beyond_seq_test);
+    ts.doTest("memtable corrupted key teardown test",
+              memtable_corrupted_index_teardown_test, TestRange<bool>({true, false}));
 
     return 0;
 }
