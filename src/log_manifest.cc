@@ -866,11 +866,18 @@ Status LogManifest::getLogFileInfoBySeq(const uint64_t seq_num,
         }
     }
 
+    // WARNING:
+    //   Should grab `info` before reading seq numbers below. Otherwise,
+    //   the memtable can be purged (freed) by other threads (e.g.,
+    //   log reclaimer) in the middle, which causes heap-use-after-free.
+    info->grab();
+
     uint64_t file_min_seq = file->getMinSeqNum();
     if (valid_number(file_min_seq) && file_min_seq > seq_num) {
         // WARNING: This can happen for the first log file,
         //          if user uses custom seqnum which is bigger than
         //          the expected seqnum.
+        info->done();
         skiplist_release_node(cursor);
         return Status::LOG_FILE_NOT_FOUND;
     }
@@ -888,17 +895,20 @@ Status LogManifest::getLogFileInfoBySeq(const uint64_t seq_num,
             skiplist_release_node(next_cursor);
         }
         if (is_last_file || !allow_non_exact_match) {
+            info->done();
             skiplist_release_node(cursor);
             return Status::LOG_FILE_NOT_FOUND;
         }
     }
 
-    info_out = info;
-    if (force_not_load_memtable) {
-        info_out->grab();
-    } else {
-        info_out->grab(isLogReclaimerActive());
+    if (!force_not_load_memtable && isLogReclaimerActive()) {
+        // Load memtable if it was purged, by grabbing it again with the
+        // loading option. The extra reference is released right away,
+        // which will not purge the memtable as we are still holding one.
+        info->grab(true);
+        info->done();
     }
+    info_out = info;
     skiplist_release_node(cursor);
     return Status();
 }
