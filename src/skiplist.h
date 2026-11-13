@@ -137,6 +137,22 @@ skiplist_node* skiplist_prev(skiplist_raw* slist,
 skiplist_node* skiplist_begin(skiplist_raw* slist);
 skiplist_node* skiplist_end(skiplist_raw* slist);
 
+typedef void skiplist_destroy_cb_t(skiplist_node *node, void *ctx);
+
+// Detach all nodes from `slist` and pass each of them to `free_cb`,
+// by following the bottom layer pointers only.
+//
+// Unlike `skiplist_erase_node()`, this function never calls `cmp_func`,
+// so a corrupted key cannot make it loop forever.
+//
+// NOT thread-safe: caller should guarantee that no other thread is
+// accessing `slist` or its nodes.
+//
+// Returns the number of nodes passed to `free_cb`.
+size_t skiplist_destroy_nodes(skiplist_raw* slist,
+                              skiplist_destroy_cb_t* free_cb,
+                              void* ctx);
+
 #ifdef __cplusplus
 }
 #endif

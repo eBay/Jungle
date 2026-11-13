@@ -1000,3 +1000,33 @@ skiplist_node* skiplist_end(skiplist_raw *slist) {
     return skiplist_prev(slist, &slist->tail);
 }
 
+size_t skiplist_destroy_nodes(skiplist_raw *slist,
+                              skiplist_destroy_cb_t *free_cb,
+                              void *ctx) {
+    size_t num_nodes = 0;
+    bool bool_true = true, bool_false = false;
+
+    skiplist_node* cur_node = ATM_GET(slist->head.next[0]);
+    while (cur_node && cur_node != &slist->tail) {
+        // Read `next` before `free_cb` releases `cur_node`.
+        skiplist_node* next_node = ATM_GET(cur_node->next[0]);
+
+        ATM_STORE(cur_node->is_fully_linked, bool_false);
+        ATM_STORE(cur_node->removed, bool_true);
+        free_cb(cur_node, ctx);
+
+        cur_node = next_node;
+        num_nodes++;
+    }
+
+    // Now the skiplist is empty.
+    size_t layer;
+    for (layer = 0; layer < slist->max_layer; ++layer) {
+        slist->head.next[layer] = &slist->tail;
+        slist->layer_entries[layer] = 0;
+    }
+    slist->num_entries = 0;
+    slist->top_layer = 0;
+
+    return num_nodes;
+}
