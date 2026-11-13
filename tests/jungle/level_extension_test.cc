@@ -1488,6 +1488,110 @@ int purge_tables_during_compaction_test(int type_num) {
     return 0;
 }
 
+int remove_migrated_tables_with_readers_test(bool do_purge) {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    // Disable background threads.
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 0;
+    g_config.numCompactorThreads = 0;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.numL0Partitions = 4;
+    config.nextLevelExtension = true;
+    config.maxL1TableSize = 1024 * 1024;
+    config.bloomFilterBitsPerUnit = 10.0;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    size_t NUM = 10000;
+    const char K_FMT[] = "k%06zu";
+    const char V_FMT[] = "v%0100zu";
+
+    // Write data to L1 (the last level).
+    CHK_Z(_set_keys(db, 0, NUM, 1, K_FMT, V_FMT));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    jungle::CompactOptions c_opt;
+    for (size_t ii=0; ii<config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(c_opt, ii));
+    }
+
+    // Open a snapshot and an iterator.
+    jungle::DB* snap = nullptr;
+    CHK_Z(db->openSnapshot(&snap));
+    jungle::Iterator itr;
+    CHK_Z(itr.init(db));
+
+    // Migrate L1 to L2. Tables in L2 share files with the tables in L1,
+    // which are still referred to by the snapshot and the iterator.
+    CHK_Z(db->compactLevel(c_opt, 1));
+
+    // Remove the migrated tables in L2.
+    if (do_purge) {
+        CHK_Z(db->purgeTables());
+    } else {
+        c_opt.ignoreThreshold = true;
+        for (size_t ii=0; ii<4; ++ii) {
+            CHK_Z(db->compactInplace(c_opt, 2));
+        }
+        c_opt.ignoreThreshold = false;
+    }
+
+    // The iterator and snapshot should still see all the data.
+    {
+        char key_str[MAX_TEST_LEN];
+        char val_str[MAX_TEST_LEN];
+        size_t idx = 0;
+        do {
+            jungle::Record rec_out;
+            jungle::Record::Holder h(rec_out);
+            s = itr.get(rec_out);
+            if (!s) break;
+
+            TestSuite::setInfo("idx=%zu", idx);
+            sprintf(key_str, K_FMT, idx);
+            sprintf(val_str, V_FMT, idx);
+            CHK_EQ(jungle::SizedBuf(key_str), rec_out.kv.key);
+            CHK_EQ(jungle::SizedBuf(val_str), rec_out.kv.value);
+            idx++;
+        } while (itr.next().ok());
+        CHK_EQ(NUM, idx);
+        CHK_Z(itr.close());
+    }
+    CHK_Z(_get_keys(snap, 0, NUM, 1, K_FMT, V_FMT));
+    CHK_Z(_iterate_keys(snap, 0, NUM-1, 1, K_FMT, V_FMT));
+    CHK_Z(jungle::DB::close(snap));
+
+    auto check_db = [&]() -> int {
+        if (do_purge) {
+            CHK_Z(_non_existing_keys(db, 0, NUM, 1, K_FMT));
+        } else {
+            CHK_Z(_get_keys(db, 0, NUM, 1, K_FMT, V_FMT));
+            CHK_Z(_iterate_keys(db, 0, NUM-1, 1, K_FMT, V_FMT));
+        }
+        return 0;
+    };
+    CHK_Z(check_db());
+
+    // Close and re-open.
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::DB::open(&db, filename, config));
+    CHK_Z(check_db());
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -1540,6 +1644,10 @@ int main(int argc, char** argv) {
                                WorkerArgs::SPLIT,
                                WorkerArgs::MERGE,
                                WorkerArgs::L0 }));
+
+    ts.doTest("remove migrated tables with readers test",
+              remove_migrated_tables_with_readers_test,
+              TestRange<bool>({true, false}));
 
     return 0;
 }

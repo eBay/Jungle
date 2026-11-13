@@ -689,8 +689,15 @@ Status TableManifest::getTablesRange(const size_t level,
     } else {
         TableInfo query(level, 0, 0, true);
         query.minKey.referTo(min_key);
-        skiplist_node* cursor = skiplist_find_smaller_or_equal
-                                ( l_info->tables, &query.snode );
+        // WARNING:
+        //   If `min_key` is empty, start from the beginning. Multiple tables
+        //   can have the same empty min key, and
+        //   `skiplist_find_smaller_or_equal` may return any of them,
+        //   which skips the ones before it.
+        skiplist_node* cursor = min_key.empty()
+                                ? nullptr
+                                : skiplist_find_smaller_or_equal
+                                  ( l_info->tables, &query.snode );
         if (!cursor) cursor = skiplist_begin(l_info->tables);
 
         bool is_first_table = true;

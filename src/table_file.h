@@ -23,6 +23,7 @@ limitations under the License.
 #include <libjungle/jungle.h>
 #include <libforestdb/forestdb.h>
 
+#include <atomic>
 #include <list>
 #include <map>
 #include <mutex>
@@ -217,6 +218,20 @@ public:
     void setLogger(SimpleLogger* logger) { myLog = logger; }
 
     void setTableInfo(TableInfo* t_info) { tableInfo = t_info; }
+
+    /**
+     * Add an owner `TableInfo` of this file. The same file can be shared
+     * by multiple `TableInfo`s (e.g., level migration).
+     */
+    void grabOwnership() { numOwners.fetch_add(1); }
+
+    /**
+     * Remove an owner `TableInfo` of this file.
+     *
+     * @return `true` if the caller was the last owner, and then the caller
+     *         is responsible for destroying this file.
+     */
+    bool releaseOwnership() { return numOwners.fetch_sub(1) == 1; }
 
     SimpleLogger* getLogger() const { return myLog; }
 
@@ -420,6 +435,9 @@ private:
 
     // Corresponding table info.
     TableInfo* tableInfo;
+
+    // Number of `TableInfo`s sharing this file.
+    std::atomic<uint32_t> numOwners;
 
     // ForestDB writer handles
     FdbHandle* writer;
