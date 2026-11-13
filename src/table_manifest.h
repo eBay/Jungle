@@ -104,8 +104,9 @@ struct TableInfo {
                 // WARNING:
                 //   Reset the file's back pointer BEFORE releasing the
                 //   ownership, as the other owner can destroy the file
-                //   right after that.
-                if (file->getTableInfo() == this) file->setTableInfo(nullptr);
+                //   right after that. It should be done atomically, as the
+                //   other owner can do the same thing at the same time.
+                file->clearTableInfo(this);
                 if (file->releaseOwnership()) {
                     file->destroySelf();
                     delete file;

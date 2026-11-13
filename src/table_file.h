@@ -217,7 +217,21 @@ public:
 
     void setLogger(SimpleLogger* logger) { myLog = logger; }
 
-    void setTableInfo(TableInfo* t_info) { tableInfo = t_info; }
+    void setTableInfo(TableInfo* t_info) { tableInfo.store(t_info); }
+
+    /**
+     * Clear the table info pointer, only if it points to the given one.
+     * The same file can be shared by multiple `TableInfo`s (e.g., level
+     * migration), and they can call this function concurrently.
+     */
+    void clearTableInfo(TableInfo* t_info) {
+        tableInfo.compare_exchange_strong(t_info, nullptr);
+    }
+
+    /**
+     * If set, the physical file will not be removed by `destroySelf()`.
+     */
+    void setKeepOnDisk() { keepOnDisk.store(true); }
 
     /**
      * Add an owner `TableInfo` of this file. The same file can be shared
@@ -315,7 +329,7 @@ public:
 
     Status returnSnapshot(Snapshot* snapshot);
 
-    TableInfo* getTableInfo() const { return tableInfo; }
+    TableInfo* getTableInfo() const { return tableInfo.load(); }
 
 private:
 // === TYPES
@@ -434,10 +448,13 @@ private:
     const TableMgr* tableMgr;
 
     // Corresponding table info.
-    TableInfo* tableInfo;
+    std::atomic<TableInfo*> tableInfo;
 
     // Number of `TableInfo`s sharing this file.
     std::atomic<uint32_t> numOwners;
+
+    // If `true`, `destroySelf()` will not remove the physical file.
+    std::atomic<bool> keepOnDisk;
 
     // ForestDB writer handles
     FdbHandle* writer;

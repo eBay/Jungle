@@ -576,6 +576,10 @@ public:
      * reading the old tables until they are closed. Ongoing compactions
      * will be cancelled.
      *
+     * If it fails to store the manifest file, the purge is still effective
+     * in memory, but may be rolled back if the process crashes before
+     * the manifest file is stored successfully.
+     *
      * @return OK on success.
      */
     Status purgeTables();

@@ -289,6 +289,18 @@ public:
 
     uint64_t getBoosterLimit(size_t level) const;
 
+    /**
+     * Check if any of the given tables has been removed from the manifest
+     * (e.g., by level migration or `purgeTables()`).
+     *
+     * WARNING:
+     *   Should be called after grabbing the table locks of the given
+     *   tables. Once this returns `false`, they cannot be migrated until
+     *   the locks are released, so that the back pointer of their files
+     *   (`TableFile::tableInfo`) points to the given tables.
+     */
+    bool isAnyTableRemoved(const std::list<TableInfo*>& tables);
+
     bool isCompactionAllowed() const {
         return allowCompaction || tableAdjInProgress;
     }

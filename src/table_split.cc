@@ -78,6 +78,10 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     TableLockHolder tl_holder(this, {victim_table->number});
     if (!tl_holder.ownsLock()) return Status::OPERATION_IN_PROGRESS;
 
+    // The victim may have been migrated to the next level (and then purged)
+    // before we lock it. Splitting it will be meaningless.
+    if (isAnyTableRemoved({victim_table})) return Status::COMPACTION_CANCELLED;
+
     _log_info( myLog, "split table %zu_%zu, level %zu, min key %s begins",
                opt.prefixNum, victim_table->number, level,
                victim_table->minKey.toReadableString().c_str() );
@@ -460,6 +464,14 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
     TableLockHolder tl_gt_holder(this, {num_gt});
     if (!tl_gt_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
 
+    // WARNING:
+    //   Both tables may have been migrated to the next level (and then
+    //   purged) before we lock them. In such a case, the back pointer of
+    //   their files does not point to them.
+    if (isAnyTableRemoved({local_victim, target_table})) {
+        throw Status(Status::COMPACTION_CANCELLED);
+    }
+
     // Read all records from the victim table.
     itr = new TableFile::Iterator();
     TC( itr->init(nullptr, local_victim->file, empty_key, empty_key) );
@@ -614,6 +626,14 @@ Status TableMgr::fixTable(const CompactOptions& options,
 
     TableLockHolder tl_gt_holder( this, {num_gt} );
     if (!tl_gt_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    // WARNING:
+    //   Both tables may have been migrated to the next level (and then
+    //   purged) before we lock them. In such a case, the back pointer of
+    //   their files does not point to them.
+    if (isAnyTableRemoved({local_victim, target_table})) {
+        throw Status(Status::COMPACTION_CANCELLED);
+    }
 
     // Read records in target table, starting from min-key of victim table.
     itr = new TableFile::Iterator();

@@ -505,6 +505,16 @@ Status TableMgr::purgeTables() {
 
     // Store manifest file first, and then release the old tables.
     s = mani->store(true);
+    if (!s) {
+        // WARNING:
+        //   The manifest file on disk may still refer to the old tables.
+        //   Keep their files on disk, otherwise the DB cannot be opened
+        //   after crash. They will be removed by `removeStaleFiles()` at
+        //   the next open, once the new manifest is stored.
+        _log_err(myLog, "[purge tables] failed to store manifest: %d, "
+                 "keep %zu old table files on disk", s, old_tables.size());
+        for (TableInfo*& t_info: old_tables) t_info->file->setKeepOnDisk();
+    }
 
     for (TableInfo*& t_info: old_tables) t_info->done();
 
@@ -512,6 +522,18 @@ Status TableMgr::purgeTables() {
               "created %zu new L0 tables, %zu us, manifest store: %d",
               old_tables.size(), new_files.size(), tt.getUs(), s);
     return s;
+}
+
+bool TableMgr::isAnyTableRemoved(const std::list<TableInfo*>& tables) {
+    std::lock_guard<std::mutex> l(mani->getLock());
+    for (TableInfo* t_info: tables) {
+        if (t_info && t_info->isRemoved()) {
+            _log_info(myLog, "table %zu_%zu at level %zu has been removed",
+                      opt.prefixNum, t_info->number, t_info->level);
+            return true;
+        }
+    }
+    return false;
 }
 
 Status TableMgr::removeStaleFiles() {

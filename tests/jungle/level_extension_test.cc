@@ -1592,6 +1592,102 @@ int remove_migrated_tables_with_readers_test(bool do_purge) {
     return 0;
 }
 
+int inplace_compaction_victim_migrated_and_purged_test() {
+    std::string filename;
+    TEST_SUITE_PREPARE_PATH(filename);
+
+    jungle::Status s;
+    jungle::DB* db;
+
+    // Disable background threads.
+    jungle::GlobalConfig g_config;
+    g_config.numFlusherThreads = 0;
+    g_config.numCompactorThreads = 0;
+    jungle::init(g_config);
+
+    // Open DB.
+    jungle::DBConfig config;
+    TEST_CUSTOM_DB_CONFIG(config)
+    config.numL0Partitions = 4;
+    config.nextLevelExtension = true;
+    config.maxL1TableSize = 1024 * 1024;
+    config.bloomFilterBitsPerUnit = 10.0;
+    CHK_Z(jungle::DB::open(&db, filename, config));
+
+    size_t NUM = 10000;
+    const char K_FMT[] = "k%06zu";
+    const char V_FMT[] = "v%0100zu";
+    const char V_FMT_NEW[] = "n%0100zu";
+
+    // Write data to L1 (the last level).
+    CHK_Z(_set_keys(db, 0, NUM, 1, K_FMT, V_FMT));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    jungle::CompactOptions c_opt;
+    for (size_t ii=0; ii<config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(c_opt, ii));
+    }
+
+    // Right before in-place compaction locks its victim in L1,
+    // migrate L1 to L2, and then purge tables.
+    bool cb_invoked = false;
+    jungle::Status s_migrate, s_purge;
+    jungle::DebugParams d_params;
+    d_params.inPlaceCompactionBeforeLockCb =
+        [&](const jungle::DebugParams::GenericCbParams& pp) {
+        if (cb_invoked) return;
+        cb_invoked = true;
+        s_migrate = db->compactLevel(c_opt, 1);
+        s_purge = db->purgeTables();
+    };
+    jungle::setDebugParams(d_params);
+    jungle::DB::enableDebugCallbacks(true);
+    DebugCbGuard cb_guard;
+
+    // In-place compaction should be cancelled, as the victim has been
+    // migrated and purged.
+    jungle::CompactOptions c_opt_inplace;
+    c_opt_inplace.ignoreThreshold = true;
+    CHK_EQ(jungle::Status::COMPACTION_CANCELLED,
+           db->compactInplace(c_opt_inplace, 1).getValue());
+    CHK_TRUE(cb_invoked);
+    CHK_Z(s_migrate);
+    CHK_Z(s_purge);
+
+    jungle::DB::enableDebugCallbacks(false);
+    jungle::setDebugParams(jungle::DebugParams());
+
+    // Purged data should not be resurrected.
+    CHK_Z(_non_existing_keys(db, 0, NUM, 1, K_FMT));
+
+    // Write new data, and compact it.
+    CHK_Z(_set_keys(db, 0, NUM, 2, K_FMT, V_FMT_NEW));
+    CHK_Z(db->sync(false));
+    CHK_Z(db->flushLogs(jungle::FlushOptions()));
+    for (size_t ii=0; ii<config.numL0Partitions; ++ii) {
+        CHK_Z(db->compactL0(c_opt, ii));
+    }
+
+    auto check_db = [&]() -> int {
+        CHK_Z(_get_keys(db, 0, NUM, 2, K_FMT, V_FMT_NEW));
+        CHK_Z(_non_existing_keys(db, 1, NUM, 2, K_FMT));
+        CHK_Z(_iterate_keys(db, 0, NUM-2, 2, K_FMT, V_FMT_NEW));
+        return 0;
+    };
+    CHK_Z(check_db());
+
+    // Close and re-open.
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::DB::open(&db, filename, config));
+    CHK_Z(check_db());
+
+    CHK_Z(jungle::DB::close(db));
+    CHK_Z(jungle::shutdown());
+
+    TEST_SUITE_CLEANUP_PATH();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     TestSuite ts(argc, argv);
 
@@ -1648,6 +1744,9 @@ int main(int argc, char** argv) {
     ts.doTest("remove migrated tables with readers test",
               remove_migrated_tables_with_readers_test,
               TestRange<bool>({true, false}));
+
+    ts.doTest("inplace compaction victim migrated and purged test",
+              inplace_compaction_victim_migrated_and_purged_test);
 
     return 0;
 }

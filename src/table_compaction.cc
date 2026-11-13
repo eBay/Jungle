@@ -111,6 +111,14 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     TableLockHolder tl_dst_holder( this, table_list_to_number(tables) );
     if (!tl_dst_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
 
+    // WARNING:
+    //   Destination tables may have been migrated to the next level
+    //   (and then purged) before we lock them. In such a case, the
+    //   back pointer of their files does not point to them.
+    if (isAnyTableRemoved(tables) || isAnyTableRemoved({local_victim})) {
+        throw Status(Status::COMPACTION_CANCELLED);
+    }
+
     TableStats victim_stats;
     local_victim->file->getStats(victim_stats);
 
@@ -722,9 +730,27 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
    try {
     if (level == 1) numL1Compactions.fetch_add(1);
 
+    DBMgr* db_mgr = DBMgr::getWithoutInit();
+    if ( db_mgr &&
+         db_mgr->isDebugCallbackEffective() ) {
+        DebugParams d_params = db_mgr->getDebugParams();
+        if (d_params.inPlaceCompactionBeforeLockCb) {
+            d_params.inPlaceCompactionBeforeLockCb(DebugParams::GenericCbParams());
+        }
+    }
+
     // Lock victim table.
     TableLockHolder tl_holder(this, {local_victim->number});
     if (!tl_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    // WARNING:
+    //   The victim may have been migrated to the next level (and then
+    //   purged) before we lock it. In such a case, the back pointer of the
+    //   victim's file does not point to the victim, and compacting it
+    //   will be meaningless anyway.
+    if (isAnyTableRemoved({local_victim})) {
+        throw Status(Status::COMPACTION_CANCELLED);
+    }
 
     uint64_t dst_table_num = 0;
     std::string dst_filename;
