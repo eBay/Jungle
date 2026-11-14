@@ -85,6 +85,13 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
 
     {   // WARNING: See the comment at `mani->removeTableFile` in `compactLevelItr`.
         std::lock_guard<std::mutex> l(mani->getLock());
+        // WARNING:
+        //   If the victim has been purged by `purgeTables()`, the tables
+        //   we get here are newly created ones. Writing records of the
+        //   victim to them will resurrect the purged data.
+        if (local_victim->isRemoved()) {
+            throw Status(Status::COMPACTION_CANCELLED);
+        }
         mani->getTablesRange(level+1, min_key_victim, max_key_victim, tables);
     }
     _log_info( myLog, "victim table's min key %s max key %s, "
@@ -103,6 +110,14 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
     // Lock destination tables.
     TableLockHolder tl_dst_holder( this, table_list_to_number(tables) );
     if (!tl_dst_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    // WARNING:
+    //   Destination tables may have been migrated to the next level
+    //   (and then purged) before we lock them. In such a case, the
+    //   back pointer of their files does not point to them.
+    if (isAnyTableRemoved(tables) || isAnyTableRemoved({local_victim})) {
+        throw Status(Status::COMPACTION_CANCELLED);
+    }
 
     TableStats victim_stats;
     local_victim->file->getStats(victim_stats);
@@ -492,6 +507,16 @@ Status TableMgr::compactLevelItr(const CompactOptions& options,
 
     {   // Grab lock, add first, and then remove next.
         std::lock_guard<std::mutex> l(mani->getLock());
+        if (local_victim->isRemoved()) {
+            // Purged by `purgeTables()` in the middle, discard the results.
+            // NOTE: keys will be freed below.
+            for (LsmFlushResult& rr: results) {
+                rr.tFile->destroySelf();
+                delete rr.tFile;
+            }
+            throw Status(Status::COMPACTION_CANCELLED);
+        }
+
         // WARNING:
         //   We should add in descending order of min key.
         //   Otherwise, if there is a point query in the middle,
@@ -617,6 +642,11 @@ Status TableMgr::migrateLevel(const CompactOptions& options,
     {   // Grab lock, add first, and then remove next.
         std::lock_guard<std::mutex> l(mani->getLock());
 
+        // Purged by `purgeTables()` in the middle, should not migrate.
+        for (TableInfo* ti: tables) {
+            if (ti->isRemoved()) throw Status(Status::COMPACTION_CANCELLED);
+        }
+
         // WARNING:
         //   We should add in descending order of min key.
         //   Otherwise, if there is a point query in the middle,
@@ -625,8 +655,14 @@ Status TableMgr::migrateLevel(const CompactOptions& options,
         auto eer = tables.rbegin();
         while (eer != tables.rend()) {
             TableInfo* ti = *eer;
-            ti->setMigration();
-            TC( mani->addTableFile( level + 1, 0, ti->minKey, ti->file ) );
+            // The file will be shared by the current table and
+            // the new table in the next level.
+            ti->file->grabOwnership();
+            s = mani->addTableFile( level + 1, 0, ti->minKey, ti->file );
+            if (!s) {
+                ti->file->releaseOwnership();
+                throw s;
+            }
             eer++;
         }
 
@@ -694,9 +730,27 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
    try {
     if (level == 1) numL1Compactions.fetch_add(1);
 
+    DBMgr* db_mgr = DBMgr::getWithoutInit();
+    if ( db_mgr &&
+         db_mgr->isDebugCallbackEffective() ) {
+        DebugParams d_params = db_mgr->getDebugParams();
+        if (d_params.inPlaceCompactionBeforeLockCb) {
+            d_params.inPlaceCompactionBeforeLockCb(DebugParams::GenericCbParams());
+        }
+    }
+
     // Lock victim table.
     TableLockHolder tl_holder(this, {local_victim->number});
     if (!tl_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    // WARNING:
+    //   The victim may have been migrated to the next level (and then
+    //   purged) before we lock it. In such a case, the back pointer of the
+    //   victim's file does not point to the victim, and compacting it
+    //   will be meaningless anyway.
+    if (isAnyTableRemoved({local_victim})) {
+        throw Status(Status::COMPACTION_CANCELLED);
+    }
 
     uint64_t dst_table_num = 0;
     std::string dst_filename;
@@ -730,20 +784,35 @@ Status TableMgr::compactInPlace(const CompactOptions& options,
         delete newly_compacted_file;
         throw s;
     }
-    mani->addTableFile(level, 0, local_victim->minKey, newly_compacted_file);
-
     // Add special checkpoint 0, for base snapshot.
+    //
+    // WARNING:
+    //   Should be done before adding the new file to manifest. Once it is
+    //   added, `purgeTables()` can remove and free it at any time,
+    //   as we don't hold a reference to it.
     uint64_t new_file_last_seqnum = 0;
     newly_compacted_file->getLatestSnapMarker(new_file_last_seqnum);
     newly_compacted_file->addCheckpoint(0, new_file_last_seqnum);
 
-    // Close the destination handle.
-    local_victim->file->releaseDstHandle(dst_handle);
-
-    {   // Remove source table file.
+    {   // Grab lock, add first, and then remove next.
+        //
+        // NOTE:
+        //   Both should be done in the same critical section, so that
+        //   others holding the lock (e.g., `purgeTables()`) never see
+        //   the source and the new file having the same min key together.
         std::lock_guard<std::mutex> l(mani->getLock());
+        if (local_victim->isRemoved()) {
+            // Purged by `purgeTables()` in the middle, discard the result.
+            newly_compacted_file->destroySelf();
+            delete newly_compacted_file;
+            throw Status(Status::COMPACTION_CANCELLED);
+        }
+        mani->addTableFile(level, 0, local_victim->minKey, newly_compacted_file);
         mani->removeTableFile(level, local_victim);
     }
+
+    // Close the destination handle.
+    local_victim->file->releaseDstHandle(dst_handle);
 
     // WARNING:
     //   Release it ONLY WHEN this table is not given by caller.
@@ -861,8 +930,19 @@ Status TableMgr::compactL0(const CompactOptions& options,
                 }
             }
             createNewTableFile(0, new_normal_file, t_opt);
-            EP( mani->addTableFile(0, hash_num, SizedBuf(), new_normal_file) );
-            new_normal_table_num = new_normal_file->getNumber();
+            {   std::lock_guard<std::mutex> l(mani->getLock());
+                if (origin_table->isRemoved()) {
+                    // Purged by `purgeTables()` after we got the tables.
+                    new_normal_file->destroySelf();
+                    delete new_normal_file;
+                    throw Status(Status::COMPACTION_CANCELLED);
+                }
+                TC( mani->addTableFile(0, hash_num, SizedBuf(), new_normal_file) );
+                // WARNING:
+                //   Should be done while holding the lock. Once the lock
+                //   is released, `purgeTables()` can free the new file.
+                new_normal_table_num = new_normal_file->getNumber();
+            }
         }
 
     } else {
@@ -974,16 +1054,35 @@ Status TableMgr::compactL0(const CompactOptions& options,
         TableFile* newly_compacted_file = new TableFile(this);
         newly_compacted_file->setLogger(myLog);
         newly_compacted_file->load(0, dst_table_num, dst_filename, opt.fOps, t_opt);
-        mani->addTableFile(0, hash_num, SizedBuf(), newly_compacted_file);
 
         // Add special checkpoint 0, for base snapshot.
+        //
+        // WARNING:
+        //   Should be done before adding the new file to manifest.
+        //   See the comment in `compactInPlace()`.
         uint64_t new_file_last_seqnum = 0;
         newly_compacted_file->getLatestSnapMarker(new_file_last_seqnum);
         newly_compacted_file->addCheckpoint(0, new_file_last_seqnum);
 
-        // Remove old file from manifest, and delete it.
-        mani->removeTableFile(0, origin_table);
-        if (merge_table) mani->removeTableFile(0, merge_table);
+        {   // Grab lock, add first, and then remove next.
+            //
+            // NOTE:
+            //   Removal should also be protected by the lock, as
+            //   `purgeTables()` may remove the same tables concurrently.
+            std::lock_guard<std::mutex> l(mani->getLock());
+            if ( origin_table->isRemoved() ||
+                 (merge_table && merge_table->isRemoved()) ) {
+                // Purged by `purgeTables()` in the middle, discard the result.
+                newly_compacted_file->destroySelf();
+                delete newly_compacted_file;
+                throw Status(Status::COMPACTION_CANCELLED);
+            }
+            mani->addTableFile(0, hash_num, SizedBuf(), newly_compacted_file);
+
+            // Remove old file from manifest, and delete it.
+            mani->removeTableFile(0, origin_table);
+            if (merge_table) mani->removeTableFile(0, merge_table);
+        }
 
         for (TableInfo*& table: tables) table->done();
 

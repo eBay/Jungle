@@ -446,6 +446,96 @@ Status TableMgr::adjustNumL0Partitions() {
     return Status();
 }
 
+Status TableMgr::purgeTables() {
+    const DBConfig* db_config = getDbConfig();
+    if (db_config->logSectionOnly) return Status::TABLES_ARE_DISABLED;
+    if (db_config->readOnly) return Status::WRITE_VIOLATION;
+
+    Status s;
+    Timer tt;
+
+    // Create new empty L0 tables first, without holding any lock.
+    std::vector<TableFile*> new_files(numL0Partitions, nullptr);
+    for (size_t ii = 0; ii < numL0Partitions; ++ii) {
+        TableFileOptions t_opt;
+        // Set 1M bits as an initial size.
+        // It will be converging to some value as compaction happens.
+        t_opt.bloomFilterSize = 1024 * 1024;
+        s = createNewTableFile(0, new_files[ii], t_opt);
+        if (!s) {
+            _log_err(myLog, "[purge tables] failed to create new table: %d", s);
+            for (TableFile*& t_file: new_files) {
+                if (!t_file) continue;
+                t_file->destroySelf();
+                delete t_file;
+            }
+            return s;
+        }
+    }
+
+    std::list<TableInfo*> old_tables;
+    {   // WARNING:
+        //   1) `L0Lock`: no flush will write to the old L0 tables
+        //      after the swap.
+        //   2) `mani->getLock()`: compaction, split, and merge check if
+        //      their source tables are removed under the same lock, and
+        //      cancel themselves if so. Otherwise, purged data will be
+        //      resurrected by their results.
+        std::lock_guard<std::mutex> l_l0(L0Lock);
+        std::lock_guard<std::mutex> l_mani(mani->getLock());
+
+        SizedBuf empty_key;
+        size_t num_levels = mani->getNumLevels();
+        for (size_t ii = 0; ii < num_levels; ++ii) {
+            mani->getTablesRange(ii, empty_key, empty_key, old_tables);
+        }
+
+        for (size_t ii = 0; ii < numL0Partitions; ++ii) {
+            mani->addTableFile(0, ii, SizedBuf(), new_files[ii]);
+        }
+
+        // NOTE:
+        //   Ongoing iterators and snapshots are holding the reference
+        //   to the old tables, so that they can keep reading them.
+        //   The last `done()` call will remove the file.
+        for (TableInfo*& t_info: old_tables) {
+            mani->removeTableFile(t_info->level, t_info);
+        }
+    }
+
+    // Store manifest file first, and then release the old tables.
+    s = mani->store(true);
+    if (!s) {
+        // WARNING:
+        //   The manifest file on disk may still refer to the old tables.
+        //   Keep their files on disk, otherwise the DB cannot be opened
+        //   after crash. They will be removed by `removeStaleFiles()` at
+        //   the next open, once the new manifest is stored.
+        _log_err(myLog, "[purge tables] failed to store manifest: %d, "
+                 "keep %zu old table files on disk", s, old_tables.size());
+        for (TableInfo*& t_info: old_tables) t_info->file->setKeepOnDisk();
+    }
+
+    for (TableInfo*& t_info: old_tables) t_info->done();
+
+    _log_info(myLog, "[purge tables] purged %zu tables, "
+              "created %zu new L0 tables, %zu us, manifest store: %d",
+              old_tables.size(), new_files.size(), tt.getUs(), s);
+    return s;
+}
+
+bool TableMgr::isAnyTableRemoved(const std::list<TableInfo*>& tables) {
+    std::lock_guard<std::mutex> l(mani->getLock());
+    for (TableInfo* t_info: tables) {
+        if (t_info && t_info->isRemoved()) {
+            _log_info(myLog, "table %zu_%zu at level %zu has been removed",
+                      opt.prefixNum, t_info->number, t_info->level);
+            return true;
+        }
+    }
+    return false;
+}
+
 Status TableMgr::removeStaleFiles() {
     // Do nothing in read only mode.
     if (getDbConfig()->readOnly) return Status();

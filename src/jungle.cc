@@ -627,6 +627,13 @@ Status DB::mergeLevel(const CompactOptions& options,
     return s;
 }
 
+Status DB::purgeTables() {
+    Status s;
+    EP( p->checkHandleValidity(DBInternal::OPTYPE_WRITE) );
+    if (sn) return Status::INVALID_HANDLE_USAGE;
+    return p->tableMgr->purgeTables();
+}
+
 
 // NOTE:
 //  MemTable --> LogFile --> LogMgr --(memcpy)--+--> DB ---> User
