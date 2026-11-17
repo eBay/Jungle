@@ -240,6 +240,8 @@ TableFile::TableFile(const TableMgr* table_mgr)
     , fOps(nullptr)
     , tableMgr(table_mgr)
     , tableInfo(nullptr)
+    , numOwners(1)
+    , keepOnDisk(false)
     , writer(nullptr)
     , bfByKey(nullptr)
     , tlbByKey(nullptr)
@@ -617,9 +619,10 @@ Status TableFile::closeSnapshot(DB* snap_handle) {
 }
 
 void TableFile::addCheckpoint(uint64_t chk, uint64_t commit_seqnum) {
-    if (tableInfo) {
+    TableInfo* cur_info = tableInfo.load();
+    if (cur_info) {
         _log_info(myLog, "file lv %zu num %zu hash %zu checkpoint %zu %zu",
-                  tableInfo->level, tableInfo->number, tableInfo->hashNum,
+                  cur_info->level, cur_info->number, cur_info->hashNum,
                   chk, commit_seqnum);
     }
 
@@ -896,9 +899,10 @@ Status TableFile::setSingle(uint32_t key_hash_val,
     doc.flags = FDB_CUSTOM_SEQNUM;
 
     bool deletion_executed = false;
+    TableInfo* cur_info = tableInfo.load();
     if ( ( db_config->purgeDeletedDocImmediately &&
-           tableInfo &&
-           tableInfo->level &&
+           cur_info &&
+           cur_info->level &&
            is_last_level ) ||
          force_delete ) {
         // Immediate purging option,
@@ -1013,11 +1017,12 @@ Status TableFile::setBatch(std::list<Record*>& batch,
     }
 
     SimpleLogger::Levels ll = SimpleLogger::INFO;
-    if (tableInfo) {
-        if (tableInfo->level) {
+    TableInfo* cur_info = tableInfo.load();
+    if (cur_info) {
+        if (cur_info->level) {
             _log_( ll, myLog,
                    "L%zu: file %zu_%zu, set %zu del %zu, %zu us, %zu us, %zu us",
-                   tableInfo->level,
+                   cur_info->level,
                    tableMgr->getTableMgrOptions()->prefixNum,
                    myNumber,
                    set_count, del_count, tt.getUs(), bf_elapsed,
@@ -1026,8 +1031,8 @@ Status TableFile::setBatch(std::list<Record*>& batch,
             _log_( ll, myLog,
                    "L%zu: hash %zu, file %zu_%zu, set %zu del %zu, %zu us, %zu us, "
                    "%zu us",
-                   tableInfo->level,
-                   tableInfo->hashNum,
+                   cur_info->level,
+                   cur_info->hashNum,
                    tableMgr->getTableMgrOptions()->prefixNum,
                    myNumber,
                    set_count, del_count, tt.getUs(), bf_elapsed,
@@ -1055,12 +1060,12 @@ Status TableFile::setBatch(std::list<Record*>& batch,
         while (entry != chkMap.end()) {
             if ( entry->first < oldest_seq ||
                  entry->second < oldest_seq ) {
-                if (tableInfo) {
+                if (cur_info) {
                     _log_debug( myLog,
                                 "file lv %zu num %zu hash %zu removed "
                                 "checkpoint %zu %zu",
-                                tableInfo->level, tableInfo->number,
-                                tableInfo->hashNum,
+                                cur_info->level, cur_info->number,
+                                cur_info->hashNum,
                                 entry->first, entry->second );
                 }
                 entry = chkMap.erase(entry);
@@ -1632,6 +1637,11 @@ Status TableFile::getCheckpointSeqnum(uint64_t chk, uint64_t& seqnum_out) {
 }
 
 Status TableFile::destroySelf() {
+    if (keepOnDisk) {
+        _log_warn(myLog, "keep table file %s on disk", filename.c_str());
+        return Status();
+    }
+
     if (fOps->exist(filename.c_str())) {
         // Instead removing it immediately,
         // put it into remove list.

@@ -214,6 +214,7 @@ struct DebugParams {
         , syncCb(nullptr)
         , afterMemTableFlushCb(nullptr)
         , adjustL0Cb(nullptr)
+        , inPlaceCompactionBeforeLockCb(nullptr)
         , forceMerge(false)
         {}
 
@@ -332,6 +333,12 @@ struct DebugParams {
      * of each hash number.
      */
     std::function< void(const GenericCbParams&) > adjustL0Cb;
+
+    /**
+     * Callback function that will be invoked during in-place compaction,
+     * after picking a victim table and before locking it.
+     */
+    std::function< void(const GenericCbParams&) > inPlaceCompactionBeforeLockCb;
 
     /**
      * If true, merge will proceed the task even with the small number

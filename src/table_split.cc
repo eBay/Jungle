@@ -78,6 +78,10 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
     TableLockHolder tl_holder(this, {victim_table->number});
     if (!tl_holder.ownsLock()) return Status::OPERATION_IN_PROGRESS;
 
+    // The victim may have been migrated to the next level (and then purged)
+    // before we lock it. Splitting it will be meaningless.
+    if (isAnyTableRemoved({victim_table})) return Status::COMPACTION_CANCELLED;
+
     _log_info( myLog, "split table %zu_%zu, level %zu, min key %s begins",
                opt.prefixNum, victim_table->number, level,
                victim_table->minKey.toReadableString().c_str() );
@@ -318,6 +322,13 @@ Status TableMgr::splitTableItr(TableInfo* victim_table) {
 
     {   // Grab lock, add first, and then remove next.
         std::lock_guard<std::mutex> l(mani->getLock());
+        if (victim_table->isRemoved()) {
+            // Purged by `purgeTables()` in the middle, discard the results.
+            // NOTE: `tFile` will be deleted below.
+            for (LsmFlushResult& rr: results) rr.tFile->destroySelf();
+            throw Status(Status::COMPACTION_CANCELLED);
+        }
+
         // WARNING:
         //   We should add in descending order of min key.
         //   Otherwise, if there is a point query in the middle,
@@ -389,9 +400,21 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
     // Find the target table (i.e., right before the victim).
     std::list<TableInfo*> tables;
     SizedBuf empty_key;
+    bool victim_removed = false;
     {   // WARNING: See the comment at `mani->removeTableFile` in `compactLevelItr`.
         std::lock_guard<std::mutex> l(mani->getLock());
-        mani->getTablesRange(level, empty_key, empty_key, tables);
+        // WARNING:
+        //   If the victim has been purged by `purgeTables()`, the tables
+        //   we get here are newly created ones. Merging the victim
+        //   into one of them will resurrect the purged data.
+        victim_removed = local_victim->isRemoved();
+        if (!victim_removed) {
+            mani->getTablesRange(level, empty_key, empty_key, tables);
+        }
+    }
+    if (victim_removed) {
+        if (!victim_table) local_victim->done();
+        return Status::COMPACTION_CANCELLED;
     }
 
     TableInfo* target_table = nullptr;
@@ -440,6 +463,14 @@ Status TableMgr::mergeLevel(const CompactOptions& options,
 
     TableLockHolder tl_gt_holder(this, {num_gt});
     if (!tl_gt_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    // WARNING:
+    //   Both tables may have been migrated to the next level (and then
+    //   purged) before we lock them. In such a case, the back pointer of
+    //   their files does not point to them.
+    if (isAnyTableRemoved({local_victim, target_table})) {
+        throw Status(Status::COMPACTION_CANCELLED);
+    }
 
     // Read all records from the victim table.
     itr = new TableFile::Iterator();
@@ -540,6 +571,11 @@ Status TableMgr::fixTable(const CompactOptions& options,
     SizedBuf empty_key;
     {   // WARNING: See the comment at `mani->removeTableFile` in `compactLevelItr`.
         std::lock_guard<std::mutex> l(mani->getLock());
+        // WARNING:
+        //   If the victim has been purged by `purgeTables()`, the tables
+        //   we get here are newly created ones. Moving records between
+        //   the victim and one of them will corrupt the new data.
+        if (local_victim->isRemoved()) return Status::COMPACTION_CANCELLED;
         mani->getTablesRange(level, empty_key, empty_key, tables);
     }
 
@@ -590,6 +626,14 @@ Status TableMgr::fixTable(const CompactOptions& options,
 
     TableLockHolder tl_gt_holder( this, {num_gt} );
     if (!tl_gt_holder.ownsLock()) throw Status(Status::OPERATION_IN_PROGRESS);
+
+    // WARNING:
+    //   Both tables may have been migrated to the next level (and then
+    //   purged) before we lock them. In such a case, the back pointer of
+    //   their files does not point to them.
+    if (isAnyTableRemoved({local_victim, target_table})) {
+        throw Status(Status::COMPACTION_CANCELLED);
+    }
 
     // Read records in target table, starting from min-key of victim table.
     itr = new TableFile::Iterator();

@@ -23,6 +23,7 @@ limitations under the License.
 #include <libjungle/jungle.h>
 #include <libforestdb/forestdb.h>
 
+#include <atomic>
 #include <list>
 #include <map>
 #include <mutex>
@@ -216,7 +217,35 @@ public:
 
     void setLogger(SimpleLogger* logger) { myLog = logger; }
 
-    void setTableInfo(TableInfo* t_info) { tableInfo = t_info; }
+    void setTableInfo(TableInfo* t_info) { tableInfo.store(t_info); }
+
+    /**
+     * Clear the table info pointer, only if it points to the given one.
+     * The same file can be shared by multiple `TableInfo`s (e.g., level
+     * migration), and they can call this function concurrently.
+     */
+    void clearTableInfo(TableInfo* t_info) {
+        tableInfo.compare_exchange_strong(t_info, nullptr);
+    }
+
+    /**
+     * If set, the physical file will not be removed by `destroySelf()`.
+     */
+    void setKeepOnDisk() { keepOnDisk.store(true); }
+
+    /**
+     * Add an owner `TableInfo` of this file. The same file can be shared
+     * by multiple `TableInfo`s (e.g., level migration).
+     */
+    void grabOwnership() { numOwners.fetch_add(1); }
+
+    /**
+     * Remove an owner `TableInfo` of this file.
+     *
+     * @return `true` if the caller was the last owner, and then the caller
+     *         is responsible for destroying this file.
+     */
+    bool releaseOwnership() { return numOwners.fetch_sub(1) == 1; }
 
     SimpleLogger* getLogger() const { return myLog; }
 
@@ -300,7 +329,7 @@ public:
 
     Status returnSnapshot(Snapshot* snapshot);
 
-    TableInfo* getTableInfo() const { return tableInfo; }
+    TableInfo* getTableInfo() const { return tableInfo.load(); }
 
 private:
 // === TYPES
@@ -419,7 +448,13 @@ private:
     const TableMgr* tableMgr;
 
     // Corresponding table info.
-    TableInfo* tableInfo;
+    std::atomic<TableInfo*> tableInfo;
+
+    // Number of `TableInfo`s sharing this file.
+    std::atomic<uint32_t> numOwners;
+
+    // If `true`, `destroySelf()` will not remove the physical file.
+    std::atomic<bool> keepOnDisk;
 
     // ForestDB writer handles
     FdbHandle* writer;

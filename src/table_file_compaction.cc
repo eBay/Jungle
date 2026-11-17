@@ -195,7 +195,12 @@ Status TableFile::compactToManually(FdbHandle* compact_handle,
     Timer tt;
     Status s;
 
-    bool is_last_level = (tableInfo->level == tableMgr->getNumLevels() - 1);
+    // NOTE:
+    //   Caller should make sure that this table is not removed,
+    //   so that `tableInfo` is valid.
+    TableInfo* cur_info = tableInfo.load();
+    assert(cur_info);
+    bool is_last_level = (cur_info->level == tableMgr->getNumLevels() - 1);
     DBConfig local_config = *(tableMgr->getDbConfig());
 
     _log_info(myLog, "doing manual compaction (%s)",
@@ -226,7 +231,7 @@ Status TableFile::compactToManually(FdbHandle* compact_handle,
             bf_bitmap_size = getBfSizeByWss(&local_config, my_stats.workingSetSizeByte);
         }
         if (!bf_bitmap_size) {
-            bf_bitmap_size = getBfSizeByLevel(&local_config, tableInfo->level);
+            bf_bitmap_size = getBfSizeByLevel(&local_config, cur_info->level);
         }
         dst_bf = new BloomFilter(bf_bitmap_size, 3);
     }
@@ -504,7 +509,7 @@ Status TableFile::mergeCompactTo(const std::string& file_to_merge,
             bf_bitmap_size = getBfSizeByWss(db_config, my_stats.workingSetSizeByte);
         }
         if (!bf_bitmap_size) {
-            bf_bitmap_size = getBfSizeByLevel(db_config, tableInfo->level);
+            bf_bitmap_size = getBfSizeByLevel(db_config, tableInfo.load()->level);
         }
         dst_bf = new BloomFilter(bf_bitmap_size, 3);
     }
