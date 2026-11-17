@@ -107,8 +107,10 @@ Status LogMgr::init(const LogMgrOptions& lm_opt) {
     if (opt.fOps->exist(m_filename.c_str())) {
         // Manifest file already exists, load it.
         s = mani->load(opt.path, m_filename, opt.prefixNum);
-        if (!s) {
+        if (!s && !mani->isLogFileCorrupted()) {
             // Error happened, try again using backup file.
+            // Not if log files are corrupted: the backup may miss
+            // newer log files, and they would be removed as stale.
             _log_err(myLog, "loading manifest error: %d, try again", s);
             TC(BackupRestore::restore(opt.fOps, m_filename));
             s = mani->load(opt.path, m_filename, opt.prefixNum);

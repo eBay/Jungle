@@ -135,6 +135,12 @@ set_target_properties(jungle_bench
     "-DJUNGLE_ADAPTER=1")
 target_link_libraries(jungle_bench ${JUNGLE_TEST_DEPS})
 
+add_executable(log_recovery_open_bench
+    ${TEST_DIR}/bench/log_recovery_open_bench.cc)
+target_compile_definitions(log_recovery_open_bench PRIVATE
+    "JUNGLE_RECOVERY_BENCH_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
+target_link_libraries(log_recovery_open_bench ${JUNGLE_TEST_DEPS})
+
 
 
 install(TARGETS
