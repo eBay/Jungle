@@ -158,7 +158,9 @@ public:
 
     /**
      * Rollback the given instance to the given sequence number.
-     * Only supported in log section mode now.
+     * In log-section-only mode, always supported.
+     * In normal (log+table) mode, supported when the target sequence
+     * number is still in the log section (not yet flushed to tables).
      *
      * @param seqnum_upto Rollback point (exclusive). This sequence number will be
      *                    preserved.

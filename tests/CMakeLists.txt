@@ -88,6 +88,8 @@ unit_test(NAME large_test SOURCES ${TEST_DIR}/jungle/large_test.cc)
 
 unit_test(NAME atomic_batch_test SOURCES ${TEST_DIR}/jungle/atomic_batch_test.cc)
 
+unit_test(NAME flush_decision_cb_test SOURCES ${TEST_DIR}/jungle/flush_decision_cb_test.cc)
+
 add_custom_target(func_test)
 add_dependencies(func_test
     basic_op_test
@@ -97,7 +99,8 @@ add_dependencies(func_test
     custom_cmp_test
     mt_test
     large_test
-    atomic_batch_test)
+    atomic_batch_test
+    flush_decision_cb_test)
 
 
 unit_test(NAME flush_stress_test SOURCES ${TEST_DIR}/stress/flush_stress_test.cc)
